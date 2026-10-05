@@ -1,0 +1,13 @@
+# Investigación y especificaciones internas (no se versionan)
+investigacion/
+spec/
+
+# Agentes de IA
+.claude/
+.agents/
+CLAUDE.md
+
+# Sistema y entorno
+.DS_Store
+Thumbs.db
+.env
