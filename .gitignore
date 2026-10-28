@@ -1,13 +1,23 @@
 # Investigación y especificaciones internas (no se versionan)
 investigacion/
 spec/
+# Glosario, ADR y guías de agentes resumen el SPEC: privados como él
+CONTEXT.md
+docs/
+skills/
 
 # Agentes de IA
 .claude/
 .agents/
+.scratch/
 CLAUDE.md
 
 # Sistema y entorno
 .DS_Store
 Thumbs.db
 .env
+
+# Generados
+ui/node_modules/
+ui/dist/
+bin/

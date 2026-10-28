@@ -1,0 +1,42 @@
+# Kudawiki en un solo contenedor (SPEC §13.11). Los valores salen de deploy/.env
+# (copia de .env.example; compose lo lee solo).
+#   Primera vez:  docker compose run --rm init     # pide la contraseña del superadmin
+#   Arrancar:     docker compose up -d
+services:
+  kudawiki:
+    build: ..
+    image: kudawiki:local
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      KUDAWIKI_BASE_URL: ${KUDAWIKI_BASE_URL:-http://localhost:8080}
+    volumes:
+      - data:/data
+      - keys:/keys:ro          # la MASTER_KEY: aparte de /data y de los backups
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+
+  # Solo para `kudawiki init`: único paso en que la llave se monta con escritura.
+  init:
+    image: kudawiki:local
+    profiles: [init]
+    entrypoint: ["/kudawiki", "init"]
+    environment:
+      # base_url también aquí: decide si la política de contraseñas es la de desarrollo (SPEC §8.1).
+      KUDAWIKI_BASE_URL: ${KUDAWIKI_BASE_URL:-http://localhost:8080}
+      KUDAWIKI_INIT_EMAIL: ${KUDAWIKI_INIT_EMAIL:-}
+      KUDAWIKI_INIT_NAME: ${KUDAWIKI_INIT_NAME:-}
+    volumes:
+      - data:/data
+      - keys:/keys
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  data:
+  keys:

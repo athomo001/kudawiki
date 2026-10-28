@@ -1,0 +1,11 @@
+<!-- Favicon: a 16 px tres capas no se distinguen, así que se usan dos y una K más gruesa.
+     Se adapta al tema del navegador con prefers-color-scheme. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <style>
+    .atras{fill:#3b82f6}.frente{fill:#1d4f91}.k{stroke:#ffffff}
+    @media (prefers-color-scheme: dark){.atras{fill:#3d5f8f}.frente{fill:#6ea8fe}.k{stroke:#15171c}}
+  </style>
+  <rect class="atras" x="12" y="4" width="32" height="32" rx="5"/>
+  <rect class="frente" x="4" y="12" width="32" height="32" rx="5"/>
+  <path class="k" d="M14 20v17M14 30l9-10M17 27l7 10" fill="none" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,11 @@
+# Solo entra al build lo que compila el binario: nada privado ni generado.
+*
+!go.mod
+!go.sum
+!embed.go
+!cmd/
+!internal/
+!ui/
+ui/node_modules/
+ui/dist/
+**/*_test.go
