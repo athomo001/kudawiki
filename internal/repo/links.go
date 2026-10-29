@@ -92,7 +92,7 @@ func (r *Repo) Tags(ctx context.Context, s Scope) ([]TagCount, error) {
 
 func (r *Repo) PagesByTag(ctx context.Context, s Scope, tag string) ([]PageRef, error) {
 	return r.pageRefs(ctx,
-		`SELECT p.slug, p.title, p.min_rank FROM page_tags t JOIN pages p ON p.id = t.page_id
+		`SELECT p.slug, p.title, p.min_rank, p.description, p.icon FROM page_tags t JOIN pages p ON p.id = t.page_id
 		 WHERE t.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ? AND t.tag = ? ORDER BY p.title`, s.WsID, s.MaxRank, tag)
 }
 
@@ -100,7 +100,7 @@ func (r *Repo) PagesByTag(ctx context.Context, s Scope, tag string) ([]PageRef, 
 // la actual tampoco se revela (SPEC §4.7).
 func (r *Repo) Backlinks(ctx context.Context, s Scope, pageID string) ([]PageRef, error) {
 	return r.pageRefs(ctx,
-		`SELECT p.slug, p.title, p.min_rank FROM page_links l JOIN pages p ON p.id = l.from_page_id
+		`SELECT p.slug, p.title, p.min_rank, p.description, p.icon FROM page_links l JOIN pages p ON p.id = l.from_page_id
 		 WHERE l.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ? AND l.to_page_id = ? AND l.from_page_id <> l.to_page_id
 		 ORDER BY p.title`, s.WsID, s.MaxRank, pageID)
 }
@@ -110,10 +110,7 @@ func (r *Repo) pageRefs(ctx context.Context, query string, args ...any) ([]PageR
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, func(row scanner) (PageRef, error) {
-		var p PageRef
-		return p, row.Scan(&p.Slug, &p.Title, &p.MinRank)
-	})
+	return collect(rows, scanPageRef)
 }
 
 // PageByAlias resuelve una ruta vieja a la actual, solo si la página es visible.
@@ -129,13 +126,13 @@ func (r *Repo) PageByAlias(ctx context.Context, s Scope, oldSlug string) (string
 }
 
 type movedPage struct {
-	id, slug, title, markdown, lang string
-	rank, revision                  int
+	id, slug, title, description, markdown, lang string
+	rank, revision                               int
 }
 
 // Rewrite reescribe en una página los [[enlaces]] a rutas movidas (moves: vieja → nueva) y
 // devuelve lo derivado del contenido nuevo (enlaces e índice de búsqueda).
-type Rewrite func(title, markdown, lang string, moves map[string]string) (string, []string, IndexDoc)
+type Rewrite func(title, description, markdown, lang string, moves map[string]string) (string, []string, IndexDoc)
 
 // MovePages mueve from y las subpáginas que quien mueve ve a to, en una transacción: cambia
 // las rutas, deja alias, registra una revisión "moved" por página y reescribe los enlaces a
@@ -152,7 +149,7 @@ func (r *Repo) MovePages(ctx context.Context, s Scope, actorID, from, to string,
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, title, content_markdown, lang, min_rank, current_revision FROM pages
+		`SELECT id, slug, title, description, content_markdown, lang, min_rank, current_revision FROM pages
 		 WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? AND (slug = ? OR slug LIKE ?)`, s.WsID, s.MaxRank, from, from+"/%")
 	if err != nil {
 		return "", 0, err
@@ -224,7 +221,7 @@ func rewriteLinkers(ctx context.Context, tx *sql.Tx, s Scope, actorID, summary s
 		old = append(old, slug)
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT p.id, p.slug, p.title, p.content_markdown, p.lang, p.min_rank, p.current_revision FROM pages p
+		`SELECT p.id, p.slug, p.title, p.description, p.content_markdown, p.lang, p.min_rank, p.current_revision FROM pages p
 		 WHERE p.workspace_id = ? AND p.id IN (SELECT from_page_id FROM page_links
 		   WHERE workspace_id = ? AND to_slug IN (?`+strings.Repeat(",?", len(moves)-1)+`))`, old...)
 	if err != nil {
@@ -235,7 +232,7 @@ func rewriteLinkers(ctx context.Context, tx *sql.Tx, s Scope, actorID, summary s
 		return err
 	}
 	for _, p := range linkers {
-		markdown, links, index := rewrite(p.title, p.markdown, p.lang, moves)
+		markdown, links, index := rewrite(p.title, p.description, p.markdown, p.lang, moves)
 		if markdown != p.markdown {
 			if err := writeIndex(ctx, tx, p.id, index); err != nil {
 				return err

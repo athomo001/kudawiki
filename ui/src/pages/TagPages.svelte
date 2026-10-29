@@ -19,7 +19,12 @@
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if pages?.length}
   <ul class="plain">
-    {#each pages as p (p.slug)}<li><a href={`/w/${area.slug}/p/${p.slug}`}>{p.title}</a> <span class="muted">/{p.slug}</span></li>{/each}
+    {#each pages as p (p.slug)}
+      <li>
+        <a href={`/w/${area.slug}/p/${p.slug}`}>{#if p.icon}{p.icon} {/if}{p.title}</a> <span class="muted">/{p.slug}</span>
+        {#if p.description}<br /><span class="muted small">{p.description}</span>{/if}
+      </li>
+    {/each}
   </ul>
 {:else if pages}
   <p class="muted">{t('tag.empty')}</p>

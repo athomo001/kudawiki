@@ -16,6 +16,8 @@ import (
 var (
 	ErrInvalidPage = errors.New("invalid_page")
 	ErrConflict    = errors.New("conflict")
+	// ErrInvalidInfo: descripción demasiado larga o un ícono que no es un emoji (§4.1).
+	ErrInvalidInfo = errors.New("invalid_page_info")
 	// ErrPathUnavailable vale para una ruta ocupada y para una bajo un padre que quien escribe no
 	// ve: un solo mensaje, para que la diferencia no delate páginas ocultas (§19.35).
 	ErrPathUnavailable = errors.New("path_unavailable")
@@ -50,6 +52,7 @@ type store interface {
 	UpdatePage(ctx context.Context, s repo.Scope, pageID string, base int, w repo.PageWrite) error
 	RevisionByNumber(ctx context.Context, s repo.Scope, pageID string, n int) (repo.Revision, error)
 	SetTags(ctx context.Context, s repo.Scope, pageID string, tags []string) error
+	SetPageInfo(ctx context.Context, s repo.Scope, pageID, description, descriptionStem, icon string) error
 	MovePages(ctx context.Context, s repo.Scope, actorID, from, to string, rewrite repo.Rewrite) (string, int, error)
 	SetLevel(ctx context.Context, s repo.Scope, actorID, slug string, level int) (string, int, error)
 	DeletePages(ctx context.Context, s repo.Scope, actorID, slug string) (string, int, error)
@@ -114,7 +117,7 @@ func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base 
 		if w.Lang == "" {
 			w.Lang = "es"
 		}
-		w.Index = IndexDoc(w.Title, w.Markdown, w.Lang)
+		w.Index = IndexDoc(w.Title, "", w.Markdown, w.Lang) // la descripción se pone después, como metadato
 		w.Kind = "created"
 		id, err := s.store.CreatePage(ctx, sc, w)
 		if errors.Is(err, repo.ErrConflict) || errors.Is(err, repo.ErrHidden) {
@@ -135,7 +138,7 @@ func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base 
 	if p.Title == w.Title && p.Markdown == w.Markdown && p.Lang == w.Lang {
 		return p.ID, 0, nil
 	}
-	w.Index = IndexDoc(w.Title, w.Markdown, w.Lang)
+	w.Index = IndexDoc(w.Title, p.Description, w.Markdown, w.Lang)
 	if w.Kind == "" {
 		w.Kind = "updated"
 	}

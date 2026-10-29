@@ -121,7 +121,7 @@
     {#each items as item, i (item.slug)}
       <li id={`search-opt-${i}`} role="option" aria-selected={i === active}>
         <a href={href(item)} onclick={() => dialog.close()}>
-          <strong>{item.title}</strong>
+          <strong>{#if 'icon' in item && item.icon}{item.icon} {/if}{item.title}</strong>
           {#if 'section' in item && item.section}<span class="search-section">› {item.section.text}</span>{/if}
           <span class="muted">/{item.slug}</span>
           {#if item.snippet.length}<span class="snippet"><Snippet parts={item.snippet} /></span>{/if}

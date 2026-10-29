@@ -76,7 +76,7 @@ func (a api) search(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"more": len(cands) > offset+pageSize}
 	results := make([]map[string]any, 0, len(hits))
 	for _, h := range hits {
-		item := map[string]any{"slug": h.Slug, "title": h.Title, "snippet": split(h.Snippet)}
+		item := map[string]any{"slug": h.Slug, "title": h.Title, "description": h.Description, "icon": h.Icon, "snippet": split(h.Snippet)}
 		// La sección donde está la coincidencia, para mostrarla y saltar a ella (§9.4).
 		if sec, ok := wiki.SectionAt(h.Markdown, h.Snippet); ok {
 			item["section"] = map[string]string{"id": sec.ID, "text": sec.Text}

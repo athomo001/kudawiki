@@ -87,7 +87,23 @@ docker compose up -d
 
 Queda en <http://localhost:8080>. Respalda el volumen `keys` (la llave maestra) **aparte** del volumen `data`: sin la llave, los documentos sellados no se pueden abrir.
 
-Para desarrollar: `make test` (compila la UI con pnpm y corre los tests), `make lint`, `make audit`.
+### Respaldos
+
+Kudawiki se respalda sola cada día a las 03:00 (`KUDAWIKI_BACKUP_TIME`) en el volumen `data` (`/data/backups`), y guarda 7 diarios, 4 semanales y 6 mensuales. Antes de cada actualización que cambia la base, hace además un respaldo propio (`kudawiki-pre-migrate-…`). Cada respaldo trae la base y los archivos subidos, con el SHA-256 de cada parte; **la llave maestra no va adentro**.
+
+```sh
+docker compose exec kudawiki /kudawiki backup                 # uno ahora
+docker compose stop kudawiki                                   # restaurar: con el servicio detenido
+docker compose run --rm kudawiki restore /data/backups/<archivo>.tar.zst
+docker compose run --rm kudawiki audit verify                  # la cadena de auditoría sigue íntegra
+docker compose up -d
+```
+
+En otra máquina, se monta el archivo: `docker compose run --rm -v "$PWD/<archivo>.tar.zst:/restore.tar.zst:ro" kudawiki restore /restore.tar.zst`. Lo que había antes no se borra: queda en `/data/before-restore-<hora>`. Los respaldos viven en el mismo volumen que los datos: **copiarlos fuera del servidor es tarea de quien opera** hasta que llegue el destino externo (F8).
+
+Para revisar la salud del contenido (enlaces rotos, archivos que faltan, índice de búsqueda): `docker compose exec kudawiki /kudawiki doctor`, o la pantalla **Salud** del admin del área y del superadmin.
+
+Para desarrollar: `make test` (compila la UI con pnpm y corre los tests), `make lint`, `make audit`, y `make load` (prueba de carga con 50 000 páginas; deja el resultado en `docs/rendimiento.md`).
 
 ## Licencia
 

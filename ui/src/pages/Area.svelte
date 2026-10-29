@@ -10,10 +10,12 @@
   import Trash from './Trash.svelte';
   import Audit from './Audit.svelte';
   import Icon from '../components/Icon.svelte';
+  import Settings from './Settings.svelte';
+  import Health from './Health.svelte';
   import NotFound from './NotFound.svelte';
 
   // Layout de área (SPEC §15): árbol a la izquierda y la vista según la ruta.
-  let { area, sub, selfId }: { area: Area; sub: string; selfId: string } = $props();
+  let { area, sub, selfId, onareachanged }: { area: Area; sub: string; selfId: string; onareachanged: () => void } = $props();
 
   let refs = $state<PageRef[]>([]);
   let tags = $state<TagCount[]>([]);
@@ -39,6 +41,8 @@
     trash: 'trash.title',
     audit: 'audit.title',
     members: 'admin.members_link',
+    settings: 'settings.title',
+    health: 'health.short',
     search: 'search.open',
     new: 'page.new',
     history: 'page.history',
@@ -90,6 +94,8 @@
       <a class="nav-item" href={`${base}/trash`} aria-current={sub === 'trash' ? 'page' : undefined}><Icon name="trash" size={16} /> {t('trash.title')}</a>
       {#if area.role === 'admin'}
         <a class="nav-item" href={`${base}/members`} aria-current={sub === 'members' ? 'page' : undefined}><Icon name="people" size={16} /> {t('admin.members_link')}</a>
+        <a class="nav-item" href={`${base}/settings`} aria-current={sub === 'settings' ? 'page' : undefined}><Icon name="settings" size={16} /> {t('settings.title')}</a>
+        <a class="nav-item" href={`${base}/health`} aria-current={sub === 'health' ? 'page' : undefined}><Icon name="pulse" size={16} /> {t('health.short')}</a>
         <a class="nav-item" href={`${base}/audit`} aria-current={sub === 'audit' ? 'page' : undefined}><Icon name="list" size={16} /> {t('audit.title')}</a>
       {/if}
     {/if}
@@ -113,11 +119,12 @@
     {/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
-      <Reader {area} slug={pageSlug} onmoved={loadTree} />
+      <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
     {:else}
       <div class="view">
         {#if sub === ''}
           <h1>{area.name}</h1>
+          {#if area.description}<p class="lead">{area.description}</p>{/if}
           <p class="muted">{refs.length ? t('area.pick_page') : t('area.empty')}</p>
           {#if tags.length}
             <h2>{t('area.tags')}</h2>
@@ -143,6 +150,10 @@
           <Trash {area} onrestored={loadTree} />
         {:else if sub === 'audit' && area.role === 'admin'}
           <Audit endpoint={`${base}/audit`} {base} />
+        {:else if sub === 'health' && area.role === 'admin'}
+          <Health endpoint={`${base}/health`} />
+        {:else if sub === 'settings' && area.role === 'admin'}
+          <Settings {area} onchanged={onareachanged} />
         {:else if sub === 'members' && area.role === 'admin'}
           <Members endpoint={`${base}/members`} areaName={area.name} canGrantAdmin={false} {selfId} />
         {:else}

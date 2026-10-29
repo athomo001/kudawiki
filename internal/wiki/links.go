@@ -5,10 +5,12 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/search"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
@@ -99,9 +101,9 @@ func (s *Service) Move(ctx context.Context, sc repo.Scope, actorID, from, to str
 	if !ValidSlug(to) || to == from || strings.HasPrefix(to, from+"/") {
 		return ErrInvalidMove
 	}
-	id, n, err := s.store.MovePages(ctx, sc, actorID, from, to, func(title, markdown, lang string, moves map[string]string) (string, []string, repo.IndexDoc) {
+	id, n, err := s.store.MovePages(ctx, sc, actorID, from, to, func(title, description, markdown, lang string, moves map[string]string) (string, []string, repo.IndexDoc) {
 		out := rewriteMoves(markdown, moves)
-		return out, Links(out), IndexDoc(title, out, lang)
+		return out, Links(out), IndexDoc(title, description, out, lang)
 	})
 	if errors.Is(err, repo.ErrConflict) || errors.Is(err, repo.ErrHidden) {
 		return s.unavailable(ctx, sc, "move", "")
@@ -126,4 +128,44 @@ func (s *Service) SetLevel(ctx context.Context, sc repo.Scope, actorID, slug str
 		s.record(ctx, sc, audit.PageLevelChange, id, map[string]any{"from": from, "to": level})
 	}
 	return err
+}
+
+// maxDescription: la descripción es una línea para listados y búsquedas, no un resumen largo.
+const maxDescription = 200
+
+// SetInfo cambia la descripción corta y el ícono de la página (§4.1); lo que viene en nil queda
+// como estaba. Son metadatos, como las etiquetas: no crean revisión. La descripción va también
+// al índice de búsqueda, con su raíz.
+func (s *Service) SetInfo(ctx context.Context, sc repo.Scope, slug string, description, icon *string) error {
+	p, err := s.store.PageBySlug(ctx, sc, slug)
+	if err != nil {
+		return err
+	}
+	if description != nil {
+		p.Description = strings.TrimSpace(*description)
+	}
+	if icon != nil {
+		p.Icon = strings.TrimSpace(*icon)
+		if *icon != p.Icon { // espacios alrededor: no es un emoji
+			return ErrInvalidInfo
+		}
+	}
+	if utf8.RuneCountInString(p.Description) > maxDescription || !validIcon(p.Icon) {
+		return ErrInvalidInfo
+	}
+	return s.store.SetPageInfo(ctx, sc, p.ID, p.Description, search.Stem(p.Description, p.Lang), p.Icon)
+}
+
+// validIcon acepta vacío o un emoji, también compuesto (👩‍💻, banderas): solo símbolos y sus
+// modificadores, nunca letras, números ni espacios, y como mucho 8 caracteres.
+func validIcon(icon string) bool {
+	if utf8.RuneCountInString(icon) > 8 {
+		return false
+	}
+	for _, r := range icon {
+		if !unicode.In(r, unicode.So, unicode.Sk, unicode.Mn, unicode.Me, unicode.Cf) {
+			return false
+		}
+	}
+	return true
 }

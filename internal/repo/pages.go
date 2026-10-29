@@ -23,12 +23,17 @@ type Page struct {
 	Revision  int
 	UpdatedBy string // nombre de quien hizo la última revisión
 	UpdatedAt time.Time
+	// Metadatos (§4.1): como las etiquetas, cambiarlos no crea revisión.
+	Description string
+	Icon        string
 }
 
 type PageRef struct {
-	Slug    string
-	Title   string
-	MinRank int
+	Slug        string
+	Title       string
+	MinRank     int
+	Description string
+	Icon        string
 }
 
 type Revision struct {
@@ -58,10 +63,10 @@ type PageWrite struct {
 func (r *Repo) PageBySlug(ctx context.Context, s Scope, slug string) (Page, error) {
 	var p Page
 	err := r.db.Read.QueryRowContext(ctx,
-		`SELECT p.id, p.slug, p.min_rank, p.title, p.content_markdown, p.lang, p.current_revision, u.full_name, p.updated_at
+		`SELECT p.id, p.slug, p.min_rank, p.title, p.content_markdown, p.lang, p.current_revision, u.full_name, p.updated_at, p.description, p.icon
 		 FROM pages p JOIN users u ON u.id = p.updated_by
 		 WHERE p.workspace_id = ? AND p.slug = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`, s.WsID, slug, s.MaxRank).
-		Scan(&p.ID, &p.Slug, &p.MinRank, &p.Title, &p.Markdown, &p.Lang, &p.Revision, &p.UpdatedBy, &p.UpdatedAt)
+		Scan(&p.ID, &p.Slug, &p.MinRank, &p.Title, &p.Markdown, &p.Lang, &p.Revision, &p.UpdatedBy, &p.UpdatedAt, &p.Description, &p.Icon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Page{}, ErrNotFound
 	}
@@ -72,14 +77,35 @@ func (r *Repo) PageBySlug(ctx context.Context, s Scope, slug string) (Page, erro
 // carpeta (SPEC §17, fugas por metadatos).
 func (r *Repo) Tree(ctx context.Context, s Scope) ([]PageRef, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT slug, title, min_rank FROM pages WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? ORDER BY slug`, s.WsID, s.MaxRank)
+		`SELECT slug, title, min_rank, description, icon FROM pages WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? ORDER BY slug`, s.WsID, s.MaxRank)
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, func(row scanner) (PageRef, error) {
-		var p PageRef
-		return p, row.Scan(&p.Slug, &p.Title, &p.MinRank)
-	})
+	return collect(rows, scanPageRef)
+}
+
+func scanPageRef(row scanner) (PageRef, error) {
+	var p PageRef
+	return p, row.Scan(&p.Slug, &p.Title, &p.MinRank, &p.Description, &p.Icon)
+}
+
+// SetPageInfo cambia la descripción y el ícono (§4.1) y, en la misma transacción, la
+// descripción en el índice de búsqueda, que pesa más que el contenido (§9.1).
+func (r *Repo) SetPageInfo(ctx context.Context, s Scope, pageID, description, descriptionStem, icon string) error {
+	tx, err := r.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET description = ?, icon = ? WHERE id = ? AND workspace_id = ?`,
+		description, icon, pageID, s.WsID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE pages_fts SET description = ?, description_stem = ? WHERE rowid = (SELECT search_rowid FROM pages WHERE id = ?)`,
+		description, descriptionStem, pageID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CreatePage crea la página con su revisión 1. Un slug ya usado da ErrConflict, también si

@@ -2,6 +2,9 @@
 # (copia de .env.example; compose lo lee solo).
 #   Primera vez:  docker compose run --rm init     # pide la contraseña del superadmin
 #   Arrancar:     docker compose up -d
+#   Respaldo ya:  docker compose exec kudawiki /kudawiki backup      (el diario es a las 03:00)
+#   Restaurar:    docker compose stop kudawiki
+#                 docker compose run --rm kudawiki restore /data/backups/<archivo>.tar.zst
 services:
   kudawiki:
     build: ..

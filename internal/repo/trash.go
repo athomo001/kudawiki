@@ -41,7 +41,7 @@ func (r *Repo) DeletePages(ctx context.Context, s Scope, actorID, slug string) (
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, title, content_markdown, lang, min_rank, current_revision FROM pages
+		`SELECT id, slug, title, description, content_markdown, lang, min_rank, current_revision FROM pages
 		 WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? AND (slug = ? OR slug LIKE ?)`,
 		s.WsID, s.MaxRank, slug, slug+"/%")
 	if err != nil {
@@ -124,7 +124,7 @@ func (r *Repo) RestorePages(ctx context.Context, s Scope, actorID, id string) (i
 		return 0, ErrHidden
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, title, content_markdown, lang, min_rank, current_revision FROM pages
+		`SELECT id, slug, title, description, content_markdown, lang, min_rank, current_revision FROM pages
 		 WHERE workspace_id = ? AND trash_root_id = ? AND deleted_at IS NOT NULL AND min_rank <= ?`, s.WsID, id, s.MaxRank)
 	if err != nil {
 		return 0, err

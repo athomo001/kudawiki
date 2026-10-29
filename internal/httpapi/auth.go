@@ -64,7 +64,7 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 	}
 	areas := make([]map[string]string, len(ms))
 	for i, m := range ms {
-		areas[i] = map[string]string{"slug": m.Slug, "name": m.Name, "role": m.Role}
+		areas[i] = map[string]string{"slug": m.Slug, "name": m.Name, "description": m.Description, "role": m.Role}
 	}
 	a.json(w, http.StatusOK, map[string]any{
 		"id": u.ID, "email": u.Email, "full_name": u.FullName,

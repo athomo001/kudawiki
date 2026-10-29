@@ -3,7 +3,7 @@
 
   // El árbol se deriva de los slugs (SPEC §4.1): "redes/vpn" cuelga de "redes" aunque
   // "redes" no sea una página; en ese caso es una carpeta sin enlace.
-  export type Node = { segment: string; slug: string; title?: string; level?: PageRef['level']; children: Node[] };
+  export type Node = { segment: string; slug: string; title?: string; level?: PageRef['level']; icon?: string; children: Node[] };
 
   export function buildTree(refs: PageRef[]): Node[] {
     const root: Node = { segment: '', slug: '', children: [] };
@@ -17,6 +17,7 @@
       });
       node.title = ref.title;
       node.level = ref.level;
+      node.icon = ref.icon;
     }
     return root.children;
   }
@@ -36,7 +37,7 @@
     <li>
       {#if n.title}
         <a class="nav-item" href={`${base}/p/${n.slug}`} aria-current={n.slug === current ? 'page' : undefined}>
-          <Icon name={n.children.length ? 'folder' : 'page'} size={15} />
+          {#if n.icon}<span class="tree-emoji" aria-hidden="true">{n.icon}</span>{:else}<Icon name={n.children.length ? 'folder' : 'page'} size={15} />{/if}
           <span class="nav-label">{n.title}</span>
           <LevelBadge level={n.level} />
         </a>

@@ -58,7 +58,7 @@ func (a api) renderOptions(r *http.Request, slug, markdown string) wiki.Options 
 	for _, ref := range refs {
 		visible[ref.Slug] = true
 		if rest, ok := strings.CutPrefix(ref.Slug, slug+"/"); ok && slug != "" && !strings.Contains(rest, "/") {
-			opts.Children = append(opts.Children, wiki.Child{Slug: ref.Slug, Title: ref.Title})
+			opts.Children = append(opts.Children, wiki.Child{Slug: ref.Slug, Title: ref.Title, Description: ref.Description, Icon: ref.Icon})
 		}
 	}
 	return opts
@@ -105,7 +105,7 @@ func (a api) getPage(w http.ResponseWriter, r *http.Request) {
 	}
 	a.json(w, http.StatusOK, map[string]any{
 		"slug": p.Slug, "title": p.Title, "markdown": p.Markdown, "html": html, "toc": toc, "tags": tags, "lang": p.Lang, "level": p.MinRank,
-		"revision": p.Revision, "updated_by": p.UpdatedBy, "updated_at": p.UpdatedAt,
+		"revision": p.Revision, "updated_by": p.UpdatedBy, "updated_at": p.UpdatedAt, "description": p.Description, "icon": p.Icon,
 	})
 }
 
@@ -144,16 +144,19 @@ func (a api) refs(w http.ResponseWriter, r *http.Request, refs []repo.PageRef, e
 	}
 	out := make([]map[string]any, len(refs))
 	for i, p := range refs {
-		out[i] = map[string]any{"slug": p.Slug, "title": p.Title, "level": p.MinRank}
+		out[i] = map[string]any{"slug": p.Slug, "title": p.Title, "level": p.MinRank, "description": p.Description, "icon": p.Icon}
 	}
 	a.json(w, http.StatusOK, out)
 }
 
-// setMeta cambia los metadatos que vienen en el cuerpo: etiquetas y nivel (§4.6, §3.2).
+// setMeta cambia los metadatos que vienen en el cuerpo: etiquetas, nivel, descripción e ícono
+// (§4.6, §3.2, §4.1).
 func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Tags  *[]string `json:"tags"`
-		Level *int      `json:"level"`
+		Tags        *[]string `json:"tags"`
+		Level       *int      `json:"level"`
+		Description *string   `json:"description"`
+		Icon        *string   `json:"icon"`
 	}
 	if !a.decode(w, r, &in) {
 		return
@@ -167,6 +170,12 @@ func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Tags != nil {
 		if err := a.Wiki.SetTags(r.Context(), scopeOf(r), slug, *in.Tags); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	if in.Description != nil || in.Icon != nil {
+		if err := a.Wiki.SetInfo(r.Context(), scopeOf(r), slug, in.Description, in.Icon); err != nil {
 			a.fail(w, r, err)
 			return
 		}

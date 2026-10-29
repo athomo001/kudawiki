@@ -6,6 +6,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/repo"
@@ -25,6 +26,8 @@ var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$`)
 
 type store interface {
 	CreateWorkspace(ctx context.Context, w repo.Workspace) error
+	WorkspaceByID(ctx context.Context, id string) (repo.Workspace, error)
+	UpdateWorkspace(ctx context.Context, s repo.Scope, name, description string) error
 	UserByEmail(ctx context.Context, email string) (repo.User, error)
 	MemberRole(ctx context.Context, s repo.Scope, userID string) (string, error)
 	SetMember(ctx context.Context, s repo.Scope, userID, role string) error
@@ -59,6 +62,36 @@ func (s *Service) Create(ctx context.Context, slug, name string) (repo.Workspace
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.WsCreate, WsID: w.ID, TargetType: "workspace", TargetID: w.ID})
 	return w, nil
+}
+
+// maxDescription: la descripción del área es un párrafo, no una página.
+const maxDescription = 500
+
+// Update cambia el nombre o la descripción del área; lo que viene en nil queda como estaba.
+// Solo su admin (la ruta lo exige, §3.1). La auditoría dice qué campos cambiaron, no el texto (§11.2).
+func (s *Service) Update(ctx context.Context, sc repo.Scope, name, description *string) error {
+	w, err := s.store.WorkspaceByID(ctx, sc.WsID)
+	if err != nil {
+		return err
+	}
+	var changed []string
+	if name != nil && strings.TrimSpace(*name) != w.Name {
+		w.Name, changed = strings.TrimSpace(*name), append(changed, "name")
+	}
+	if description != nil && strings.TrimSpace(*description) != w.Description {
+		w.Description, changed = strings.TrimSpace(*description), append(changed, "description")
+	}
+	if w.Name == "" || utf8.RuneCountInString(w.Description) > maxDescription {
+		return ErrInvalidArea
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if err := s.store.UpdateWorkspace(ctx, sc, w.Name, w.Description); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Event{Action: audit.WsUpdate, WsID: sc.WsID, TargetType: "workspace", TargetID: sc.WsID, Meta: map[string]any{"changed": changed}})
+	return nil
 }
 
 // SetMember agrega a alguien al área o le cambia el rol.

@@ -32,6 +32,8 @@ var (
 	UserInvite       = Action{"user.invite"}
 	UserInviteAccept = Action{"user.invite_accept"}
 	WsCreate         = Action{"ws.create"}
+	WsUpdate         = Action{"ws.update"}
+	BackupRun        = Action{"backup.run"}
 	WsMemberAdd      = Action{"ws.member_add"}
 	WsMemberRemove   = Action{"ws.member_remove"}
 	WsMemberRole     = Action{"ws.member_role_change"}
@@ -51,7 +53,7 @@ var (
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
 var All = []Action{
 	AuthLogin, AuthLoginFailed, AuthLockout, AuthLogout, UserInvite, UserInviteAccept,
-	WsCreate, WsMemberAdd, WsMemberRemove, WsMemberRole,
+	WsCreate, WsUpdate, BackupRun, WsMemberAdd, WsMemberRemove, WsMemberRole,
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
 	PageRead, PathUnavailable, MediaUpload,
 }

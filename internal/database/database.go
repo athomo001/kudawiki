@@ -69,6 +69,10 @@ func (db *DB) Close() error {
 	return errors.Join(db.Read.Close(), db.Write.Close())
 }
 
+// ErrSchemaNewer: la base viene de un binario más nuevo. Este no la toca ni arranca: para volver
+// atrás se restaura el respaldo previo a la migración (SPEC §13.9).
+var ErrSchemaNewer = errors.New("database schema is newer than this binary: restore the pre-migrate backup or use a newer binary")
+
 type migration struct {
 	version int
 	name    string
@@ -100,11 +104,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
 		return err
 	}
-	current, err := db.version(ctx, db.Write)
-	if err != nil {
-		return err
-	}
-	ms, err := embedded()
+	pending, err := db.pending(ctx, db.Write)
 	if err != nil {
 		return err
 	}
@@ -114,10 +114,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return err
 	}
 	defer conn.Close()
-	for _, m := range ms {
-		if m.version <= current {
-			continue
-		}
+	for _, m := range pending {
 		if err := apply(ctx, conn, m); err != nil {
 			return fmt.Errorf("migration %s: %w", m.name, err)
 		}
@@ -171,21 +168,64 @@ func apply(ctx context.Context, conn *sql.Conn, m migration) (err error) {
 
 // Ready confirma que la BD responde y que no quedan migraciones pendientes (/readyz, SPEC §13.5).
 func (db *DB) Ready(ctx context.Context) error {
-	current, err := db.version(ctx, db.Read)
+	pending, err := db.pending(ctx, db.Read)
 	if err != nil {
 		return err
 	}
-	ms, err := embedded()
-	if err != nil {
-		return err
-	}
-	if latest := ms[len(ms)-1].version; current != latest {
-		return fmt.Errorf("schema at version %d, want %d", current, latest)
+	if len(pending) > 0 {
+		return fmt.Errorf("%d migrations pending, first %s", len(pending), pending[0].name)
 	}
 	return nil
 }
 
-func (db *DB) version(ctx context.Context, conn *sql.DB) (int, error) {
+// Pending lista las migraciones que se aplicarían, sin tocar la base: es `kudawiki migrate
+// --dry-run` y lo que decide si hace falta el respaldo previo (SPEC §13.9).
+func (db *DB) Pending(ctx context.Context) ([]string, error) {
+	ms, err := db.pending(ctx, db.Read)
+	names := make([]string, len(ms))
+	for i, m := range ms {
+		names[i] = m.name
+	}
+	return names, err
+}
+
+func (db *DB) pending(ctx context.Context, conn *sql.DB) ([]migration, error) {
+	current, err := Version(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
+	ms, err := embedded()
+	if err != nil {
+		return nil, err
+	}
+	if current > ms[len(ms)-1].version {
+		return nil, ErrSchemaNewer
+	}
+	var out []migration
+	for _, m := range ms {
+		if m.version > current {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// Latest es la versión de esquema de este binario: un respaldo de una más nueva no se restaura.
+func Latest() int {
+	ms, err := embedded()
+	if err != nil || len(ms) == 0 {
+		return 0
+	}
+	return ms[len(ms)-1].version
+}
+
+// Version es la versión de esquema de una base; 0 si nunca se migró. Sirve también para leer
+// la de un respaldo antes de restaurarlo.
+func Version(ctx context.Context, conn *sql.DB) (int, error) {
+	var exists bool
+	if err := conn.QueryRowContext(ctx, `SELECT count(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).Scan(&exists); err != nil || !exists {
+		return 0, err
+	}
 	var v sql.NullInt64
 	err := conn.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v)
 	return int(v.Int64), err

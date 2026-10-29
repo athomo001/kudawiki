@@ -21,6 +21,9 @@
   let markdown = $state('');
   let summary = $state('');
   let tags = $state('');
+  // Descripción corta e ícono (§4.1): metadatos, como las etiquetas; no crean revisión.
+  let description = $state('');
+  let icon = $state('');
   let lang = $state<'es' | 'en'>('es');
   // null = heredar del padre (página nueva) o no cambiar; solo se ofrecen niveles hasta el propio.
   let level = $state<Level | null>(null);
@@ -121,7 +124,8 @@
       await api('PUT', `/w/${area.slug}/pages/${target}`, { title, markdown, lang, base_revision: base, change_summary: summary });
       // Las etiquetas son metadatos, no contenido: no crean revisión (SPEC §4.6).
       const list = tags.split(',').map((s) => s.trim()).filter(Boolean);
-      await api('PATCH', `/w/${area.slug}/meta/${target}`, level ? { tags: list, level } : { tags: list });
+      const meta = { tags: list, description, icon: icon.trim() };
+      await api('PATCH', `/w/${area.slug}/meta/${target}`, level ? { ...meta, level } : meta);
       const to = path.trim();
       const moving = !!slug && to !== slug;
       if (moving) {
@@ -180,6 +184,8 @@
         .then((p) => {
           ({ title, markdown } = p);
           tags = (p.tags ?? []).join(', ');
+          description = p.description;
+          icon = p.icon;
           lang = p.lang;
           level = p.level;
           base = p.revision;
@@ -222,6 +228,11 @@
   </header>
 
   <div class="editor-bar">
+    <label class="editor-icon">
+      {t('page.icon')}
+      <input maxlength="16" placeholder="🔐" title={t('page.icon_hint')} bind:value={icon} />
+    </label>
+    <label class="editor-desc">{t('page.description')} <input maxlength="200" placeholder={t('page.description_hint')} bind:value={description} /></label>
     <label class="editor-tags">{t('page.tags')} <input placeholder={t('page.tags_hint')} bind:value={tags} /></label>
     <label>
       {t('page.lang')}

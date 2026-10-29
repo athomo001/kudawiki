@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/media"
+	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -39,7 +41,10 @@ type fixture struct {
 	cookies map[string]*http.Cookie // por nombre: super, adminTI, editorTI, viewerTI, adminFin, outsider
 }
 
-func newFixture(t *testing.T) fixture {
+// unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
+var unlimited = middleware.Limit{PerSecond: 1e9, Burst: 1e9}
+
+func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	t.Helper()
 	ctx := context.Background()
 	db := dbtest.Open(t)
@@ -50,10 +55,11 @@ func newFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	base, _ := url.Parse(origin)
+	storage := t.TempDir()
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-		Media: media.NewService(store, rec, t.TempDir(), 1<<20), Read: store, DB: db,
+		Media: media.NewService(store, rec, storage, 1<<20), Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head></head>app")}},
-		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
+		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
 	hash, _ := auth.HashPassword(password)
 	users := map[string]string{}
@@ -464,6 +470,170 @@ func TestSearchSectionsAndFacets(t *testing.T) {
 	get("viewerTI", "q=kwfacet&sort=date")
 	if len(res.Results) != 3 || res.Results[0].Slug != "manuales/correo" {
 		t.Errorf("sort=date: %+v", res.Results)
+	}
+}
+
+// §3.1 (pedido original, pre-spec §2.1): el admin del área edita su nombre y su descripción;
+// todos los miembros los ven, y el cambio queda en la auditoría sin el texto.
+func TestAreaSettings(t *testing.T) {
+	f := newFixture(t)
+	if w := f.do("adminTI", "GET", "/api/w/ti/settings", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"TI"`) {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	if w := f.do("adminTI", "PATCH", "/api/w/ti/settings", `{"name":"Tecnología","description":"Soporte, redes y servidores"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("patch: %d %s", w.Code, w.Body)
+	}
+	// Lo ve cualquier miembro, en sus áreas.
+	if body := f.do("viewerTI", "GET", "/api/auth/me", "").Body.String(); !strings.Contains(body, `"name":"Tecnología"`) || !strings.Contains(body, "Soporte, redes y servidores") {
+		t.Errorf("me after patch: %s", body)
+	}
+	// Solo un campo: el otro queda como estaba.
+	f.do("adminTI", "PATCH", "/api/w/ti/settings", `{"description":""}`)
+	if body := f.do("adminTI", "GET", "/api/w/ti/settings", "").Body.String(); !strings.Contains(body, `"name":"Tecnología"`) || !strings.Contains(body, `"description":""`) {
+		t.Errorf("partial patch: %s", body)
+	}
+	for body, want := range map[string]int{
+		`{"name":"  "}`: http.StatusUnprocessableEntity,
+		`{"description":"` + strings.Repeat("x", 501) + `"}`: http.StatusUnprocessableEntity,
+		`{"slug":"otra"}`: http.StatusBadRequest,
+	} {
+		if w := f.do("adminTI", "PATCH", "/api/w/ti/settings", body); w.Code != want {
+			t.Errorf("%.40s: %d, want %d", body, w.Code, want)
+		}
+	}
+	// Otra área, otro rol: el mismo 404.
+	if w := f.do("editorTI", "PATCH", "/api/w/ti/settings", `{"name":"x"}`); w.Code != http.StatusNotFound {
+		t.Errorf("editor patches: %d, want 404", w.Code)
+	}
+	if w := f.do("adminFin", "GET", "/api/w/ti/settings", ""); w.Code != http.StatusNotFound {
+		t.Errorf("other area admin: %d, want 404", w.Code)
+	}
+	var audit struct {
+		Events []struct {
+			Action string         `json:"action"`
+			Meta   map[string]any `json:"meta"`
+		} `json:"events"`
+	}
+	raw := f.do("adminTI", "GET", "/api/w/ti/audit?action=ws.update", "").Body
+	json.Unmarshal(raw.Bytes(), &audit)
+	if len(audit.Events) != 2 || strings.Contains(raw.String(), "Soporte") {
+		t.Errorf("audit (2 events, no text): %s", raw)
+	}
+}
+
+// §4.1: descripción corta e ícono por página. Se ven en la página, en el índice de hijas y en
+// los listados, se encuentran al buscar, y no se pierden al volver a guardar ni al mover.
+// La de una página que el lector no ve no aparece en ninguna parte (§17).
+func TestPageInfo(t *testing.T) {
+	f := newFixture(t)
+	save := func(who, slug, md string, base int) {
+		t.Helper()
+		if w := f.do(who, "PUT", "/api/w/ti/pages/"+slug, fmt.Sprintf(`{"title":"%s","markdown":"%s","base_revision":%d}`, slug, md, base)); w.Code != http.StatusNoContent {
+			t.Fatalf("save %s: %d %s", slug, w.Code, w.Body)
+		}
+	}
+	meta := func(who, slug, body string) int { return f.do(who, "PATCH", "/api/w/ti/meta/"+slug, body).Code }
+	save("editorTI", "manual", `Índice:\n\n[[children]]\n`, 0)
+	save("editorTI", "manual/vpn", "Pasos.", 0)
+	save("adminTI", "manual/secreto", "Plan.", 0)
+	if c := meta("editorTI", "manual/vpn", `{"description":"Cómo conectarse desde la casa","icon":"🔐"}`); c != http.StatusNoContent {
+		t.Fatalf("meta: %d", c)
+	}
+	if c := meta("adminTI", "manual/secreto", `{"description":"kwdescsecreta","level":3}`); c != http.StatusNoContent {
+		t.Fatalf("meta N3: %d", c)
+	}
+
+	var page struct {
+		Description string `json:"description"`
+		Icon        string `json:"icon"`
+		HTML        string `json:"html"`
+	}
+	json.Unmarshal(f.do("viewerTI", "GET", "/api/w/ti/pages/manual/vpn", "").Body.Bytes(), &page)
+	if page.Description != "Cómo conectarse desde la casa" || page.Icon != "🔐" {
+		t.Errorf("page = %+v", page)
+	}
+	// El índice de hijas lleva la descripción; la de la hija N3 no llega al lector.
+	json.Unmarshal(f.do("viewerTI", "GET", "/api/w/ti/pages/manual", "").Body.Bytes(), &page)
+	if !strings.Contains(page.HTML, "Cómo conectarse desde la casa") || strings.Contains(page.HTML, "kwdescsecreta") {
+		t.Errorf("children index: %s", page.HTML)
+	}
+	if body := f.do("viewerTI", "GET", "/api/w/ti/tree", "").Body.String(); !strings.Contains(body, "🔐") || strings.Contains(body, "kwdescsecreta") {
+		t.Errorf("tree: %s", body)
+	}
+
+	// Se busca por la descripción, también por la raíz (conectar → conectarse), y sigue
+	// encontrándose después de volver a guardar el contenido y de mover la página.
+	found := func(q string) bool {
+		return strings.Contains(f.do("viewerTI", "GET", "/api/w/ti/search?q="+url.QueryEscape(q), "").Body.String(), `"slug":"`)
+	}
+	if !found("conectar") {
+		t.Error("description is not searchable")
+	}
+	if found("kwdescsecreta") {
+		t.Error("N3 description found by a viewer")
+	}
+	save("editorTI", "manual/vpn", "Pasos nuevos.", 1)
+	if w := f.do("editorTI", "POST", "/api/w/ti/move/manual/vpn", `{"to":"guias/vpn"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("move: %d %s", w.Code, w.Body)
+	}
+	if !found("conectar") {
+		t.Error("description lost from the index after saving and moving")
+	}
+	json.Unmarshal(f.do("viewerTI", "GET", "/api/w/ti/pages/guias/vpn", "").Body.Bytes(), &page)
+	if page.Description != "Cómo conectarse desde la casa" || page.Icon != "🔐" {
+		t.Errorf("after save and move: %+v", page)
+	}
+
+	for body, want := range map[string]int{
+		`{"description":"` + strings.Repeat("x", 201) + `"}`: http.StatusUnprocessableEntity,
+		`{"icon":"abc"}`: http.StatusUnprocessableEntity,
+		`{"icon":"🔐 "}`:  http.StatusUnprocessableEntity,
+		`{"icon":"🔐🔐🔐🔐🔐🔐🔐🔐🔐"}`: http.StatusUnprocessableEntity,
+		`{"icon":""}`:    http.StatusNoContent, // quitarlo
+		`{"icon":"👩‍💻"}`: http.StatusNoContent, // emoji compuesto
+	} {
+		if c := meta("editorTI", "guias/vpn", body); c != want {
+			t.Errorf("%.40s: %d, want %d", body, c, want)
+		}
+	}
+}
+
+// §14.5: la API entera tiene límite, no solo el login; pasado el límite, 429 con Retry-After.
+func TestAPIRateLimit(t *testing.T) {
+	// Seis fichas, que el fixture gasta en iniciar sesión con sus seis personas: la próxima
+	// petición, de cualquiera y a cualquier ruta de la API, ya no pasa.
+	f := newFixture(t, middleware.Limit{PerSecond: 0.001, Burst: 6})
+	w := f.do("adminTI", "GET", "/api/w/ti/tree", "")
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
+		t.Errorf("over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))
+	}
+}
+
+// §13.7: la salud del contenido la ve el admin del área (la suya) y el superadmin (todas, y lo
+// que no es de ningún área). A los demás, el 404 uniforme.
+func TestHealthViews(t *testing.T) {
+	f := newFixture(t)
+	f.do("editorTI", "PUT", "/api/w/ti/pages/red", `{"title":"Red","markdown":"Ver [[no/existe]].","base_revision":0}`)
+	f.do("adminFin", "PUT", "/api/w/finanzas/pages/plan", `{"title":"Plan","markdown":"Ver [[otra/rota]].","base_revision":0}`)
+
+	area := f.do("adminTI", "GET", "/api/w/ti/health", "")
+	if area.Code != http.StatusOK || !strings.Contains(area.Body.String(), `"links.broken"`) || !strings.Contains(area.Body.String(), "no/existe") {
+		t.Fatalf("area health: %d %s", area.Code, area.Body)
+	}
+	if strings.Contains(area.Body.String(), "otra/rota") {
+		t.Errorf("another area's problem leaked: %s", area.Body)
+	}
+	for _, who := range []string{"editorTI", "viewerTI", "adminFin", "outsider"} {
+		if w := f.do(who, "GET", "/api/w/ti/health", ""); w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", who, w.Code)
+		}
+	}
+	global := f.do("super", "GET", "/api/admin/health", "")
+	if global.Code != http.StatusOK || !strings.Contains(global.Body.String(), "no/existe") || !strings.Contains(global.Body.String(), "otra/rota") {
+		t.Errorf("global health: %d %s", global.Code, global.Body)
+	}
+	if w := f.do("adminTI", "GET", "/api/admin/health", ""); w.Code != http.StatusNotFound {
+		t.Errorf("area admin on global health: %d", w.Code)
 	}
 }
 

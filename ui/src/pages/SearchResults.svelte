@@ -156,9 +156,10 @@
       <ol class="results">
         {#each hits as h (h.slug)}
           <li>
-            <a href={pageHref(h)}><strong>{h.title}</strong></a>
+            <a href={pageHref(h)}><strong>{#if h.icon}{h.icon} {/if}{h.title}</strong></a>
             {#if h.section}<span class="search-section">› {h.section.text}</span>{/if}
             <span class="muted">/{h.slug}</span>
+            {#if h.description}<p class="result-desc">{h.description}</p>{/if}
             {#if h.snippet.length}<p class="snippet"><Snippet parts={h.snippet} /></p>{/if}
           </li>
         {/each}

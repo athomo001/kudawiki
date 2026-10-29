@@ -14,16 +14,21 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/athomo001/kudawiki"
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
+	"github.com/athomo001/kudawiki/internal/backup"
 	"github.com/athomo001/kudawiki/internal/config"
 	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
+	"github.com/athomo001/kudawiki/internal/health"
 	"github.com/athomo001/kudawiki/internal/httpapi"
 	"github.com/athomo001/kudawiki/internal/jobs"
 	"github.com/athomo001/kudawiki/internal/media"
@@ -41,7 +46,14 @@ commands:
   serve        run the web server
   healthcheck  exit 0 if the local server answers /healthz (Docker HEALTHCHECK)
   search       "search rebuild": regenerate the search index of every page
-  audit        "audit verify": check the hash chain of the audit log (exit 1 if broken)`
+  audit        "audit verify": check the hash chain of the audit log (exit 1 if broken)
+  migrate      "migrate --dry-run": list the pending migrations without applying them
+               (serve applies them, after a backup)
+  backup       make a backup now into <data_dir>/backups (the master key is not included)
+  restore      "restore <file>": verify a backup and put it in place; the server must be stopped
+  doctor       check the content health (broken links, tree, media, search index);
+               --ws <slug> for one area, --fix to rebuild the index and remove stray files
+               (with the server stopped). Exit 1 if there are errors`
 
 func main() {
 	if len(os.Args) < 2 {
@@ -53,6 +65,9 @@ func main() {
 
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	configPath := fs.String("config", "", "path to kudawiki.yaml (default "+config.DefaultPath+" if present)")
+	dryRun := fs.Bool("dry-run", false, "migrate: only list what would be applied")
+	wsSlug := fs.String("ws", "", "doctor: only this area")
+	fix := fs.Bool("fix", false, "doctor: apply the automatic fixes")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, err := config.Load(*configPath)
@@ -68,6 +83,14 @@ func main() {
 			err = runSearchRebuild(ctx, cfg)
 		case "audit":
 			err = runAuditVerify(ctx, cfg)
+		case "migrate":
+			err = runMigrateDryRun(ctx, cfg, *dryRun)
+		case "backup":
+			err = runBackup(ctx, cfg)
+		case "restore":
+			err = runRestore(cfg, fs.Arg(0))
+		case "doctor":
+			err = runDoctor(ctx, cfg, *wsSlug, *fix)
 		default:
 			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
@@ -166,7 +189,16 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	defer db.Close()
+	// Con migraciones pendientes, primero un respaldo de la base (SPEC §13.9): para volver atrás
+	// se restaura. Una base de un binario más nuevo no se toca y el servicio no arranca.
+	preMigrate, err := backupBeforeMigrate(ctx, db, cfg, logger)
+	if err != nil {
+		return err
+	}
 	if err := db.Migrate(ctx); err != nil {
+		if preMigrate != "" {
+			return fmt.Errorf("%w (nothing was left half-applied; the backup is %s)", err, preMigrate)
+		}
 		return err
 	}
 	store := repo.New(db)
@@ -181,6 +213,10 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	rec := audit.NewRecorder(store, time.Now, logger)
+	if preMigrate != "" { // recién ahora: antes de migrar, la tabla de auditoría podía no existir
+		rec.Record(ctx, audit.Event{Action: audit.BackupRun, TargetType: "backup", TargetID: filepath.Base(preMigrate), System: "pre_migrate",
+			Meta: map[string]any{"kind": string(backup.PreMigrate)}})
+	}
 	svc, err := auth.NewService(store, rec, time.Now, cfg.IsLocal())
 	if err != nil {
 		return err
@@ -188,20 +224,24 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	base, _ := url.Parse(cfg.BaseURL) // validada en config.Load
 	files := media.NewService(store, rec, cfg.StorageDir(), cfg.Upload.MaxBytes)
 
-	// La purga diaria termina antes de cerrar la BD: este defer corre antes que el de db.Close.
+	// Los jobs terminan antes de cerrar la BD: este defer corre antes que el de db.Close.
 	jobCtx, stopJobs := context.WithCancel(ctx)
-	jobDone := make(chan struct{})
-	go func() {
-		defer close(jobDone)
+	var jobsDone sync.WaitGroup
+	jobsDone.Go(func() {
 		jobs.Purge{Store: store, Files: files, Audit: rec, Retention: cfg.TrashRetention(), AuditRetention: cfg.AuditRetention(),
 			Now: time.Now, Log: logger}.Daily(jobCtx)
-	}()
-	defer func() { stopJobs(); <-jobDone }()
+	})
+	hour, minute := cfg.BackupAt()
+	jobsDone.Go(func() {
+		jobs.Backup{DB: db.Read, StorageDir: cfg.StorageDir(), Dir: cfg.BackupDir(), Hour: hour, Minute: minute, Audit: rec, Now: time.Now, Log: logger,
+			Keep: backup.Retention{Daily: cfg.Backup.KeepDaily, Weekly: cfg.Backup.KeepWeekly, Monthly: cfg.Backup.KeepMonthly}}.Daily(jobCtx)
+	})
+	defer func() { stopJobs(); jobsDone.Wait() }()
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-			Media: files, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), Log: logger}),
+			Media: files, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -277,6 +317,197 @@ func runHealthcheck(cfg config.Config) error {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("healthz returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// runMigrateDryRun lista las migraciones pendientes sin tocar nada (SPEC §13.9). Aplicarlas es
+// cosa de `serve`, que antes hace el respaldo: no hay otro camino para migrar.
+func runMigrateDryRun(ctx context.Context, cfg config.Config, dryRun bool) error {
+	if !dryRun {
+		return errors.New("migrations are applied by `kudawiki serve`, after a backup; use `kudawiki migrate --dry-run` to list them")
+	}
+	if _, err := os.Stat(cfg.DBPath()); err != nil {
+		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	pending, err := db.Pending(ctx)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		fmt.Println("no pending migrations")
+		return nil
+	}
+	fmt.Printf("%d pending migrations (a backup is made before applying them):\n", len(pending))
+	for _, name := range pending {
+		fmt.Println("  " + name)
+	}
+	return nil
+}
+
+// backupBeforeMigrate respalda la base si hay migraciones pendientes y ya tiene datos (SPEC
+// §13.9). Solo la base: migrar no toca storage/. Devuelve la ruta del respaldo, o "" si no hizo
+// falta.
+func backupBeforeMigrate(ctx context.Context, db *database.DB, cfg config.Config, logger *slog.Logger) (string, error) {
+	pending, err := db.Pending(ctx)
+	if err != nil || len(pending) == 0 {
+		return "", err
+	}
+	if v, err := database.Version(ctx, db.Read); err != nil || v == 0 {
+		return "", err // base nueva: no hay nada que respaldar
+	}
+	path, err := backup.Create(ctx, db.Read, "", cfg.BackupDir(), backup.PreMigrate, time.Now())
+	if err != nil {
+		return "", fmt.Errorf("backup before migrating: %w", err)
+	}
+	logger.Info("backup before migrating", "file", path, "migrations", len(pending))
+	return path, nil
+}
+
+// runBackup hace un respaldo ahora (SPEC §13.3) y lo verifica. La MASTER_KEY no va adentro.
+func runBackup(ctx context.Context, cfg config.Config) error {
+	if _, err := os.Stat(cfg.DBPath()); err != nil {
+		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	path, err := backup.Create(ctx, db.Read, cfg.StorageDir(), cfg.BackupDir(), backup.Manual, time.Now())
+	if err != nil {
+		return err
+	}
+	m, err := backup.Verify(path)
+	if err != nil {
+		return fmt.Errorf("the backup was written but does not verify: %w", err)
+	}
+	// Con el esquema al día queda en la auditoría; con migraciones pendientes la tabla puede no existir.
+	if pending, err := db.Pending(ctx); err == nil && len(pending) == 0 {
+		rec := audit.NewRecorder(repo.New(db), time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+		rec.Record(ctx, audit.Event{Action: audit.BackupRun, TargetType: "backup", TargetID: filepath.Base(path), System: "cli",
+			Meta: map[string]any{"kind": string(backup.Manual)}})
+	}
+	fmt.Printf("backup ok: %s (%d files, schema %d)\n", path, len(m.Files), m.Schema)
+	fmt.Println("the master key is not in the backup: keep a copy of it separately")
+	return nil
+}
+
+// runRestore pone un respaldo en lugar de la base y de storage/ (SPEC §13.3). Lo que había
+// queda aparte en before-restore-<hora>. Con el servidor corriendo, no: la base cambiaría bajo
+// sus pies.
+func runRestore(cfg config.Config, file string) error {
+	if file == "" {
+		return errors.New("usage: kudawiki restore <file>")
+	}
+	if used, err := backup.InUse(cfg.DBPath()); err != nil {
+		return err
+	} else if used {
+		return errors.New("the database is in use: stop `kudawiki serve` (or the container) before restoring")
+	}
+	m, previous, err := backup.Restore(file, cfg.DBPath(), cfg.StorageDir(), database.Latest())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("restored %s backup from %s (%d files, schema %d)\n", m.Kind, m.CreatedAt.Format(time.RFC3339), len(m.Files), m.Schema)
+	if previous != "" {
+		fmt.Printf("what was there before is in %s\n", previous)
+	}
+	if m.Schema < database.Latest() {
+		fmt.Println("the backup has an older schema: the next `kudawiki serve` will migrate it (after its own backup)")
+	}
+	fmt.Println("check it with: kudawiki audit verify")
+	return nil
+}
+
+// runDoctor revisa la salud del contenido (SPEC §13.7), con el SHA-256 de cada archivo. Con
+// --fix aplica los dos arreglos automáticos: reconstruir el índice y borrar los archivos que no
+// tienen fila. Para eso el servidor tiene que estar detenido: un archivo recién subido, antes
+// de que se guarde su fila, parecería sobrante.
+func runDoctor(ctx context.Context, cfg config.Config, wsSlug string, fix bool) error {
+	if fix {
+		if used, err := backup.InUse(cfg.DBPath()); err != nil {
+			return err
+		} else if used {
+			return errors.New("--fix needs the server stopped; without --fix, doctor only reads and can run anytime")
+		}
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if pending, err := db.Pending(ctx); err != nil {
+		return err
+	} else if len(pending) > 0 {
+		return errors.New("the database has pending migrations: start the server once to apply them")
+	}
+	store := repo.New(db)
+	areas, err := store.ListWorkspaces(ctx)
+	if err != nil {
+		return err
+	}
+	if wsSlug != "" {
+		areas = slices.DeleteFunc(areas, func(w repo.Workspace) bool { return w.Slug != wsSlug })
+		if len(areas) == 0 {
+			return fmt.Errorf("no area %q", wsSlug)
+		}
+	}
+	opts := health.Options{StorageDir: cfg.StorageDir(), Areas: areas, Global: wsSlug == "", Hash: true, Now: time.Now()}
+	problems, err := health.Check(ctx, store, opts)
+	if err != nil {
+		return err
+	}
+	if fix && len(problems) > 0 {
+		if err := doctorFix(ctx, store, cfg, areas, problems); err != nil {
+			return err
+		}
+		if problems, err = health.Check(ctx, store, opts); err != nil {
+			return err
+		}
+	}
+	errs := 0
+	for _, p := range problems {
+		if p.Severity == health.Error {
+			errs++
+		}
+		fmt.Printf("%-7s  %-26s  %-12s  %s  %s\n", p.Severity, p.Check, p.Area, p.Page, p.Detail)
+	}
+	fmt.Printf("%d areas checked: %d errors, %d warnings\n", len(areas), errs, len(problems)-errs)
+	if errs > 0 {
+		return errors.New("the content has errors")
+	}
+	return nil
+}
+
+// doctorFix aplica los arreglos automáticos de §13.7 y deja lo demás para una persona.
+func doctorFix(ctx context.Context, store *repo.Repo, cfg config.Config, areas []repo.Workspace, problems []health.Problem) error {
+	wsID := make(map[string]string, len(areas))
+	for _, w := range areas {
+		wsID[w.Slug] = w.ID
+	}
+	reindex := false
+	for _, p := range problems {
+		switch {
+		case strings.HasPrefix(p.Check, "search."):
+			reindex = true
+		case p.Check == "media.stray_file":
+			if err := os.Remove(filepath.Join(cfg.StorageDir(), "ws_"+wsID[p.Area], p.Detail)); err != nil {
+				return err
+			}
+			fmt.Println("fixed: removed stray file", p.Area, p.Detail)
+		}
+	}
+	if reindex {
+		if err := store.RebuildIndex(ctx, wiki.IndexDoc); err != nil {
+			return err
+		}
+		fmt.Println("fixed: search index rebuilt")
 	}
 	return nil
 }

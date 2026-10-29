@@ -9,6 +9,7 @@
   import Admin from './pages/Admin.svelte';
   import Members from './pages/Members.svelte';
   import Audit from './pages/Audit.svelte';
+  import Health from './pages/Health.svelte';
   import Area from './pages/Area.svelte';
   import Invite from './pages/Invite.svelte';
   import NotFound from './pages/NotFound.svelte';
@@ -76,7 +77,7 @@
     {#if !editing}<TopBar {me} {area} onprefs={savePrefs} onlogout={logout} />{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if area}
-      <Area {area} sub={areaPath?.[2] ?? ''} selfId={me.id} />
+      <Area {area} sub={areaPath?.[2] ?? ''} selfId={me.id} onareachanged={loadMe} />
     {:else}
       <main class="view">
         {#if route.path === '/'}
@@ -85,6 +86,8 @@
           <Admin />
         {:else if route.path === '/admin/audit' && me.is_global_admin}
           <Audit endpoint="/admin/audit" global />
+        {:else if route.path === '/admin/health' && me.is_global_admin}
+          <Health endpoint="/admin/health" global />
         {:else if adminAreaId && me.is_global_admin}
           <Members endpoint={`/admin/workspaces/${adminAreaId}/members`} canGrantAdmin selfId={me.id} />
         {:else}

@@ -8,9 +8,11 @@
   import { tick } from 'svelte';
   import { enhance } from '../lib/enhance';
   import { remember } from '../components/SearchBox.svelte';
+  import { shortcuts } from '../lib/shortcuts';
   import NotFound from './NotFound.svelte';
 
-  let { area, slug, onmoved }: { area: Area; slug: string; onmoved: () => void } = $props();
+  // refs: el árbol del área, para anterior/siguiente entre hermanas (§15).
+  let { area, slug, refs, onmoved }: { area: Area; slug: string; refs: PageRef[]; onmoved: () => void } = $props();
   let confirmDelete = $state(false);
 
   let page = $state<Page | null>(null);
@@ -56,6 +58,46 @@
   $effect(() => {
     void locale();
     if (page && prose) enhance(prose);
+  });
+
+  // Atajos (§15): E edita, G H abre el historial. Ctrl+K busca y Ctrl+S guarda en el editor.
+  $effect(() =>
+    shortcuts({
+      e: () => page && canEdit(area) && navigate(`${base}/edit/${page.slug}`),
+      'g h': () => page && navigate(`${base}/history/${page.slug}`),
+    }),
+  );
+
+  // El índice resalta la sección que se está leyendo: la del último encabezado que ya pasó
+  // por arriba de la pantalla (§15).
+  let activeId = $state('');
+  $effect(() => {
+    if (!page || !prose) return;
+    const heads = [...prose.querySelectorAll<HTMLElement>('h2[id], h3[id]')];
+    const update = () => {
+      let id = heads[0]?.id ?? '';
+      // Al final de la página ya no se puede bajar más: las últimas secciones no llegarían
+      // nunca arriba, así que se marca la última que se ve.
+      const atEnd = innerHeight + scrollY >= document.documentElement.scrollHeight - 2;
+      for (const h of heads) {
+        const top = h.getBoundingClientRect().top;
+        if (atEnd ? top > innerHeight : top > 120) break;
+        id = h.id;
+      }
+      activeId = id;
+    };
+    update();
+    addEventListener('scroll', update, { passive: true });
+    return () => removeEventListener('scroll', update);
+  });
+
+  // Anterior y siguiente entre hermanas, en el orden del árbol (§15).
+  const siblings = $derived.by(() => {
+    if (!page) return { prev: undefined, next: undefined };
+    const parent = page.slug.includes('/') ? page.slug.slice(0, page.slug.lastIndexOf('/') + 1) : '';
+    const list = refs.filter((r) => r.slug.startsWith(parent) && !r.slug.slice(parent.length).includes('/'));
+    const i = list.findIndex((r) => r.slug === page?.slug);
+    return { prev: i > 0 ? list[i - 1] : undefined, next: i >= 0 ? list[i + 1] : undefined };
   });
 
   // Con #ancla (p. ej. desde la búsqueda, §9.4) se salta a esa sección cuando el contenido ya está.
@@ -116,11 +158,18 @@
       <p class={`article-badges level-${page.level}`} lang={locale()}>
         {page.level > 1 ? '🔒 ' : ''}{t('page.level_line', { level: t(`level.${page.level}`) })}
       </p>
-      <h1>{page.title}</h1>
+      <h1>{#if page.icon}<span class="page-icon" aria-hidden="true">{page.icon}</span>{/if}{page.title}</h1>
+      {#if page.description}<p class="lead">{page.description}</p>{/if}
       <hr />
       {#if error && !showMove && !showDelete}<p class="error" role="alert" lang={locale()}>{error}</p>{/if}
       <!-- Único {@html} del lector: HTML saneado por bluemonday en el servidor (SPEC §4.1). -->
       <div class="prose" bind:this={prose}>{@html page.html}</div>
+      {#if siblings.prev || siblings.next}
+        <nav class="pager" aria-label={t('page.pager')} lang={locale()}>
+          {#if siblings.prev}<a href={`${base}/p/${siblings.prev.slug}`} rel="prev">← {siblings.prev.title}</a>{:else}<span></span>{/if}
+          {#if siblings.next}<a href={`${base}/p/${siblings.next.slug}`} rel="next">{siblings.next.title} →</a>{/if}
+        </nav>
+      {/if}
     </article>
 
     <aside class="page-info" aria-label={t('page.info')}>
@@ -129,7 +178,7 @@
           <h2 class="side-title">{t('page.toc')}</h2>
           <ul lang={page.lang}>
             {#each page.toc as h (h.id)}
-              <li class:sub={h.level === 3}><a href={`#${h.id}`}>{h.text}</a></li>
+              <li class:sub={h.level === 3}><a href={`#${h.id}`} aria-current={h.id === activeId ? 'location' : undefined}>{h.text}</a></li>
             {/each}
           </ul>
         </nav>
@@ -161,14 +210,15 @@
 
     <div class="page-actions" role="group" aria-label={t('page.actions')}>
       {#if canEdit(area)}
-        <a class="action action-primary" href={`${base}/edit/${page.slug}`} aria-label={t('page.edit_label')} title={t('page.edit_label')}>
+        <a class="action action-primary" href={`${base}/edit/${page.slug}`} aria-label={t('page.edit_label')} aria-keyshortcuts="E" title={`${t('page.edit_label')} (E)`}>
           <Icon name="edit" />
         </a>
       {/if}
-      <a class="action" href={`${base}/history/${page.slug}`} aria-label={t('page.history')} title={t('page.history')}><Icon name="history" /></a>
+      <a class="action" href={`${base}/history/${page.slug}`} aria-label={t('page.history')} aria-keyshortcuts="G H" title={`${t('page.history')} (G H)`}><Icon name="history" /></a>
       <button type="button" class="action" aria-label={t('page.source')} title={t('page.source')} onclick={() => (showSource = true)}>
         <Icon name="code" />
       </button>
+      <button type="button" class="action" aria-label={t('page.print')} title={t('page.print')} onclick={() => print()}><Icon name="print" /></button>
       {#if area.role === 'admin'}
         <button type="button" class="action" aria-label={t('access.title')} title={t('access.title')} onclick={openAccess}><Icon name="people" /></button>
       {/if}

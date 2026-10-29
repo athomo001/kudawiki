@@ -22,6 +22,23 @@ function callouts(root: HTMLElement) {
   }
 }
 
+// Enlace permanente por encabezado (SPEC §15): un "#" al lado, que aparece al pasar el mouse o
+// al llegar con el teclado. Como los avisos, el texto accesible se vuelve a escribir en cada
+// llamada para que siga al idioma.
+function anchors(root: HTMLElement) {
+  for (const h of root.querySelectorAll<HTMLElement>('h2[id], h3[id], h4[id]')) {
+    let a = h.querySelector<HTMLAnchorElement>(':scope > a.heading-anchor');
+    if (!a) {
+      a = document.createElement('a');
+      a.className = 'heading-anchor';
+      a.href = `#${h.id}`;
+      a.textContent = '#';
+      h.append(a);
+    }
+    a.setAttribute('aria-label', t('page.permalink', { heading: h.firstChild?.textContent ?? '' }));
+  }
+}
+
 // Pestañas: sin JS las secciones se leen una tras otra; con JS, patrón ARIA de tabs.
 function tabs(root: HTMLElement) {
   for (const box of root.querySelectorAll<HTMLElement>('.tabs:not([data-ready])')) {
@@ -110,6 +127,7 @@ function mermaid(root: HTMLElement) {
 export function enhance(root: HTMLElement | undefined) {
   if (!root) return;
   callouts(root);
+  anchors(root);
   tabs(root);
   mermaid(root);
   void math(root);

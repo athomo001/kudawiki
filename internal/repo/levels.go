@@ -80,7 +80,7 @@ func (r *Repo) SetLevel(ctx context.Context, s Scope, actorID, slug string, leve
 		return "", 0, ErrBelowParent
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, title, content_markdown, lang, min_rank, current_revision FROM pages
+		`SELECT id, slug, title, description, content_markdown, lang, min_rank, current_revision FROM pages
 		 WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? AND (slug = ? OR (slug LIKE ? AND min_rank < ?))`,
 		s.WsID, s.MaxRank, slug, slug+"/%", level)
 	if err != nil {
@@ -122,5 +122,5 @@ func levelName(rank int) string { return fmt.Sprintf("N%d", rank) }
 
 func scanMoved(row scanner) (movedPage, error) {
 	var p movedPage
-	return p, row.Scan(&p.id, &p.slug, &p.title, &p.markdown, &p.lang, &p.rank, &p.revision)
+	return p, row.Scan(&p.id, &p.slug, &p.title, &p.description, &p.markdown, &p.lang, &p.rank, &p.revision)
 }

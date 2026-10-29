@@ -10,7 +10,7 @@ export class ApiError extends Error {
 }
 
 export type Role = 'viewer' | 'editor' | 'admin';
-export type Area = { slug: string; name: string; role: Role };
+export type Area = { slug: string; name: string; description: string; role: Role };
 
 // Preferencias de lectura de SPEC §15; se aplican en todas las áreas.
 export type ReadingPrefs = { font: 'default' | 'dyslexic' | 'legible'; wide: boolean };
@@ -27,7 +27,7 @@ export type Me = {
 
 export type Member = { user_id: string; email: string; full_name: string; role: Role };
 export type Level = 1 | 2 | 3;
-export type PageRef = { slug: string; title: string; level?: Level };
+export type PageRef = { slug: string; title: string; level?: Level; description?: string; icon?: string };
 export type Heading = { level: number; id: string; text: string };
 export type Page = {
   slug: string;
@@ -41,6 +41,8 @@ export type Page = {
   revision: number;
   updated_by: string;
   updated_at: string;
+  description: string; // corta, para listados y búsqueda (§4.1)
+  icon: string; // emoji, o vacío
 };
 export type RevisionMeta = {
   revision: number;
@@ -88,6 +90,8 @@ export type SearchHit = {
   slug: string;
   title: string;
   snippet: { text: string; hit?: boolean }[];
+  description?: string;
+  icon?: string;
   section?: { id: string; text: string }; // dónde está la coincidencia (SPEC §9.4)
 };
 export type Facet = { value: string; count: number };

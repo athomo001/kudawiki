@@ -19,7 +19,7 @@ import (
 // bluemonday: no hay HTML, scripts ni CSS que el autor pueda inyectar.
 
 // Child es una subpágina visible para quien lee, para [[children]].
-type Child struct{ Slug, Title string }
+type Child struct{ Slug, Title, Description, Icon string }
 
 // Options es el contexto de un render: la base de las rutas del área (/w/ti), las hijas
 // visibles y qué rutas existen para quien lee. Sin base, los [[enlaces]] quedan como texto.
@@ -88,7 +88,13 @@ type mermaid struct {
 type blockList struct {
 	ast.BaseBlock
 	class string
-	items []Heading // para [[children]], ID es la ruta y Level es 2
+	items []listItem
+}
+
+// listItem es una línea de [[toc]] o de [[children]]; note es la descripción de la hija (§4.1).
+type listItem struct {
+	href, text, note string
+	sub              bool
 }
 
 func (n *callout) Kind() ast.NodeKind   { return kindCallout }
@@ -246,11 +252,17 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 	// Las listas se llenan al final, cuando el índice ya tiene todos los encabezados.
 	for _, l := range lists {
 		if l.class == "toc" {
-			l.items = opts.toc
+			for _, h := range opts.toc {
+				l.items = append(l.items, listItem{href: "#" + h.ID, text: h.Text, sub: h.Level == 3})
+			}
 			continue
 		}
 		for _, c := range opts.Children {
-			l.items = append(l.items, Heading{Level: 2, ID: opts.Base + "/p/" + c.Slug, Text: c.Title})
+			text := c.Title
+			if c.Icon != "" {
+				text = c.Icon + " " + text
+			}
+			l.items = append(l.items, listItem{href: opts.Base + "/p/" + c.Slug, text: text, note: c.Description})
 		}
 	}
 	for _, f := range replace {
@@ -330,15 +342,15 @@ func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
 		l := n.(*blockList)
 		fmt.Fprintf(w, `<ul class="%s">`, l.class)
 		for _, it := range l.items {
-			href := it.ID
-			if l.class == "toc" {
-				href = "#" + it.ID
-			}
 			sub := ""
-			if it.Level == 3 {
+			if it.sub {
 				sub = ` class="sub"`
 			}
-			fmt.Fprintf(w, `<li%s><a href="%s">%s</a></li>`, sub, html.EscapeString(href), html.EscapeString(it.Text))
+			note := ""
+			if it.note != "" {
+				note = ` <span class="child-note">` + html.EscapeString(it.note) + `</span>`
+			}
+			fmt.Fprintf(w, `<li%s><a href="%s">%s</a>%s</li>`, sub, html.EscapeString(it.href), html.EscapeString(it.text), note)
 		}
 		w.WriteString("</ul>\n")
 		return ast.WalkSkipChildren, nil

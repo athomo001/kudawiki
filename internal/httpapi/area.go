@@ -22,6 +22,9 @@ func scopeOf(r *http.Request) repo.Scope { return r.Context().Value(scopeKey{}).
 func (a api) areaRoutes(r chi.Router) {
 	r.Use(a.workspaceBoundary)
 	a.pageRoutes(r)
+	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/settings", a.areaSettings)
+	r.With(a.requireRank(repo.RoleRank("admin"))).Patch("/settings", a.updateAreaSettings)
+	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/health", a.areaHealth)
 	r.Route("/members", func(r chi.Router) {
 		r.Use(a.requireRank(repo.RoleRank("admin")))
 		a.memberRoutes(r)
@@ -105,4 +108,40 @@ func (a api) removeMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// areaSettings es la configuración del área para su admin (SPEC §14.3). En F3: nombre y
+// descripción; el modo de aprobación y lo demás llegan con F4.
+func (a api) areaSettings(w http.ResponseWriter, r *http.Request) {
+	ws, err := a.Read.WorkspaceByID(r.Context(), scopeOf(r).WsID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.json(w, http.StatusOK, map[string]string{"name": ws.Name, "description": ws.Description})
+}
+
+func (a api) updateAreaSettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if err := a.Workspaces.Update(r.Context(), scopeOf(r), in.Name, in.Description); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// areaHealth es la salud del área para su admin (SPEC §13.7).
+func (a api) areaHealth(w http.ResponseWriter, r *http.Request) {
+	ws, err := a.Read.WorkspaceByID(r.Context(), scopeOf(r).WsID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.health(w, r, []repo.Workspace{ws}, false)
 }

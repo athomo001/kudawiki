@@ -11,14 +11,17 @@ import (
 )
 
 // IndexDoc arma lo que se indexa de una página (SPEC §9.1): texto plano sin sintaxis ni URLs,
-// los encabezados aparte (pesan más) y el código aparte (pesa menos), cada uno con su raíz.
-func IndexDoc(title, markdown, lang string) repo.IndexDoc {
+// la descripción y los encabezados aparte (pesan más) y el código aparte (pesa menos), cada uno
+// con su raíz. La descripción la pide cada camino que reescribe el índice (guardar, mover,
+// reconstruir): si alguno no la pasara, se perdería de la búsqueda.
+func IndexDoc(title, description, markdown, lang string) repo.IndexDoc {
 	x := extract(markdown)
 	d := repo.IndexDoc{
-		Lang: lang, Title: title,
+		Lang: lang, Title: title, Description: description,
 		Headings: x.headings, Content: x.content, Code: x.code,
 	}
-	d.TitleStem, d.HeadingsStem, d.ContentStem = search.Stem(d.Title, lang), search.Stem(d.Headings, lang), search.Stem(d.Content, lang)
+	d.TitleStem, d.DescriptionStem = search.Stem(d.Title, lang), search.Stem(d.Description, lang)
+	d.HeadingsStem, d.ContentStem = search.Stem(d.Headings, lang), search.Stem(d.Content, lang)
 	return d
 }
 

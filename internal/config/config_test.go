@@ -73,3 +73,24 @@ func TestAuditRetentionFloor(t *testing.T) {
 		t.Errorf("audit retention %v days, want %d", got, AuditFloorDays)
 	}
 }
+
+// Respaldo diario (SPEC §13.3): 03:00 y 7/4/6 por omisión; la hora se valida.
+func TestBackupSchedule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("backup:\n  keep_monthly: 12\n"), 0o600)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, m := c.BackupAt(); h != 3 || m != 0 || c.Backup.KeepDaily != 7 || c.Backup.KeepWeekly != 4 || c.Backup.KeepMonthly != 12 {
+		t.Errorf("backup = %+v", c.Backup)
+	}
+	t.Setenv("KUDAWIKI_BACKUP_TIME", "23:30")
+	if c, err := Load(path); err != nil || c.Backup.Time != "23:30" {
+		t.Errorf("env time: %+v, %v", c.Backup, err)
+	}
+	t.Setenv("KUDAWIKI_BACKUP_TIME", "3 am")
+	if _, err := Load(path); err == nil {
+		t.Error("a bad backup.time was accepted")
+	}
+}

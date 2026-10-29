@@ -3,6 +3,9 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
+
+	"github.com/athomo001/kudawiki/internal/health"
 
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/go-chi/chi/v5"
@@ -26,6 +29,7 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Get("/workspaces", a.listWorkspaces)
 	r.Post("/workspaces", a.createWorkspace)
 	r.Get("/audit", a.audit)
+	r.Get("/health", a.globalHealth)
 	// El superadmin administra miembros sin ser miembro: el Scope sale del ID del área.
 	r.Route("/workspaces/{id}/members", func(r chi.Router) {
 		r.Use(a.adminScope)
@@ -122,4 +126,28 @@ func (a api) adminScope(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, withScope(r, repo.Scope{WsID: ws.ID, MaxRank: repo.RoleRank("admin")}))
 	})
+}
+
+// globalHealth es la salud de todas las áreas y del índice para el superadmin (SPEC §13.7).
+func (a api) globalHealth(w http.ResponseWriter, r *http.Request) {
+	areas, err := a.Read.ListWorkspaces(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.health(w, r, areas, true)
+}
+
+// health responde los problemas. Sin el SHA-256 de cada archivo (puede tardar minutos con
+// muchos GB): eso lo hace `kudawiki doctor`, y la respuesta lo dice.
+func (a api) health(w http.ResponseWriter, r *http.Request, areas []repo.Workspace, global bool) {
+	problems, err := health.Check(r.Context(), a.Read, health.Options{StorageDir: a.StorageDir, Areas: areas, Global: global, Now: time.Now()})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if problems == nil {
+		problems = []health.Problem{}
+	}
+	a.json(w, http.StatusOK, map[string]any{"problems": problems, "hash_checked": false})
 }

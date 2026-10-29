@@ -43,6 +43,7 @@ type authService interface {
 
 type workspaceService interface {
 	Create(ctx context.Context, slug, name string) (repo.Workspace, error)
+	Update(ctx context.Context, sc repo.Scope, name, description *string) error
 	SetMember(ctx context.Context, a workspace.Actor, sc repo.Scope, email, role string) error
 	RemoveMember(ctx context.Context, a workspace.Actor, sc repo.Scope, userID string) error
 }
@@ -52,6 +53,7 @@ type wikiService interface {
 	Save(ctx context.Context, sc repo.Scope, actorID string, base int, w repo.PageWrite) error
 	Revert(ctx context.Context, sc repo.Scope, actorID, slug string, n, base int) error
 	SetTags(ctx context.Context, sc repo.Scope, slug string, tags []string) error
+	SetInfo(ctx context.Context, sc repo.Scope, slug string, description, icon *string) error
 	Move(ctx context.Context, sc repo.Scope, actorID, from, to string) error
 	SetLevel(ctx context.Context, sc repo.Scope, actorID, slug string, level int) error
 	Delete(ctx context.Context, sc repo.Scope, actorID, slug string) error
@@ -89,6 +91,14 @@ type reader interface {
 	Trash(ctx context.Context, s repo.Scope, actorID string) ([]repo.TrashItem, error)
 	AuditEvents(ctx context.Context, f repo.AuditFilter) ([]repo.AuditEntry, error)
 	AreaAudit(ctx context.Context, s repo.Scope, f repo.AuditFilter) ([]repo.AuditEntry, error)
+	// Salud del contenido (§13.7): lo que pide health.Check.
+	BrokenLinks(ctx context.Context, s repo.Scope) ([]repo.BrokenLink, error)
+	ShadowedAliases(ctx context.Context, s repo.Scope) ([]repo.ShadowedAlias, error)
+	OrphanPages(ctx context.Context, s repo.Scope) ([]string, error)
+	PagesListingChildren(ctx context.Context, s repo.Scope) ([]string, error)
+	MediaRows(ctx context.Context, s repo.Scope, unattachedBefore time.Time) ([]repo.MediaRow, error)
+	PagesWithoutIndex(ctx context.Context, s repo.Scope) ([]string, error)
+	OrphanIndexRows(ctx context.Context) (int, error)
 }
 
 type readiness interface {
@@ -106,7 +116,11 @@ type Deps struct {
 	BaseURL    *url.URL
 	// TrashRetention dice cuándo se purga lo que está en la papelera (SPEC §4.5).
 	TrashRetention time.Duration
-	Log            *slog.Logger
+	// StorageDir es la carpeta de los archivos subidos: la salud la compara con la BD (§13.7).
+	StorageDir string
+	// RateLimit es el límite general de la API (§14.5); sin indicarlo, rige el de omisión.
+	RateLimit middleware.Limit
+	Log       *slog.Logger
 }
 
 type api struct{ Deps }
@@ -129,6 +143,11 @@ func New(d Deps) http.Handler {
 				next.ServeHTTP(w, r.WithContext(audit.WithActor(r.Context(), audit.Actor{IP: clientIP(r)})))
 			})
 		})
+		limit := d.RateLimit
+		if limit == (middleware.Limit{}) {
+			limit = middleware.DefaultLimit
+		}
+		r.Use(middleware.RateLimit(limit, time.Now))
 		r.Post("/auth/login", a.login)
 		r.Post("/auth/invite/accept", a.acceptInvite)
 		r.Group(func(r chi.Router) {
@@ -249,6 +268,7 @@ var domainErrors = map[error]int{
 	workspace.ErrUserNotFound:  http.StatusUnprocessableEntity,
 	workspace.ErrForbidden:     http.StatusForbidden,
 	wiki.ErrInvalidPage:        http.StatusUnprocessableEntity,
+	wiki.ErrInvalidInfo:        http.StatusUnprocessableEntity,
 	wiki.ErrConflict:           http.StatusConflict,
 	wiki.ErrPathUnavailable:    http.StatusConflict,
 	wiki.ErrInvalidTags:        http.StatusUnprocessableEntity,

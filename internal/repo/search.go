@@ -22,14 +22,15 @@ type SearchQuery struct {
 
 // IndexDoc es lo que se indexa de una página (SPEC §9.1).
 type IndexDoc struct {
-	Lang                                 string // decide el stemmer; no se guarda en el índice
-	Title, Headings, Content, Code       string
-	TitleStem, HeadingsStem, ContentStem string
+	Lang                                                  string // decide el stemmer; no se guarda en el índice
+	Title, Description, Headings, Content, Code           string
+	TitleStem, DescriptionStem, HeadingsStem, ContentStem string
 }
 
 type SearchHit struct {
-	ID, Slug, Title string
-	UpdatedAt       time.Time
+	ID, Slug, Title   string
+	Description, Icon string // para mostrar en el resultado (§4.1)
+	UpdatedAt         time.Time
 	// Los llena Snippets, solo para los resultados que se muestran: el fragmento con las
 	// coincidencias entre HitStart y HitEnd, y el Markdown para ubicar su sección (§9.4).
 	Snippet, Markdown string
@@ -67,8 +68,8 @@ func writeIndex(ctx context.Context, tx *sql.Tx, pageID string, d IndexDoc) erro
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO pages_fts (rowid, title, tags, headings, description, content_text, code_text,
 		   title_stem, headings_stem, description_stem, content_stem)
-		 VALUES (?, ?, COALESCE((SELECT group_concat(tag, ' ') FROM page_tags WHERE page_id = ?), ''), ?, '', ?, ?, ?, ?, '', ?)`,
-		rowid, d.Title, pageID, d.Headings, d.Content, d.Code, d.TitleStem, d.HeadingsStem, d.ContentStem); err != nil {
+		 VALUES (?, ?, COALESCE((SELECT group_concat(tag, ' ') FROM page_tags WHERE page_id = ?), ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rowid, d.Title, pageID, d.Headings, d.Description, d.Content, d.Code, d.TitleStem, d.HeadingsStem, d.DescriptionStem, d.ContentStem); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO pages_title_trgm (rowid, title) VALUES (?, ?)`, rowid, d.Title)
@@ -89,7 +90,7 @@ func (r *Repo) Search(ctx context.Context, s Scope, q SearchQuery, limit int) ([
 	}
 	return collect(rows, func(row scanner) (SearchHit, error) {
 		var h SearchHit
-		return h, row.Scan(&h.rowid, &h.ID, &h.Slug, &h.Title, &h.UpdatedAt)
+		return h, row.Scan(&h.rowid, &h.ID, &h.Slug, &h.Title, &h.Description, &h.Icon, &h.UpdatedAt)
 	})
 }
 
@@ -183,11 +184,11 @@ func searchSQL(s Scope, q SearchQuery, limit int) (string, []any) {
 	var b strings.Builder
 	var args []any
 	if q.Match != "" {
-		b.WriteString(`SELECT f.rowid, p.id, p.slug, p.title, p.updated_at FROM pages_fts f CROSS JOIN pages p ON p.search_rowid = f.rowid
+		b.WriteString(`SELECT f.rowid, p.id, p.slug, p.title, p.description, p.icon, p.updated_at FROM pages_fts f CROSS JOIN pages p ON p.search_rowid = f.rowid
 			WHERE pages_fts MATCH ? AND p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`)
 		args = append(args, q.Match, s.WsID, s.MaxRank)
 	} else {
-		b.WriteString(`SELECT 0, p.id, p.slug, p.title, p.updated_at FROM pages p WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`)
+		b.WriteString(`SELECT 0, p.id, p.slug, p.title, p.description, p.icon, p.updated_at FROM pages p WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`)
 		args = append(args, s.WsID, s.MaxRank)
 	}
 	if q.Path != "" {
@@ -286,15 +287,15 @@ func (r *Repo) IndexStale(ctx context.Context) (bool, error) {
 
 // RebuildIndex regenera el índice de todas las páginas de todas las áreas: el índice es
 // derivado y nunca es la única copia de nada (SPEC §9.7). Es una operación del sistema.
-func (r *Repo) RebuildIndex(ctx context.Context, derive func(title, markdown, lang string) IndexDoc) error {
-	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, title, content_markdown, lang FROM pages`)
+func (r *Repo) RebuildIndex(ctx context.Context, derive func(title, description, markdown, lang string) IndexDoc) error {
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, title, description, content_markdown, lang FROM pages`)
 	if err != nil {
 		return err
 	}
-	type row struct{ id, title, markdown, lang string }
+	type row struct{ id, title, description, markdown, lang string }
 	pages, err := collect(rows, func(sc scanner) (row, error) {
 		var p row
-		return p, sc.Scan(&p.id, &p.title, &p.markdown, &p.lang)
+		return p, sc.Scan(&p.id, &p.title, &p.description, &p.markdown, &p.lang)
 	})
 	if err != nil {
 		return err
@@ -310,7 +311,7 @@ func (r *Repo) RebuildIndex(ctx context.Context, derive func(title, markdown, la
 		}
 	}
 	for _, p := range pages {
-		if err := writeIndex(ctx, tx, p.id, derive(p.title, p.markdown, p.lang)); err != nil {
+		if err := writeIndex(ctx, tx, p.id, derive(p.title, p.description, p.markdown, p.lang)); err != nil {
 			return err
 		}
 	}

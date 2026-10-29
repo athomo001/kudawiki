@@ -285,6 +285,7 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .nav-item[aria-current='page'] { background: rgb(255 255 255 / 0.16); font-weight: 600; }
 .nav-item .icon { color: var(--kw-accent-muted); }
 .nav-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tree-emoji { flex: none; width: 15px; font-size: 0.8125rem; line-height: 1; text-align: center; }
 .nav-folder { color: var(--kw-accent-muted); }
 .tree { list-style: none; margin: 0; padding: 0; }
 .tree .tree .nav-item { padding-left: 2rem; }
@@ -305,6 +306,18 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .reader { display: flex; flex: 1; }
 .article { flex: 999 1 32.5rem; min-width: 0; max-width: 51.25rem; padding: 2.25rem 3rem 4rem; }
 .article > hr { margin: 0 0 0.5rem; }
+/* Descripción corta (§4.1) bajo el título, como en el mockup; también la del área en su inicio. */
+.lead { margin: 0 0 1.75rem; font-size: 1.0625rem; line-height: 1.55; color: var(--kw-text-muted); }
+.page-icon { margin-right: 0.5rem; }
+/* Anterior y siguiente entre hermanas, al pie del artículo. */
+.pager { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--kw-line); font-size: 0.875rem; }
+/* Enlace permanente por encabezado: aparece al pasar el mouse o con el foco del teclado. */
+.heading-anchor { margin-left: 0.5rem; color: var(--kw-text-muted); font-weight: 400; opacity: 0; }
+.heading-anchor:hover { text-decoration: none; }
+:is(h2, h3, h4):hover > .heading-anchor, .heading-anchor:focus-visible { opacity: 1; }
+.prose .children .child-note { color: var(--kw-text-muted); }
+.prose .children .child-note::before { content: '— '; }
+.page-info nav a[aria-current='location'] { color: var(--kw-link); font-weight: 500; }
 .article-badges { margin: 0 0 0.625rem; font-size: 0.8125rem; color: var(--kw-text-muted); }
 .article-badges.level-2 { color: var(--kw-level-n2); font-weight: 600; }
 .article-badges.level-3 { color: var(--kw-level-n3); font-weight: 600; }
@@ -378,8 +391,10 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   border-bottom: 1px solid var(--kw-line); background: var(--kw-bg-subtle); font-size: 0.875rem; color: var(--kw-text-muted);
 }
 .editor-bar label { display: flex; align-items: center; gap: 0.5rem; }
-.editor-tags { flex: 1 1 20rem; }
-.editor-tags input { flex: 1; }
+.editor-icon input { width: 3.5rem; text-align: center; }
+.editor-desc { flex: 2 1 18rem; }
+.editor-tags { flex: 1 1 14rem; }
+.editor-desc input, .editor-tags input { flex: 1; min-width: 0; }
 /* --kw-split lo pone el divisor (Editor.svelte): ancho del Markdown, del 20 al 80 %. */
 .editor-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--kw-split, 50%)) 0.5rem minmax(0, 1fr); }
 .editor-source { min-height: 0; overflow: auto; background: #fcfcfd; }
@@ -457,7 +472,7 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 
 /* ===== Impresión: solo el contenido ===== */
 @media print {
-  .topbar, .sidebar, .crumbs, .page-actions, .page-info { display: none; }
+  .topbar, .sidebar, .crumbs, .page-actions, .page-info, .pager, .heading-anchor { display: none; }
   .article { max-width: none; padding: 0; }
 }
 
@@ -515,6 +530,14 @@ mark { background: #fff1a8; color: inherit; }
 .results { margin: 0; padding-left: 1.25rem; }
 .results li { margin-bottom: 1.125rem; }
 .results .snippet { margin: 0.25rem 0 0; }
+.result-desc { margin: 0.125rem 0 0; color: var(--kw-text-soft); font-size: 0.9375rem; }
+.settings { max-width: 36rem; }
+/* Salud del contenido: la severidad con texto, no solo con color. */
+.health-summary { margin: 1rem 0; }
+.sev { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.sev-error { color: var(--kw-state-error); }
+.sev-warning { color: var(--kw-state-warning); }
+.settings textarea { width: 100%; resize: vertical; }
 .search-form input { flex: 1 1 24rem; }
 .search-section { margin-left: 0.375rem; color: var(--kw-text-soft); font-size: 0.875rem; }
 

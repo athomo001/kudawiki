@@ -130,6 +130,10 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/search-misses", "GET", "/api/w/ti/search-misses", "", 3, false, 200},
 		{"/api/w/{ws}/audit", "GET", "/api/w/ti/audit", "", 3, false, 200},
 		{"/api/w/{ws}/members/", "GET", "/api/w/ti/members", "", 3, false, 200},
+		{"/api/w/{ws}/settings", "GET", "/api/w/ti/settings", "", 3, false, 200},
+		{"/api/w/{ws}/health", "GET", "/api/w/ti/health", "", 3, false, 200},
+		// Con un nombre vacío valida y no cambia nada: la matriz no altera el área.
+		{"/api/w/{ws}/settings", "PATCH", "/api/w/ti/settings", `{"name":""}`, 3, false, 422},
 		{"/api/w/{ws}/members/", "POST", "/api/w/ti/members", `{"email":"x","role":"admin"}`, 3, false, 422},
 		{"/api/w/{ws}/members/{user_id}", "DELETE", "/api/w/ti/members/no-existe", "", 3, false, 204},
 		{"/api/w/{ws}/trash", "GET", "/api/w/ti/trash", "", 2, false, 200},
@@ -197,14 +201,14 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		covered[p.method+" "+p.route] = true
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
-	// en TestLoginMeLogout, TestPreferences, TestInviteFlow, TestInviteResend, TestAreaAdminLimits y TestRoutingFallbacks. Borrar
+	// en TestLoginMeLogout, TestPreferences, TestInviteFlow, TestInviteResend, TestHealthViews, TestAreaAdminLimits y TestRoutingFallbacks. Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
 	// del superadmin se prueba en TestAuditViews.
 	elsewhere := []string{
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
-		"GET /api/admin/users", "POST /api/admin/users", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces",
+		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces",
 		"GET /api/admin/workspaces/{id}/members/", "POST /api/admin/workspaces/{id}/members/",
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",
 	}

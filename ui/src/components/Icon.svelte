@@ -17,6 +17,9 @@
     list: 'M4 6h16M4 12h16M4 18h10',
     trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
     close: 'M6 6l12 12M18 6L6 18',
+    settings: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6',
+    print: 'M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z',
+    pulse: 'M3 12h4l3-7 4 14 3-7h4',
   };
   export type IconName = keyof typeof paths | 'more';
 </script>

@@ -31,6 +31,14 @@ type Config struct {
 	Audit struct {
 		RetentionDays int `yaml:"retention_days"`
 	} `yaml:"audit"`
+	// Backup: el respaldo automático, una vez al día a esa hora local, y cuántos se guardan
+	// (SPEC §13.3). El destino externo llega con F8.
+	Backup struct {
+		Time        string `yaml:"time"` // HH:MM
+		KeepDaily   int    `yaml:"keep_daily"`
+		KeepWeekly  int    `yaml:"keep_weekly"`
+		KeepMonthly int    `yaml:"keep_monthly"`
+	} `yaml:"backup"`
 }
 
 // AuditFloorDays es el piso de retención de la auditoría (SPEC §11.2): el superadmin es a quien
@@ -40,6 +48,13 @@ const AuditFloorDays = 180
 // DBPath y StorageDir siguen el layout de disco de SPEC §13.2.
 func (c Config) DBPath() string     { return filepath.Join(c.DataDir, "data", "wiki.db") }
 func (c Config) StorageDir() string { return filepath.Join(c.DataDir, "storage") }
+func (c Config) BackupDir() string  { return filepath.Join(c.DataDir, "backups") }
+
+// BackupAt es la hora y el minuto del respaldo diario (ya validados).
+func (c Config) BackupAt() (hour, minute int) {
+	t, _ := time.Parse("15:04", c.Backup.Time)
+	return t.Hour(), t.Minute()
+}
 
 // TrashRetention es cuánto queda algo en la papelera antes de la purga (SPEC §4.5).
 func (c Config) TrashRetention() time.Duration {
@@ -63,6 +78,8 @@ func Load(path string) (Config, error) {
 	c.Upload.MaxBytes = 25 << 20 // 25 MB (SPEC §4.4)
 	c.Trash.RetentionDays = 30   // SPEC §4.5
 	c.Audit.RetentionDays = 730  // 2 años (SPEC §11.1)
+	c.Backup.Time = "03:00"      // SPEC §13.3
+	c.Backup.KeepDaily, c.Backup.KeepWeekly, c.Backup.KeepMonthly = 7, 4, 6
 
 	explicit := path != ""
 	if !explicit {
@@ -83,6 +100,7 @@ func Load(path string) (Config, error) {
 		"KUDAWIKI_BASE_URL":        &c.BaseURL,
 		"KUDAWIKI_DATA_DIR":        &c.DataDir,
 		"KUDAWIKI_MASTER_KEY_FILE": &c.MasterKeyFile,
+		"KUDAWIKI_BACKUP_TIME":     &c.Backup.Time,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = v
@@ -124,6 +142,12 @@ func (c Config) IsLocal() bool {
 }
 
 func (c Config) validate() error {
+	if _, err := time.Parse("15:04", c.Backup.Time); err != nil {
+		return fmt.Errorf("backup.time must be HH:MM, got %q", c.Backup.Time)
+	}
+	if c.Backup.KeepDaily < 1 || c.Backup.KeepWeekly < 0 || c.Backup.KeepMonthly < 0 {
+		return errors.New("backup.keep_daily must be at least 1, and keep_weekly and keep_monthly not negative")
+	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("base_url must be an absolute http(s) URL, got %q", c.BaseURL)

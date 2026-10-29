@@ -27,9 +27,10 @@ func RoleRank(role string) int {
 }
 
 type Workspace struct {
-	ID   string
-	Slug string
-	Name string
+	ID          string
+	Slug        string
+	Name        string
+	Description string // la escribe el admin del área (§3.1)
 }
 
 // Membership es un área vista por uno de sus miembros.
@@ -50,9 +51,15 @@ func (r *Repo) CreateWorkspace(ctx context.Context, w Workspace) error {
 	return conflict(err)
 }
 
+// UpdateWorkspace cambia el nombre y la descripción del área del Scope (§3.1).
+func (r *Repo) UpdateWorkspace(ctx context.Context, s Scope, name, description string) error {
+	_, err := r.db.Write.ExecContext(ctx, `UPDATE workspaces SET name = ?, description = ? WHERE id = ?`, name, description, s.WsID)
+	return err
+}
+
 // ListWorkspaces y WorkspaceByID son del panel del superadmin, que administra áreas sin ser miembro.
 func (r *Repo) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
-	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, slug, name FROM workspaces ORDER BY name`)
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, slug, name, description FROM workspaces ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +67,12 @@ func (r *Repo) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 func (r *Repo) WorkspaceByID(ctx context.Context, id string) (Workspace, error) {
-	return scanWorkspace(r.db.Read.QueryRowContext(ctx, `SELECT id, slug, name FROM workspaces WHERE id = ?`, id))
+	return scanWorkspace(r.db.Read.QueryRowContext(ctx, `SELECT id, slug, name, description FROM workspaces WHERE id = ?`, id))
 }
 
 func scanWorkspace(row scanner) (Workspace, error) {
 	var w Workspace
-	err := row.Scan(&w.ID, &w.Slug, &w.Name)
+	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Workspace{}, ErrNotFound
 	}
@@ -76,7 +83,7 @@ func scanWorkspace(row scanner) (Workspace, error) {
 // membresía dan el mismo ErrNotFound, en una sola consulta, para que no se distingan (SPEC §3.3).
 func (r *Repo) MembershipBySlug(ctx context.Context, slug, userID string) (Membership, error) {
 	return scanMembership(r.db.Read.QueryRowContext(ctx,
-		`SELECT w.id, w.slug, w.name, m.role FROM workspaces w
+		`SELECT w.id, w.slug, w.name, w.description, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
 		 WHERE w.slug = ? AND m.user_id = ?`, slug, userID))
 }
@@ -84,7 +91,7 @@ func (r *Repo) MembershipBySlug(ctx context.Context, slug, userID string) (Membe
 // Memberships lista las áreas de una persona (para /auth/me).
 func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT w.id, w.slug, w.name, m.role FROM workspaces w
+		`SELECT w.id, w.slug, w.name, w.description, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
 		 WHERE m.user_id = ? ORDER BY w.name`, userID)
 	if err != nil {
@@ -95,7 +102,7 @@ func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, er
 
 func scanMembership(row scanner) (Membership, error) {
 	var m Membership
-	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Role)
+	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Membership{}, ErrNotFound
 	}
