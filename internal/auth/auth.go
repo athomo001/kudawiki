@@ -49,6 +49,11 @@ type store interface {
 	AcceptInvite(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
 	ReplaceInvite(ctx context.Context, userID string, t repo.AuthToken) error
 	SetPreferences(ctx context.Context, userID, locale string, prefs repo.ReadingPrefs) error
+	// Recuperación por consola (SPEC §13.6).
+	DeleteSessions(ctx context.Context, userID string) (int64, error)
+	SetPassword(ctx context.Context, userID, passwordHash string) error
+	UnlockLogin(ctx context.Context, userID string, at time.Time) error
+	LoginUnlockedAt(ctx context.Context, email string) (time.Time, error)
 }
 
 type Service struct {
@@ -95,6 +100,17 @@ func (s *Service) CreateSuperadmin(ctx context.Context, email, fullName, passwor
 func (s *Service) Login(ctx context.Context, ip, email, password string) (string, error) {
 	key := ip + "|" + strings.ToLower(strings.TrimSpace(email))
 	n, err := s.allow(key)
+	if errors.As(err, new(RateLimitedError)) {
+		// El bloqueo vive en la memoria de este proceso y `kudawiki admin unlock` corre en otro:
+		// deja la hora en la BD, y solo se consulta cuando hay bloqueo (SPEC §13.6).
+		at, uerr := s.store.LoginUnlockedAt(ctx, strings.TrimSpace(email))
+		if uerr != nil {
+			return "", uerr
+		}
+		if s.lift(key, at) {
+			n, err = s.allow(key)
+		}
+	}
 	if err != nil {
 		return "", err
 	}
@@ -179,6 +195,18 @@ func (s *Service) allow(key string) (int, error) {
 	a.count++
 	s.attempts[key] = a
 	return a.count, nil
+}
+
+// lift olvida la ventana de intentos si el desbloqueo por consola es posterior a su inicio.
+func (s *Service) lift(key string, unlockedAt time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.attempts[key]
+	if !ok || !unlockedAt.After(a.since) {
+		return false
+	}
+	delete(s.attempts, key)
+	return true
 }
 
 // Authenticate valida la sesión y devuelve su usuario. Una sesión vencida se borra al verla.

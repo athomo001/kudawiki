@@ -30,6 +30,7 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Post("/workspaces", a.createWorkspace)
 	r.Get("/audit", a.audit)
 	r.Get("/health", a.globalHealth)
+	a.siteAdminRoutes(r)
 	// El superadmin administra miembros sin ser miembro: el Scope sale del ID del área.
 	r.Route("/workspaces/{id}/members", func(r chi.Router) {
 		r.Use(a.adminScope)

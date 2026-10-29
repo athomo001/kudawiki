@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [svelte()],
   // Logo y favicon del producto (SPEC §15): se copian tal cual a dist/.
   publicDir: 'static',
-  server: { proxy: { '/api': 'http://localhost:8080' } },
+  server: { proxy: { '/api': 'http://localhost:8080', '/_site': 'http://localhost:8080' } },
   build: {
     // El editor (CodeMirror) y Mermaid se cargan aparte, solo cuando hacen falta.
     chunkSizeWarningLimit: 1500,

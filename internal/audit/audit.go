@@ -48,6 +48,15 @@ var (
 	PageRead         = Action{"page.read"}             // solo páginas N3 (§11.1)
 	PathUnavailable  = Action{"page.path_unavailable"} // §19.35
 	MediaUpload      = Action{"media.upload"}
+	// Recuperación por consola (§13.6): las corre quien tiene shell en el servidor.
+	CLIUnlock           = Action{"admin.cli_unlock"}
+	CLISetPassword      = Action{"admin.cli_set_password"}
+	CLICreateSuperadmin = Action{"admin.cli_create_superadmin"}
+	CLIRevokeSessions   = Action{"admin.cli_revoke_sessions"}
+	// Marca de la empresa (§15.1.5).
+	SiteBrandingUpdate = Action{"site.branding_update"}
+	SiteAssetUpload    = Action{"site.asset_upload"}
+	SiteAssetDelete    = Action{"site.asset_delete"}
 )
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
@@ -56,6 +65,8 @@ var All = []Action{
 	WsCreate, WsUpdate, BackupRun, WsMemberAdd, WsMemberRemove, WsMemberRole,
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
 	PageRead, PathUnavailable, MediaUpload,
+	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
+	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.

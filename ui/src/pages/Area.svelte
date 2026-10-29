@@ -13,6 +13,7 @@
   import Settings from './Settings.svelte';
   import Health from './Health.svelte';
   import NotFound from './NotFound.svelte';
+  import SiteFooter from '../components/SiteFooter.svelte';
 
   // Layout de área (SPEC §15): árbol a la izquierda y la vista según la ruta.
   let { area, sub, selfId, onareachanged }: { area: Area; sub: string; selfId: string; onareachanged: () => void } = $props();
@@ -161,6 +162,7 @@
         {/if}
       </div>
     {/if}
+    <SiteFooter />
   </main>
 </div>
 {/if}

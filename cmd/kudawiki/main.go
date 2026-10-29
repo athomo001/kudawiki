@@ -25,6 +25,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/backup"
+	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/config"
 	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
@@ -53,7 +54,12 @@ commands:
   restore      "restore <file>": verify a backup and put it in place; the server must be stopped
   doctor       check the content health (broken links, tree, media, search index);
                --ws <slug> for one area, --fix to rebuild the index and remove stray files
-               (with the server stopped). Exit 1 if there are errors`
+               (with the server stopped). Exit 1 if there are errors
+  admin        console recovery, for when no superadmin can get in (recorded in the audit log):
+                 admin unlock <email>                     lift the lockout after failed logins
+                 admin set-password <email>               password is prompted; closes their sessions
+                 admin create-superadmin <email> <name>   local emergency account; password is prompted
+                 admin revoke-sessions --all | <email>    close the sessions of everyone or of one person`
 
 func main() {
 	if len(os.Args) < 2 {
@@ -91,6 +97,8 @@ func main() {
 			err = runRestore(cfg, fs.Arg(0))
 		case "doctor":
 			err = runDoctor(ctx, cfg, *wsSlug, *fix)
+		case "admin":
+			err = runAdmin(ctx, cfg, fs.Args())
 		default:
 			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
@@ -119,16 +127,7 @@ func runInit(ctx context.Context, cfg config.Config, email, name string) error {
 	}
 	if err := initDB(ctx, cfg, email, name, password); err != nil {
 		os.Remove(cfg.MasterKeyFile)
-		// Mensaje legible: el código del error no le dice nada a quien instala.
-		switch {
-		case errors.Is(err, auth.ErrPasswordTooShort) && cfg.IsLocal():
-			return errors.New("password rejected: it cannot be empty")
-		case errors.Is(err, auth.ErrPasswordTooShort):
-			return fmt.Errorf("password rejected: it must have at least %d characters", auth.MinPasswordLength)
-		case errors.Is(err, auth.ErrPasswordCommon):
-			return errors.New("password rejected: it is in the list of common passwords, choose another")
-		}
-		return err
+		return consoleError(err, cfg)
 	}
 	if cfg.IsLocal() {
 		fmt.Println("warning: base_url is localhost, so the password policy was relaxed (development only)")
@@ -223,6 +222,12 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	}
 	base, _ := url.Parse(cfg.BaseURL) // validada en config.Load
 	files := media.NewService(store, rec, cfg.StorageDir(), cfg.Upload.MaxBytes)
+	b := cfg.Branding
+	brand, err := branding.NewService(store, rec, branding.Patch{Title: b.Title, Company: b.Company, ColorPrimary: b.ColorPrimary,
+		ColorHeader: b.ColorHeader, ColorSidebar: b.ColorSidebar, LoginMessage: b.LoginMessage, ShowPoweredBy: b.ShowPoweredBy})
+	if err != nil {
+		return err
+	}
 
 	// Los jobs terminan antes de cerrar la BD: este defer corre antes que el de db.Close.
 	jobCtx, stopJobs := context.WithCancel(ctx)
@@ -241,7 +246,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-			Media: files, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
+			Media: files, Branding: brand, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -483,6 +488,90 @@ func runDoctor(ctx context.Context, cfg config.Config, wsSlug string, fix bool) 
 		return errors.New("the content has errors")
 	}
 	return nil
+}
+
+// runAdmin es la recuperación por consola (SPEC §13.6). Escribe en la BD con el servidor
+// corriendo (SQLite serializa a los dos escritores) y queda en la auditoría como el sistema
+// "cli". El aviso a los superadmins llega con las notificaciones (F4).
+func runAdmin(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 {
+		return errUsageAdmin
+	}
+	if _, err := os.Stat(cfg.DBPath()); err != nil {
+		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if pending, err := db.Pending(ctx); err != nil {
+		return err
+	} else if len(pending) > 0 {
+		return errors.New("the database has pending migrations: start the server once to apply them")
+	}
+	store := repo.New(db)
+	svc, err := auth.NewService(store, audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil))), time.Now, cfg.IsLocal())
+	if err != nil {
+		return err
+	}
+	msg, err := adminCommand(ctx, svc, args)
+	if err != nil {
+		return consoleError(err, cfg)
+	}
+	fmt.Println(msg)
+	fmt.Println("recorded in the audit log")
+	return nil
+}
+
+var errUsageAdmin = errors.New("usage: kudawiki admin unlock <email> | set-password <email> | create-superadmin <email> <name> | revoke-sessions --all | <email>")
+
+// adminCommand corre un subcomando de `kudawiki admin` y devuelve qué decirle a quien opera.
+func adminCommand(ctx context.Context, svc *auth.Service, args []string) (string, error) {
+	cmd, email := args[0], args[1]
+	switch {
+	case cmd == "unlock" && len(args) == 2:
+		return email + " can log in again", svc.UnlockLogin(ctx, email)
+	case cmd == "set-password" && len(args) == 2:
+		password, err := readPassword()
+		if err != nil {
+			return "", err
+		}
+		return "password set for " + email + "; their sessions were closed", svc.SetPassword(ctx, email, password)
+	case cmd == "create-superadmin" && len(args) >= 3:
+		password, err := readPassword()
+		if err != nil {
+			return "", err
+		}
+		return "superadmin created: " + email, svc.CreateEmergencySuperadmin(ctx, email, strings.Join(args[2:], " "), password)
+	case cmd == "revoke-sessions" && len(args) == 2:
+		if email == "--all" {
+			email = ""
+		}
+		n, err := svc.RevokeSessions(ctx, email)
+		return fmt.Sprintf("sessions closed: %d", n), err
+	}
+	return "", errUsageAdmin
+}
+
+// consoleError traduce los errores de dominio a un mensaje legible: el código del error no le
+// dice nada a quien instala u opera.
+func consoleError(err error, cfg config.Config) error {
+	switch {
+	case errors.Is(err, repo.ErrNotFound):
+		return errors.New("there is no person with that email")
+	case errors.Is(err, auth.ErrEmailTaken):
+		return errors.New("that email already has an account: use `kudawiki admin set-password`")
+	case errors.Is(err, auth.ErrInvalidUser):
+		return errors.New("a valid email and a name are required")
+	case errors.Is(err, auth.ErrPasswordTooShort) && cfg.IsLocal():
+		return errors.New("password rejected: it cannot be empty")
+	case errors.Is(err, auth.ErrPasswordTooShort):
+		return fmt.Errorf("password rejected: it must have at least %d characters", auth.MinPasswordLength)
+	case errors.Is(err, auth.ErrPasswordCommon):
+		return errors.New("password rejected: it is in the list of common passwords, choose another")
+	}
+	return err
 }
 
 // doctorFix aplica los arreglos automáticos de §13.7 y deja lo demás para una persona.

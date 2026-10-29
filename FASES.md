@@ -9,7 +9,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F0](#f0--diseño-y-especificación) | Diseño y especificación | SPEC cerrado, mockups, logo | 🟡 |
 | [F1](#f1--esqueleto-m0) | Esqueleto (M0) | Binario que arranca y permite iniciar sesión | 🟡 |
 | [F2](#f2--wiki-con-aislamiento-m1) | Wiki con aislamiento (M1) | Wiki usable por áreas + tests de contención | ✅ |
-| [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | 🟡 |
+| [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | ✅ |
 | [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ⚪ |
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ⚪ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | ⚪ |
@@ -105,10 +105,12 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [x] Interfaz con el diseño aprobado (SPEC §15, ["Kudawiki — Interfaz"](https://claude.ai/artifact/VdzikVaZkB7LTc3ffJSTmu)): barra superior oscura, menú lateral azul con el árbol, migas de pan, columna derecha (índice, etiquetas, qué enlaza aquí, metadatos), columna de acciones de íconos, selector ES/EN y preferencias de lectura (`Aa`: OpenDyslexic, Atkinson, espaciado amplio; guardadas por usuario, fuentes embebidas). Se aplica a todas las pantallas que existen, también a las que no tienen mockup propio; lo de fases posteriores no aparece hasta su fase. *(F3.4: a, marco, lector, idioma, preferencias de lectura, fuentes y logo; b, editor, diff en el conflicto y dentro de la línea, ruta editable y divisor; c, resto de pantallas, sección y filtros de la búsqueda, reenviar invitaciones; d, descripción e ícono por página, configuración del área, extras del lector, atajos y favicon. El modo oscuro con conmutador espera su mockup, B4)*
 - [x] Backups automáticos, backup previo a migraciones, `restore`. También `migrate --dry-run`, no arrancar contra un esquema más nuevo y el rate limit en toda la API. *(F3.5; el destino externo y el cifrado del respaldo son de F8)*
 - [x] Salud del contenido (`kudawiki doctor` y la pantalla Salud): enlaces, árbol, media y búsqueda. *(Vigencia, sellados y propuestas se suman en F5, F7 y F4)*
-- [ ] Recuperación por consola.
-- [ ] Marca de la empresa: título, colores con contraste automático, logo y favicon con sus variantes, sin parpadeo (§15.1).
+- [x] Recuperación por consola (§13.6): `kudawiki admin unlock`, `set-password`, `create-superadmin` y `revoke-sessions`, auditados como evento del sistema `cli`. *(F3.6; `reset-2fa` llega con el 2FA en F6 y el aviso a los superadmins con las notificaciones en F4)*
+- [x] Marca de la empresa: título, colores con contraste automático, logo y favicon con sus variantes, sin parpadeo (§15.1). Pantalla **Administración → Apariencia** con vista previa en vivo, paletas sugeridas y "Restablecer a Kudawiki"; lo que fija el archivo de configuración gana y se ve bloqueado. *(F3.6; las variantes para el correo y la marca de agua llegan con F4 y F7, la vista oscura del panel con el modo oscuro (B4), y Apariencia, sin mockup propio, usa el marco y los formularios del diseño aprobado)*
 
 **Criterio de salida:** restaurar un backup en otra máquina y que `audit verify` pase; los tests de contención cubren los tres niveles; todas las pantallas siguen el diseño aprobado.
+
+**Cumplido el 2026-10-29.** Un respaldo restaurado en otra carpeta pasa `audit verify` (F3.5, `TestRestoredBackupPassesAuditVerify`), la matriz de contención cubre N1, N2 y N3 (F3.1) y todas las pantallas siguen el diseño aprobado (F3.4; Apariencia con el mismo marco). Pasaron a otras fases: syslog y exportación de la auditoría, destino externo y cifrado de los respaldos (F8); modo auditoría y `admin reset-2fa` (F6); modo oscuro con conmutador (B4, espera su mockup).
 
 ---
 

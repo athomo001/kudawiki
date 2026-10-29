@@ -94,3 +94,22 @@ func TestBackupSchedule(t *testing.T) {
 		t.Error("a bad backup.time was accepted")
 	}
 }
+
+// La marca del archivo queda presente (no nil) aunque esté vacía, y las variables ganan.
+func TestBranding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("branding:\n  title: Wiki ACME\n  company: \"\"\n  show_powered_by: false\n"), 0o600)
+	t.Setenv("KUDAWIKI_BRANDING_COLOR_PRIMARY", "#C8102E")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.Branding
+	if *b.Title != "Wiki ACME" || b.Company == nil || *b.Company != "" || *b.ShowPoweredBy || *b.ColorPrimary != "#C8102E" || b.ColorHeader != nil {
+		t.Errorf("branding = %+v", b)
+	}
+	t.Setenv("KUDAWIKI_BRANDING_SHOW_POWERED_BY", "quizás")
+	if _, err := Load(path); err == nil {
+		t.Error("want error for a bad boolean")
+	}
+}

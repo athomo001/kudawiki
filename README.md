@@ -64,7 +64,7 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F0 · Diseño y especificación | 🟡 En curso |
 | F1 · Esqueleto | 🟡 Falta el CI en GitHub |
 | F2 · Wiki con aislamiento | ✅ Hecha |
-| F3 · Niveles, auditoría y respaldos | 🟡 En curso |
+| F3 · Niveles, auditoría y respaldos | ✅ Hecha |
 | F4 · Propuestas y notificaciones | ⚪ Pendiente |
 | F5 · Espacio personal y vigencia | ⚪ Pendiente |
 | F6 · Identidad, AD y 2FA | ⚪ Pendiente |
@@ -102,6 +102,21 @@ docker compose up -d
 En otra máquina, se monta el archivo: `docker compose run --rm -v "$PWD/<archivo>.tar.zst:/restore.tar.zst:ro" kudawiki restore /restore.tar.zst`. Lo que había antes no se borra: queda en `/data/before-restore-<hora>`. Los respaldos viven en el mismo volumen que los datos: **copiarlos fuera del servidor es tarea de quien opera** hasta que llegue el destino externo (F8).
 
 Para revisar la salud del contenido (enlaces rotos, archivos que faltan, índice de búsqueda): `docker compose exec kudawiki /kudawiki doctor`, o la pantalla **Salud** del admin del área y del superadmin.
+
+### Marca de la empresa
+
+El título, los colores, el logo y el favicon se cambian en **Administración → Apariencia** (solo el superadmin), con vista previa antes de guardar. También se pueden fijar en `kudawiki.yaml` (`branding.title`, `branding.color_primary`…) o con `KUDAWIKI_BRANDING_*`; lo que esté ahí gana y el panel lo muestra bloqueado.
+
+### Si nadie puede entrar
+
+Con acceso al servidor, la consola resuelve los casos en que ningún superadmin puede iniciar sesión. Cada comando queda en la auditoría:
+
+```sh
+docker compose exec kudawiki /kudawiki admin unlock ana@acme.cl         # levanta el bloqueo por intentos fallidos
+docker compose exec kudawiki /kudawiki admin set-password ana@acme.cl   # pide la contraseña nueva y cierra sus sesiones
+docker compose exec kudawiki /kudawiki admin create-superadmin soporte@acme.cl "Soporte TI"   # cuenta de emergencia
+docker compose exec kudawiki /kudawiki admin revoke-sessions --all      # o un correo
+```
 
 Para desarrollar: `make test` (compila la UI con pnpm y corre los tests), `make lint`, `make audit`, y `make load` (prueba de carga con 50 000 páginas; deja el resultado en `docs/rendimiento.md`).
 

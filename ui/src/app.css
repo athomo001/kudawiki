@@ -1,11 +1,10 @@
-/* Tokens del diseño aprobado "Kudawiki — Interfaz" (SPEC §15). El color de la empresa (§15.1)
-   reemplaza a --kw-accent cuando llegue la marca; los componentes solo usan tokens.
-   Nada de estilos en línea: la CSP no los deja (§14.5). */
+/* Tokens del diseño aprobado "Kudawiki — Interfaz" (SPEC §15). La marca de la empresa (§15.1)
+   los reemplaza desde un <style> con nonce que arma el servidor (internal/branding): los
+   componentes solo usan tokens. Nada de estilos en línea: la CSP no los deja (§14.5). */
 :root {
   color-scheme: light dark;
   --kw-accent: #1d4f91; /* menú lateral, botón de editar y botones principales */
   --kw-on-accent: #fff;
-  --kw-accent-muted: #c9dbf3; /* textos secundarios sobre el acento */
   --kw-primary: var(--kw-accent);
   --kw-on-primary: var(--kw-on-accent);
   --kw-link: #1a5fb4;
@@ -28,15 +27,35 @@
   --kw-state-info: #1d4f91;
   --kw-level-n2: #9a4d00;
   --kw-level-n3: #9e1c3f;
-  --kw-level-on-accent: #ffd8a8; /* insignias N2/N3 dentro del menú lateral */
   --kw-focus-ring: #1a5fb4;
-  /* La barra superior es oscura con cualquier tema y cualquier marca. */
+  /* Menú lateral: el color principal, salvo que la empresa elija otro (§15.1.1). */
+  --kw-sidebar: var(--kw-accent);
+  --kw-on-sidebar: var(--kw-on-accent);
+  --kw-sidebar-muted: #c9dbf3; /* textos secundarios */
+  --kw-sidebar-hover: rgb(255 255 255 / 0.1);
+  --kw-sidebar-current: rgb(255 255 255 / 0.16); /* página actual y separadores */
+  --kw-sidebar-focus: #fff;
+  --kw-level-on-sidebar: #ffd8a8; /* insignias N2/N3 dentro del menú */
+  /* La barra superior es igual con cualquier tema; su color lo elige la empresa y el texto se
+     ajusta solo por contraste (§15.1.2). */
   --kw-topbar-bg: #15171c;
   --kw-topbar-text: #e8eaed;
   --kw-topbar-muted: #9aa0a6;
   --kw-topbar-line: #3a3f47;
   --kw-topbar-field: #23262d;
   --kw-topbar-field-line: #343941;
+  --kw-topbar-strong-line: #454b54;
+  --kw-topbar-hover: rgb(255 255 255 / 0.1);
+  --kw-topbar-focus: #8ab4f8;
+  --kw-topbar-brand: #fff;
+  --kw-topbar-action: #3b82f6; /* Guardar en la cabecera del editor */
+  --kw-topbar-action-hover: #2f6fd8;
+  --kw-on-topbar-action: #fff;
+  /* Logo de Kudawiki sobre la barra: spec/logo/kudawiki-logo-oscuro.svg */
+  --kw-topbar-logo-back: #3d5f8f;
+  --kw-topbar-logo-mid: #3b82f6;
+  --kw-topbar-logo-front: #6ea8fe;
+  --kw-topbar-logo-k: #15171c;
   /* Editor: colores del Markdown y de CodeMirror (lib/editor.ts) */
   --kw-md-heading: #1d4f91;
   --kw-md-mark: #8a6d00;
@@ -86,8 +105,10 @@
     --kw-logo-k: #15171c;
   }
 }
-/* spec/logo/kudawiki-logo-oscuro.svg */
-.topbar { --kw-logo-back: #3d5f8f; --kw-logo-mid: #3b82f6; --kw-logo-front: #6ea8fe; --kw-logo-k: #15171c; }
+.topbar {
+  --kw-logo-back: var(--kw-topbar-logo-back); --kw-logo-mid: var(--kw-topbar-logo-mid);
+  --kw-logo-front: var(--kw-topbar-logo-front); --kw-logo-k: var(--kw-topbar-logo-k);
+}
 .logo .logo-back { fill: var(--kw-logo-back); }
 .logo .logo-mid { fill: var(--kw-logo-mid); }
 .logo .logo-front { fill: var(--kw-logo-front); }
@@ -164,6 +185,8 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 .login label { margin-top: 0.75rem; font-weight: 600; font-size: 0.875rem; }
 .login input { min-height: 2.5rem; font-size: 1rem; }
 .login .primary { min-height: 2.5rem; font-size: 0.9375rem; }
+/* Aviso de uso de la empresa (§15.1.1): texto plano, respeta los saltos de línea. */
+.login-message { margin-top: 2rem; white-space: pre-line; color: var(--kw-text-muted); font-size: 0.875rem; }
 
 .inline { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
 .inline label { display: grid; gap: 0.25rem; font-weight: 600; font-size: 0.875rem; }
@@ -183,15 +206,18 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   min-height: 3.5rem; padding: 0.5rem 1rem;
   background: var(--kw-topbar-bg); color: var(--kw-topbar-text);
 }
-.topbar :focus-visible { outline-color: #8ab4f8; }
-.brand { display: flex; align-items: center; gap: 0.625rem; color: #fff; font-weight: 600; font-size: 1.0625rem; letter-spacing: -0.01em; }
-.brand:hover { color: #fff; text-decoration: none; }
+.topbar :focus-visible { outline-color: var(--kw-topbar-focus); }
+.brand { display: flex; align-items: center; gap: 0.625rem; color: var(--kw-topbar-brand); font-weight: 600; font-size: 1.0625rem; letter-spacing: -0.01em; }
+.brand:hover { color: var(--kw-topbar-brand); text-decoration: none; }
+/* Logo de la empresa: 32 px de alto en la barra (§15.1.3), sin deformarse. */
+.brand-logo { display: block; height: 2rem; width: auto; max-width: 12rem; object-fit: contain; }
+.login-brand .brand-logo { height: 2.5rem; max-width: 16rem; }
 .topbar-muted { color: var(--kw-topbar-muted); }
 .topbar-btn {
   display: flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0.25rem 0.5rem;
   border: 0; border-radius: 6px; background: transparent; color: var(--kw-topbar-text); font-size: 0.875rem;
 }
-.topbar-btn:hover, .topbar-btn[aria-expanded='true'] { background: rgb(255 255 255 / 0.1); }
+.topbar-btn:hover, .topbar-btn[aria-expanded='true'] { background: var(--kw-topbar-hover); }
 .topbar-icon { width: 2.5rem; justify-content: center; font-size: 0.9375rem; font-weight: 600; }
 .area-switch { min-height: 2.25rem; padding: 0.375rem 0.625rem; border: 1px solid var(--kw-topbar-line); }
 .topbar-search { flex: 1 1 17.5rem; display: flex; justify-content: center; }
@@ -211,7 +237,7 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   color: var(--kw-topbar-muted); font-size: 0.875rem; text-align: left;
 }
 .search-trigger span { flex: 1; }
-.search-trigger kbd { border-color: #454b54; background: transparent; color: var(--kw-topbar-muted); font-size: 0.75rem; }
+.search-trigger kbd { border-color: var(--kw-topbar-strong-line); background: transparent; color: var(--kw-topbar-muted); font-size: 0.75rem; }
 
 /* ===== Menús desplegables ===== */
 .dropdown { position: relative; }
@@ -270,28 +296,28 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .area { display: flex; min-height: calc(100vh - 3.5rem); }
 .sidebar {
   flex: 0 0 17.5rem; padding: 1rem 0 1.5rem;
-  background: var(--kw-accent); color: var(--kw-on-accent); font-size: 0.875rem;
+  background: var(--kw-sidebar); color: var(--kw-on-sidebar); font-size: 0.875rem;
 }
-.sidebar hr { margin: 0.625rem 1rem; background: rgb(255 255 255 / 0.16); }
+.sidebar hr { margin: 0.625rem 1rem; background: var(--kw-sidebar-current); }
 .sidebar-head { display: flex; align-items: center; justify-content: space-between; padding: 0 0.5rem 0.75rem 1rem; }
-.sidebar-title { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--kw-accent-muted); }
-.sidebar-icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 6px; color: var(--kw-on-accent); }
-.sidebar :focus-visible { outline-color: #fff; outline-offset: -2px; }
+.sidebar-title { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--kw-sidebar-muted); }
+.sidebar-icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 6px; color: var(--kw-on-sidebar); }
+.sidebar :focus-visible { outline-color: var(--kw-sidebar-focus); outline-offset: -2px; }
 .nav-item {
-  display: flex; align-items: center; gap: 0.5rem; padding: 0.375rem 1rem; color: var(--kw-on-accent); font-size: 0.875rem;
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.375rem 1rem; color: var(--kw-on-sidebar); font-size: 0.875rem;
 }
 .sidebar > .nav-item { padding-block: 0.5rem; font-size: 0.90625rem; }
-.sidebar a:hover, .sidebar-icon:hover { background: rgb(255 255 255 / 0.1); color: var(--kw-on-accent); text-decoration: none; }
-.nav-item[aria-current='page'] { background: rgb(255 255 255 / 0.16); font-weight: 600; }
-.nav-item .icon { color: var(--kw-accent-muted); }
+.sidebar a:hover, .sidebar-icon:hover { background: var(--kw-sidebar-hover); color: var(--kw-on-sidebar); text-decoration: none; }
+.nav-item[aria-current='page'] { background: var(--kw-sidebar-current); font-weight: 600; }
+.nav-item .icon { color: var(--kw-sidebar-muted); }
 .nav-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tree-emoji { flex: none; width: 15px; font-size: 0.8125rem; line-height: 1; text-align: center; }
-.nav-folder { color: var(--kw-accent-muted); }
+.nav-folder { color: var(--kw-sidebar-muted); }
 .tree { list-style: none; margin: 0; padding: 0; }
 .tree .tree .nav-item { padding-left: 2rem; }
 .tree .tree .tree .nav-item { padding-left: 3rem; }
 .tree .tree .tree .tree .nav-item { padding-left: 4rem; }
-.sidebar .level { color: var(--kw-level-on-accent); }
+.sidebar .level { color: var(--kw-level-on-sidebar); }
 
 .area-main { flex: 1 1 35rem; min-width: 0; display: flex; flex-direction: column; }
 
@@ -369,11 +395,11 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; min-height: 3.5rem; padding: 0.625rem 1rem;
   background: var(--kw-topbar-bg); color: var(--kw-topbar-text);
 }
-.editor-head :focus-visible { outline-color: #8ab4f8; }
+.editor-head :focus-visible { outline-color: var(--kw-topbar-focus); }
 .editor-back { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 6px; color: var(--kw-topbar-text); }
-.editor-back:hover { background: rgb(255 255 255 / 0.1); color: var(--kw-topbar-text); }
+.editor-back:hover { background: var(--kw-topbar-hover); color: var(--kw-topbar-text); }
 .editor-title { flex: 1 1 20rem; min-width: 0; display: grid; gap: 0.125rem; }
-.title-input, .slug-input { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: #fff; }
+.title-input, .slug-input { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--kw-topbar-brand); }
 .title-input { width: 100%; font-size: 1.0625rem; font-weight: 600; }
 .title-input::placeholder { color: var(--kw-topbar-muted); }
 .editor-path { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; font-size: 0.78125rem; color: var(--kw-topbar-muted); }
@@ -381,11 +407,11 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .slug-input { max-width: 100%; font-size: 0.78125rem; color: var(--kw-topbar-text); border-bottom: 1px dashed var(--kw-topbar-line); }
 .editor-btn {
   display: inline-flex; align-items: center; min-height: 2.25rem; padding: 0 0.875rem; border-radius: 6px;
-  border: 1px solid #454b54; background: transparent; color: var(--kw-topbar-text); font-size: 0.875rem;
+  border: 1px solid var(--kw-topbar-strong-line); background: transparent; color: var(--kw-topbar-text); font-size: 0.875rem;
 }
-.editor-btn:hover { background: rgb(255 255 255 / 0.1); color: var(--kw-topbar-text); text-decoration: none; }
-.editor-save { border: 0; padding: 0 1rem; background: #3b82f6; color: #fff; font-weight: 500; }
-.editor-save:hover { background: #2f6fd8; }
+.editor-btn:hover { background: var(--kw-topbar-hover); color: var(--kw-topbar-text); text-decoration: none; }
+.editor-save { border: 0; padding: 0 1rem; background: var(--kw-topbar-action); color: var(--kw-on-topbar-action); font-weight: 500; }
+.editor-save:hover { background: var(--kw-topbar-action-hover); }
 .editor-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; padding: 0.375rem 0.75rem;
   border-bottom: 1px solid var(--kw-line); background: var(--kw-bg-subtle); font-size: 0.875rem; color: var(--kw-text-muted);
@@ -467,13 +493,15 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
   .article, .view { padding: 1.5rem 1.25rem 3rem; }
   .article { flex-basis: 100%; }
   .page-info { padding: 0 1.25rem 2rem; }
-  .crumbs, .error.banner { padding-inline: 1.25rem; }
+  .crumbs, .error.banner, .site-footer { padding-inline: 1.25rem; }
 }
 
 /* ===== Impresión: solo el contenido ===== */
 @media print {
   .topbar, .sidebar, .crumbs, .page-actions, .page-info, .pager, .heading-anchor { display: none; }
   .article { max-width: none; padding: 0; }
+  .print-only { display: inline; }
+  .site-footer { padding-inline: 0; }
 }
 
 /* ===== Extensiones de Markdown (SPEC §4.10) ===== */
@@ -565,3 +593,54 @@ mark { background: #fff1a8; color: inherit; }
 .level-3 { color: var(--kw-level-n3); }
 .access { list-style: none; padding: 0; margin-top: 1rem; display: grid; gap: 0.375rem; }
 .access li.denied { color: var(--kw-text-muted); }
+
+/* ===== Marca de la empresa (SPEC §15.1) ===== */
+/* Pie discreto: la empresa y "Con Kudawiki". Al imprimir suma el título de la wiki. */
+.site-footer {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25rem 1.25rem; margin-top: auto;
+  padding: 1.5rem 3rem; color: var(--kw-text-muted); font-size: 0.8125rem;
+}
+.print-only { display: none; }
+
+/* Administración → Apariencia */
+.appearance { max-width: 44rem; }
+.appearance h2 { margin: 1.5rem 0 0; }
+.appearance fieldset { margin: 0; padding: 0; border: 0; }
+.check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+.color-field { display: flex; align-items: center; gap: 0.5rem; }
+.color-field input[type='color'] { width: 2.75rem; padding: 0.125rem; cursor: pointer; }
+.color-field input[type='text'] { width: 7rem; font-family: var(--kw-font-mono); }
+.palettes { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.palettes .secondary { display: flex; align-items: center; gap: 0.375rem; }
+.swatch { width: 1rem; height: 1rem; border-radius: 3px; border: 1px solid rgb(0 0 0 / 0.15); }
+.swatch + .swatch { margin-left: -0.375rem; }
+/* Vista previa: barra, menú y página en miniatura, con las variables de la paleta propuesta. */
+.brand-preview { border: 1px solid var(--kw-line); border-radius: 8px; overflow: hidden; font-size: 0.875rem; }
+.brand-preview-bar {
+  --kw-logo-back: var(--kw-topbar-logo-back); --kw-logo-mid: var(--kw-topbar-logo-mid);
+  --kw-logo-front: var(--kw-topbar-logo-front); --kw-logo-k: var(--kw-topbar-logo-k);
+  display: flex; align-items: center; gap: 0.5rem; height: 3rem; padding: 0 1rem;
+  background: var(--kw-topbar-bg); color: var(--kw-topbar-brand); font-weight: 600;
+}
+.brand-preview-bar .brand-logo { height: 1.5rem; max-width: 9rem; }
+.brand-preview-muted { margin-left: auto; color: var(--kw-topbar-muted); font-weight: 400; }
+.brand-preview-body { display: flex; min-height: 9rem; }
+.brand-preview-side { flex: 0 0 11rem; padding: 0.625rem 0; background: var(--kw-sidebar); color: var(--kw-on-sidebar); }
+.brand-preview-side > span { display: block; padding: 0.375rem 1rem; }
+.brand-preview-side .current { background: var(--kw-sidebar-current); font-weight: 600; }
+.brand-preview-side .level { color: var(--kw-level-on-sidebar); font-size: 0.6875rem; font-weight: 600; }
+.brand-preview-main { flex: 1; padding: 1rem 1.25rem; background: var(--kw-bg); }
+.brand-preview-link { color: var(--kw-link); text-decoration: underline; }
+.brand-preview-button {
+  display: inline-block; padding: 0.375rem 0.875rem; border-radius: 6px;
+  background: var(--kw-accent); color: var(--kw-on-accent); font-weight: 500;
+}
+.asset { display: flex; flex-wrap: wrap; gap: 1rem 1.25rem; align-items: flex-start; padding: 1rem 0; border-bottom: 1px solid var(--kw-line); }
+.asset .field { flex: 1 1 18rem; }
+.asset-view {
+  flex: 0 0 9rem; display: grid; place-items: center; min-height: 3.5rem; padding: 0.5rem;
+  border-radius: 6px; background: var(--kw-bg-subtle); color: var(--kw-text-muted);
+}
+/* El logo para fondo oscuro se muestra sobre la barra oscura de Kudawiki. */
+.asset-view.dark { background: #15171c; color: #9aa0a6; }
+.asset-view img { max-width: 100%; max-height: 2.5rem; }

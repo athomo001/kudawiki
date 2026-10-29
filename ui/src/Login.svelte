@@ -1,7 +1,8 @@
 <script lang="ts">
   import { api, codeOf } from './lib/api';
   import { t, errorText } from './lib/i18n/index.svelte';
-  import Logo from './components/Logo.svelte';
+  import Brand from './components/Brand.svelte';
+  import { site } from './lib/site.svelte';
 
   let { onlogin }: { onlogin: () => void } = $props();
 
@@ -27,7 +28,7 @@
 </script>
 
 <main class="login">
-  <p class="login-brand"><Logo size={40} /> {t('app.name')}</p>
+  <p class="login-brand"><Brand size={40} /></p>
   <h1>{t('auth.login')}</h1>
   <form onsubmit={submit} aria-describedby={error ? 'login-error' : undefined}>
     <label for="email">{t('auth.email')}</label>
@@ -42,4 +43,6 @@
       {busy ? t('auth.logging_in') : t('auth.login')}
     </button>
   </form>
+  <!-- Aviso de uso de la empresa (§15.1.1): texto plano, nunca HTML. -->
+  {#if site.login_message}<p class="login-message">{site.login_message}</p>{/if}
 </main>

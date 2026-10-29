@@ -167,3 +167,55 @@ func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := r.db.Write.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, tokenHash)
 	return err
 }
+
+// DeleteSessions cierra las sesiones de una persona, o las de todos si userID está vacío
+// (SPEC §13.6). Devuelve cuántas cerró.
+func (r *Repo) DeleteSessions(ctx context.Context, userID string) (int64, error) {
+	res, err := r.db.Write.ExecContext(ctx, `DELETE FROM sessions WHERE ? = '' OR user_id = ?`, userID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SetPassword fija la contraseña de una persona desde la consola (SPEC §13.6). Como al
+// restablecerla (§8.5.1), en la misma transacción se cierran sus sesiones y se anulan sus
+// enlaces sin usar: una invitación pendiente ya no sirve para elegir otra.
+func (r *Repo) SetPassword(ctx context.Context, userID, passwordHash string) error {
+	tx, err := r.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users SET password_hash = ?, invited_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, passwordHash, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	for _, q := range []string{`DELETE FROM auth_tokens WHERE user_id = ? AND used_at IS NULL`, `DELETE FROM sessions WHERE user_id = ?`} {
+		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// UnlockLogin deja la hora del desbloqueo (SPEC §13.6); el servidor la lee al ver el bloqueo.
+func (r *Repo) UnlockLogin(ctx context.Context, userID string, at time.Time) error {
+	_, err := r.db.Write.ExecContext(ctx, `UPDATE users SET login_unlocked_at = ? WHERE id = ?`, at.UTC(), userID)
+	return err
+}
+
+// LoginUnlockedAt es la hora del último desbloqueo por consola; cero si nunca hubo uno o si el
+// email no existe.
+func (r *Repo) LoginUnlockedAt(ctx context.Context, email string) (time.Time, error) {
+	var at sql.NullTime
+	err := r.db.Read.QueryRowContext(ctx, `SELECT login_unlocked_at FROM users WHERE email = ?`, email).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	return at.Time, err
+}

@@ -201,7 +201,8 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		covered[p.method+" "+p.route] = true
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
-	// en TestLoginMeLogout, TestPreferences, TestInviteFlow, TestInviteResend, TestHealthViews, TestAreaAdminLimits y TestRoutingFallbacks. Borrar
+	// en TestLoginMeLogout, TestPreferences, TestInviteFlow, TestInviteResend, TestHealthViews, TestAreaAdminLimits,
+	// TestRoutingFallbacks y TestBranding (la marca es de la instalación, no de un área). Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
 	// del superadmin se prueba en TestAuditViews.
 	elsewhere := []string{
@@ -211,6 +212,8 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces",
 		"GET /api/admin/workspaces/{id}/members/", "POST /api/admin/workspaces/{id}/members/",
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",
+		"GET /api/admin/site", "PATCH /api/admin/site", "POST /api/admin/site/preview",
+		"PUT /api/admin/site/assets/{kind}", "DELETE /api/admin/site/assets/{kind}", "GET /_site/{name}",
 	}
 	err := chi.Walk(f.h.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		key := method + " " + route

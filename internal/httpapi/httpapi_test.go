@@ -19,6 +19,7 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
+	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/media"
@@ -56,9 +57,13 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	}
 	base, _ := url.Parse(origin)
 	storage := t.TempDir()
+	brand, err := branding.NewService(store, rec, branding.Patch{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-		Media: media.NewService(store, rec, storage, 1<<20), Read: store, DB: db, StorageDir: storage,
-		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head></head>app")}},
+		Media: media.NewService(store, rec, storage, 1<<20), Branding: brand, Read: store, DB: db, StorageDir: storage,
+		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
 	hash, _ := auth.HashPassword(password)

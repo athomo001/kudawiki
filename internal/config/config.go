@@ -39,6 +39,17 @@ type Config struct {
 		KeepWeekly  int    `yaml:"keep_weekly"`
 		KeepMonthly int    `yaml:"keep_monthly"`
 	} `yaml:"backup"`
+	// Branding: la marca de la empresa (SPEC §15.1). Lo que esté aquí gana sobre el panel y se
+	// muestra bloqueado; nil es "no está en el archivo". La valida el paquete branding.
+	Branding struct {
+		Title         *string `yaml:"title"`
+		Company       *string `yaml:"company"`
+		ColorPrimary  *string `yaml:"color_primary"`
+		ColorHeader   *string `yaml:"color_header"`
+		ColorSidebar  *string `yaml:"color_sidebar"`
+		LoginMessage  *string `yaml:"login_message"`
+		ShowPoweredBy *bool   `yaml:"show_powered_by"`
+	} `yaml:"branding"`
 }
 
 // AuditFloorDays es el piso de retención de la auditoría (SPEC §11.2): el superadmin es a quien
@@ -105,6 +116,25 @@ func Load(path string) (Config, error) {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = v
 		}
+	}
+	for env, dst := range map[string]**string{
+		"KUDAWIKI_BRANDING_TITLE":         &c.Branding.Title,
+		"KUDAWIKI_BRANDING_COMPANY":       &c.Branding.Company,
+		"KUDAWIKI_BRANDING_COLOR_PRIMARY": &c.Branding.ColorPrimary,
+		"KUDAWIKI_BRANDING_COLOR_HEADER":  &c.Branding.ColorHeader,
+		"KUDAWIKI_BRANDING_COLOR_SIDEBAR": &c.Branding.ColorSidebar,
+		"KUDAWIKI_BRANDING_LOGIN_MESSAGE": &c.Branding.LoginMessage,
+	} {
+		if v, ok := os.LookupEnv(env); ok {
+			*dst = &v
+		}
+	}
+	if v, ok := os.LookupEnv("KUDAWIKI_BRANDING_SHOW_POWERED_BY"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_BRANDING_SHOW_POWERED_BY: %w", err)
+		}
+		c.Branding.ShowPoweredBy = &b
 	}
 	if v, ok := os.LookupEnv("KUDAWIKI_UPLOAD_MAX_BYTES"); ok {
 		n, err := strconv.ParseInt(v, 10, 64)

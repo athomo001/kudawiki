@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, codeOf } from '../lib/api';
   import { t, errorText } from '../lib/i18n/index.svelte';
-  import Logo from '../components/Logo.svelte';
+  import Brand from '../components/Brand.svelte';
 
   // El token viaja en el fragmento (#), que nunca llega al servidor; se saca de la barra de
   // direcciones apenas se lee, para que no quede en el historial (SPEC §8.5).
@@ -34,7 +34,7 @@
 </script>
 
 <main class="login">
-  <p class="login-brand"><Logo size={40} /> {t('app.name')}</p>
+  <p class="login-brand"><Brand size={40} /></p>
   <h1>{t('invite.title')}</h1>
   {#if done}
     <p role="status">{t('invite.done')}</p>

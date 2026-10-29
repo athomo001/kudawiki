@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Area, Me, ReadingPrefs } from '../lib/api';
   import { t, locale } from '../lib/i18n/index.svelte';
-  import Logo from './Logo.svelte';
+  import Brand from './Brand.svelte';
   import Icon from './Icon.svelte';
   import Dropdown from './Dropdown.svelte';
   import SearchBox from './SearchBox.svelte';
@@ -32,7 +32,7 @@
 </script>
 
 <header class="topbar">
-  <a class="brand" href="/"><Logo /> {t('app.name')}</a>
+  <a class="brand" href="/"><Brand onBar /></a>
 
   {#if me.workspaces.length}
     <Dropdown label={t('nav.areas_menu')} class="topbar-btn area-switch" align="start">
@@ -99,6 +99,7 @@
             <li><a href="/admin">{t('nav.admin')}</a></li>
             <li><a href="/admin/audit">{t('audit.title')}</a></li>
             <li><a href="/admin/health">{t('health.short')}</a></li>
+            <li><a href="/admin/appearance">{t('appearance.title')}</a></li>
           </ul>
         {/if}
         <button type="button" class="menu-item" onclick={onlogout}>{t('auth.logout')}</button>

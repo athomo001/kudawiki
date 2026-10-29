@@ -22,6 +22,7 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
+	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/repo"
@@ -101,6 +102,15 @@ type reader interface {
 	OrphanIndexRows(ctx context.Context) (int, error)
 }
 
+// brandingService es la marca de la empresa (SPEC §15.1).
+type brandingService interface {
+	Site(ctx context.Context) (branding.Site, error)
+	Update(ctx context.Context, actorID string, p branding.Patch) (branding.Site, error)
+	Upload(ctx context.Context, actorID, kind string, data []byte) ([]branding.Warning, error)
+	DeleteAsset(ctx context.Context, kind string) error
+	File(ctx context.Context, name string) (repo.SiteAsset, error)
+}
+
 type readiness interface {
 	Ready(ctx context.Context) error
 }
@@ -110,6 +120,7 @@ type Deps struct {
 	Workspaces workspaceService
 	Wiki       wikiService
 	Media      mediaService
+	Branding   brandingService
 	Read       reader
 	DB         readiness
 	UI         fs.FS // contenido de ui/dist
@@ -161,6 +172,7 @@ func New(d Deps) http.Handler {
 		r.NotFound(a.notFound)
 	})
 
+	r.Get("/_site/{name}", a.siteFile)
 	r.Get("/*", a.spa)
 	return r
 }
@@ -214,10 +226,16 @@ func (a api) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce := base64.RawStdEncoding.EncodeToString(raw)
+	site, err := a.Branding.Site(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", middleware.CSP(nonce))
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store") // el nonce no se puede reusar desde una cache
+	page = brandPage(page, site, nonce)
 	w.Write(bytes.Replace(page, []byte("<head>"), []byte(`<head><meta name="csp-nonce" content="`+nonce+`">`), 1))
 }
 
@@ -254,29 +272,33 @@ func (a api) error(w http.ResponseWriter, r *http.Request, status int, code stri
 
 // domainErrors: el texto de cada error de dominio es su código estable.
 var domainErrors = map[error]int{
-	auth.ErrInvalidCredentials: http.StatusUnauthorized,
-	auth.ErrPasswordTooShort:   http.StatusUnprocessableEntity,
-	auth.ErrPasswordCommon:     http.StatusUnprocessableEntity,
-	auth.ErrInvalidUser:        http.StatusUnprocessableEntity,
-	auth.ErrEmailTaken:         http.StatusConflict,
-	auth.ErrInvalidInvite:      http.StatusGone,
-	auth.ErrNotInvited:         http.StatusConflict,
-	auth.ErrInvalidPreferences: http.StatusUnprocessableEntity,
-	workspace.ErrInvalidArea:   http.StatusUnprocessableEntity,
-	workspace.ErrSlugTaken:     http.StatusConflict,
-	workspace.ErrInvalidRole:   http.StatusUnprocessableEntity,
-	workspace.ErrUserNotFound:  http.StatusUnprocessableEntity,
-	workspace.ErrForbidden:     http.StatusForbidden,
-	wiki.ErrInvalidPage:        http.StatusUnprocessableEntity,
-	wiki.ErrInvalidInfo:        http.StatusUnprocessableEntity,
-	wiki.ErrConflict:           http.StatusConflict,
-	wiki.ErrPathUnavailable:    http.StatusConflict,
-	wiki.ErrInvalidTags:        http.StatusUnprocessableEntity,
-	wiki.ErrInvalidMove:        http.StatusUnprocessableEntity,
-	wiki.ErrInvalidLevel:       http.StatusUnprocessableEntity,
-	wiki.ErrLevelBelowParent:   http.StatusUnprocessableEntity,
-	media.ErrTooLarge:          http.StatusRequestEntityTooLarge,
-	media.ErrUnsupportedType:   http.StatusUnsupportedMediaType,
+	auth.ErrInvalidCredentials:  http.StatusUnauthorized,
+	auth.ErrPasswordTooShort:    http.StatusUnprocessableEntity,
+	auth.ErrPasswordCommon:      http.StatusUnprocessableEntity,
+	auth.ErrInvalidUser:         http.StatusUnprocessableEntity,
+	auth.ErrEmailTaken:          http.StatusConflict,
+	auth.ErrInvalidInvite:       http.StatusGone,
+	auth.ErrNotInvited:          http.StatusConflict,
+	auth.ErrInvalidPreferences:  http.StatusUnprocessableEntity,
+	workspace.ErrInvalidArea:    http.StatusUnprocessableEntity,
+	workspace.ErrSlugTaken:      http.StatusConflict,
+	workspace.ErrInvalidRole:    http.StatusUnprocessableEntity,
+	workspace.ErrUserNotFound:   http.StatusUnprocessableEntity,
+	workspace.ErrForbidden:      http.StatusForbidden,
+	wiki.ErrInvalidPage:         http.StatusUnprocessableEntity,
+	wiki.ErrInvalidInfo:         http.StatusUnprocessableEntity,
+	wiki.ErrConflict:            http.StatusConflict,
+	wiki.ErrPathUnavailable:     http.StatusConflict,
+	wiki.ErrInvalidTags:         http.StatusUnprocessableEntity,
+	wiki.ErrInvalidMove:         http.StatusUnprocessableEntity,
+	wiki.ErrInvalidLevel:        http.StatusUnprocessableEntity,
+	wiki.ErrLevelBelowParent:    http.StatusUnprocessableEntity,
+	media.ErrTooLarge:           http.StatusRequestEntityTooLarge,
+	media.ErrUnsupportedType:    http.StatusUnsupportedMediaType,
+	branding.ErrInvalid:         http.StatusUnprocessableEntity,
+	branding.ErrLocked:          http.StatusConflict,
+	branding.ErrTooLarge:        http.StatusRequestEntityTooLarge,
+	branding.ErrUnsupportedType: http.StatusUnsupportedMediaType,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.

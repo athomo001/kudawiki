@@ -10,6 +10,7 @@
   import { remember } from '../components/SearchBox.svelte';
   import { shortcuts } from '../lib/shortcuts';
   import NotFound from './NotFound.svelte';
+  import { setDocumentTitle } from '../lib/site.svelte';
 
   // refs: el árbol del área, para anterior/siguiente entre hermanas (§15).
   let { area, slug, refs, onmoved }: { area: Area; slug: string; refs: PageRef[]; onmoved: () => void } = $props();
@@ -98,6 +99,12 @@
     const list = refs.filter((r) => r.slug.startsWith(parent) && !r.slug.slice(parent.length).includes('/'));
     const i = list.findIndex((r) => r.slug === page?.slug);
     return { prev: i > 0 ? list[i - 1] : undefined, next: i >= 0 ? list[i + 1] : undefined };
+  });
+
+  // La pestaña dice qué se lee (§15.1.1); al salir de la página vuelve al título de la wiki.
+  $effect(() => {
+    if (page) setDocumentTitle(page.title);
+    return () => setDocumentTitle();
   });
 
   // Con #ancla (p. ej. desde la búsqueda, §9.4) se salta a esa sección cuando el contenido ya está.
