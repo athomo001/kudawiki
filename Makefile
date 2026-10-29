@@ -2,7 +2,7 @@
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
-.PHONY: ui build test lint audit
+.PHONY: ui build test lint audit load
 
 ui:
 	cd ui && pnpm install --frozen-lockfile && pnpm check && pnpm build
@@ -22,3 +22,8 @@ lint:
 audit:
 	go run $(GOVULNCHECK) ./...
 	cd ui && pnpm audit --prod
+
+# Prueba de carga (SPEC §9.5): guarda 50 000 páginas y busca por la API. Tarda minutos; el
+# avance sale en vivo y el resultado queda en docs/rendimiento.md aunque pase.
+load:
+	KUDAWIKI_LOAD=1 go test -run TestSearchLoad -v -count=1 -timeout 0 ./internal/httpapi/

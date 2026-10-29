@@ -89,7 +89,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 
 **Criterio de salida:** dos áreas con contenido sembrado; ningún test de contención encuentra una fuga (rutas, búsqueda, media, etiquetas, backlinks).
 
-**Cumplido el 2026-10-27** (`TestContainmentMatrix`, `TestEveryRouteIsInTheMatrix`). La búsqueda cumple además el objetivo de §9.5 con 50 000 páginas (p95 44 ms). Pendientes de §9 que no bloqueaban la salida: la sección del encabezado en Ctrl+K y los filtros con conteos en la página de resultados (hechos en F3.4c).
+**Cumplido el 2026-10-27** (`TestContainmentMatrix`, `TestEveryRouteIsInTheMatrix`). La búsqueda cumple además el objetivo de §9.5 con 50 000 páginas (p95 44 ms; medida de nuevo el 2026-10-29 de punta a punta por la API: p95 41 ms, ver SPEC §9.5). Pendientes de §9 que no bloqueaban la salida: la sección del encabezado en Ctrl+K y los filtros con conteos en la página de resultados (hechos en F3.4c).
 
 ---
 

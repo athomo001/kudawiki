@@ -136,20 +136,11 @@ func (r *Repo) SearchMeta(ctx context.Context, s Scope, pageIDs []string) (tags,
 	if len(pageIDs) == 0 {
 		return tags, authors, nil
 	}
-	in := `(?` + strings.Repeat(",?", len(pageIDs)-1) + `)`
-	args := []any{s.WsID, s.MaxRank}
-	for _, id := range pageIDs {
-		args = append(args, id)
-	}
+	tagsSQL, authorsSQL, args := searchMetaSQL(s, pageIDs)
 	for _, x := range []struct {
 		query string
 		into  map[string][]string
-	}{
-		{`SELECT t.page_id, t.tag FROM page_tags t JOIN pages p ON p.id = t.page_id
-		  WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ? AND t.page_id IN ` + in, tags},
-		{`SELECT DISTINCT r.page_id, u.full_name FROM page_revisions r JOIN users u ON u.id = r.created_by JOIN pages p ON p.id = r.page_id
-		  WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ? AND r.page_id IN ` + in, authors},
-	} {
+	}{{tagsSQL, tags}, {authorsSQL, authors}} {
 		rows, err := r.db.Read.QueryContext(ctx, x.query, args...)
 		if err != nil {
 			return nil, nil, err
@@ -166,6 +157,23 @@ func (r *Repo) SearchMeta(ctx context.Context, s Scope, pageIDs []string) (tags,
 		}
 	}
 	return tags, authors, nil
+}
+
+// searchMetaSQL arma las dos consultas de SearchMeta. Empiezan por la lista de candidatos con
+// CROSS JOIN, que en SQLite fija el orden: si no, el planificador prefiere recorrer todas las
+// páginas del área por pages_ws_rank y, con 50 000, cada consulta tardaba ~150 ms en caliente y
+// más de un segundo en frío (medido; con la lista primero, 0,3 y 5 ms).
+func searchMetaSQL(s Scope, pageIDs []string) (tags, authors string, args []any) {
+	cands := `WITH c(id) AS (VALUES (?)` + strings.Repeat(",(?)", len(pageIDs)-1) + `) `
+	scope := ` WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`
+	for _, id := range pageIDs {
+		args = append(args, id)
+	}
+	args = append(args, s.WsID, s.MaxRank)
+	tags = cands + `SELECT t.page_id, t.tag FROM c CROSS JOIN pages p ON p.id = c.id CROSS JOIN page_tags t ON t.page_id = p.id` + scope
+	authors = cands + `SELECT DISTINCT r.page_id, u.full_name FROM c CROSS JOIN pages p ON p.id = c.id
+		CROSS JOIN page_revisions r ON r.page_id = p.id JOIN users u ON u.id = r.created_by` + scope
+	return tags, authors, args
 }
 
 // searchSQL arma la consulta. CROSS JOIN obliga a SQLite a recorrer primero el índice FTS5 y

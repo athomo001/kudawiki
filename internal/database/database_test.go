@@ -18,3 +18,16 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Las lecturas van por mmap (SPEC §13.4): con la caché por omisión de SQLite (~2 MB por
+// conexión), buscar en un área de 50 000 páginas releía el índice en cada consulta.
+func TestReadPoolUsesMmap(t *testing.T) {
+	db := dbtest.Open(t)
+	var size int64
+	if err := db.Read.QueryRow(`PRAGMA mmap_size`).Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size < 1<<30 {
+		t.Errorf("read pool mmap_size = %d, want at least 1 GiB", size)
+	}
+}

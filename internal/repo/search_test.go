@@ -34,3 +34,58 @@ func TestSearchPlanStartsWithFTS(t *testing.T) {
 		}
 	}
 }
+
+// Buscar los padres de una página corre en cada guardado. El único índice por ruta es parcial
+// (sin las páginas de la papelera, 0008): si la consulta no lo dice, SQLite recorre el área
+// entera y guardar se vuelve más lento cuanto más grande es el área. Ninguna parte de la
+// consulta puede buscar solo por área.
+func TestAncestorLookupUsesSlugIndex(t *testing.T) {
+	db := dbtest.Open(t)
+	query, args := ancestorRankSQL(Scope{WsID: "w", MaxRank: 3}, "a/b/c")
+	rows, err := db.Read.Query(`EXPLAIN QUERY PLAN `+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "pages_ws_slug") || strings.Contains(joined, "(workspace_id=?)") || strings.Contains(joined, "SCAN pages") {
+		t.Errorf("ancestor lookup must not walk the whole area, got:\n%s", joined)
+	}
+}
+
+// Contar etiquetas y autores de los candidatos (§9.4) tiene que empezar por la lista de
+// candidatos, no por las páginas del área: con 50 000 páginas era la diferencia entre 0,3 ms y
+// más de un segundo por búsqueda.
+func TestSearchMetaStartsWithCandidates(t *testing.T) {
+	db := dbtest.Open(t)
+	tags, authors, args := searchMetaSQL(Scope{WsID: "w", MaxRank: 3}, []string{"a", "b", "c"})
+	for name, q := range map[string]string{"tags": tags, "authors": authors} {
+		rows, err := db.Read.Query(`EXPLAIN QUERY PLAN `+q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		joined := strings.Join(plan, "\n")
+		if strings.Contains(joined, "pages_ws_rank") || strings.Contains(joined, "SCAN p") {
+			t.Errorf("%s must start with the candidates, got:\n%s", name, joined)
+		}
+	}
+}

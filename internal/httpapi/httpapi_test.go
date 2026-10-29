@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"image"
 	"image/png"
-	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -54,7 +53,7 @@ func newFixture(t *testing.T) fixture {
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
 		Media: media.NewService(store, rec, t.TempDir(), 1<<20), Read: store, DB: db,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head></head>app")}},
-		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
 	hash, _ := auth.HashPassword(password)
 	users := map[string]string{}
@@ -87,6 +86,15 @@ func newFixture(t *testing.T) fixture {
 		f.cookies[name] = w.Result().Cookies()[0]
 	}
 	return f
+}
+
+// testLog lleva al test los errores que registra el servidor: un 500 dice por qué, en vez de
+// perderse. Solo errores: el log de cada petición sería ruido.
+type testLog struct{ t testing.TB }
+
+func (l testLog) Write(p []byte) (int, error) {
+	l.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
 }
 
 func (f fixture) do(who, method, path, body string) *httptest.ResponseRecorder {

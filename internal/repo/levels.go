@@ -35,14 +35,31 @@ func ancestors(slug string) []any {
 // que están en la papelera: así una hija creada mientras tanto nace con su nivel, y al
 // restaurarlo ninguna queda por debajo de su padre.
 func maxAncestorRank(ctx context.Context, q querier, s Scope, slug string) (int, error) {
-	anc := ancestors(slug)
-	if len(anc) == 0 {
+	if len(ancestors(slug)) == 0 {
 		return 0, nil
 	}
+	query, args := ancestorRankSQL(s, slug)
 	var rank int
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(min_rank), 0) FROM pages WHERE workspace_id = ? AND slug IN (?`+
-		strings.Repeat(",?", len(anc)-1)+`)`, append([]any{s.WsID}, anc...)...).Scan(&rank)
+	err := q.QueryRowContext(ctx, query, args...).Scan(&rank)
 	return rank, err
+}
+
+// ancestorRankSQL arma la consulta en dos partes porque el índice por ruta es parcial (solo lo
+// que no está en la papelera, 0008): los padres vigentes se buscan por ese índice y los de la
+// papelera por el suyo. En una sola consulta sin deleted_at, SQLite recorre el área entera en
+// cada guardado (TestAncestorLookupUsesSlugIndex).
+func ancestorRankSQL(s Scope, slug string) (string, []any) {
+	anc := ancestors(slug)
+	in := `(?` + strings.Repeat(",?", len(anc)-1) + `)`
+	var args []any
+	for range 2 {
+		args = append(args, s.WsID)
+		args = append(args, anc...)
+	}
+	return `SELECT COALESCE(MAX(r), 0) FROM (
+		SELECT MAX(min_rank) AS r FROM pages WHERE workspace_id = ? AND slug IN ` + in + ` AND deleted_at IS NULL
+		UNION ALL
+		SELECT MAX(min_rank) FROM pages WHERE workspace_id = ? AND slug IN ` + in + ` AND deleted_at IS NOT NULL)`, args
 }
 
 // SetLevel cambia el nivel de la página y sube a ese nivel a las subpáginas que quedarían por

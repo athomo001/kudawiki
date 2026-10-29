@@ -49,7 +49,12 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	read, err := sql.Open("sqlite", "file:"+path+"?mode=ro&"+pragmas)
+	// Las lecturas van por mmap (SPEC §13.4): con la caché por omisión de SQLite (~2 MB por
+	// conexión), buscar en un área de 50 000 páginas (~800 MB de base) releía el índice en cada
+	// consulta, ~110 ms solo para los candidatos; con mmap, ~20 ms (§9.5, medido 2026-10-29). Se
+	// prefirió a cache_size porque las páginas mapeadas las guarda el sistema una sola vez para
+	// todo el pool, y las libera si le falta memoria; cache_size duplica la caché por conexión.
+	read, err := sql.Open("sqlite", "file:"+path+"?mode=ro&"+pragmas+"&_pragma=mmap_size(1073741824)")
 	if err != nil {
 		write.Close()
 		return nil, err
