@@ -1,6 +1,7 @@
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { keymap } from '@codemirror/view';
+import { EditorSelection } from '@codemirror/state';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 
@@ -41,6 +42,22 @@ const theme = EditorView.theme({
   '.cm-activeLine': { backgroundColor: 'var(--kw-cm-active)' },
 });
 
+// Ctrl+B y Ctrl+I (SPEC §15): envuelven la selección; sin selección dejan el cursor entre las marcas.
+function wrap(mark: string) {
+  return (view: EditorView) => {
+    view.dispatch(
+      view.state.changeByRange((r) => ({
+        changes: [
+          { from: r.from, insert: mark },
+          { from: r.to, insert: mark },
+        ],
+        range: EditorSelection.range(r.from + mark.length, r.to + mark.length),
+      })),
+    );
+    return true;
+  };
+}
+
 // Editor Markdown con CodeMirror 6 (SPEC §4.2).
 export function createEditor(parent: HTMLElement, doc: string, label: string, h: Handlers): EditorView {
   return new EditorView({
@@ -48,7 +65,12 @@ export function createEditor(parent: HTMLElement, doc: string, label: string, h:
     parent,
     extensions: [
       EditorView.cspNonce.of(nonce),
-      keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (h.onSave(), true) }]),
+      // Antes que basicSetup: Mod-i allí selecciona el nodo padre.
+      keymap.of([
+        { key: 'Mod-s', preventDefault: true, run: () => (h.onSave(), true) },
+        { key: 'Mod-b', run: wrap('**') },
+        { key: 'Mod-i', run: wrap('*') },
+      ]),
       basicSetup,
       markdown(),
       theme,

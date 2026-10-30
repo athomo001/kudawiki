@@ -369,7 +369,8 @@ func (a api) revert(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// preview usa el mismo render que el lector: la vista previa y la página final son idénticas (SPEC §4.2).
+// preview usa el mismo render que el lector: la vista previa y la página final son idénticas (SPEC §4.2),
+// salvo las marcas data-line, que no se ven.
 func (a api) preview(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Markdown string `json:"markdown"`
@@ -377,7 +378,9 @@ func (a api) preview(w http.ResponseWriter, r *http.Request) {
 	if !a.decode(w, r, &in) {
 		return
 	}
-	html, toc, err := wiki.Render(in.Markdown, a.renderOptions(r, "", in.Markdown))
+	opts := a.renderOptions(r, "", in.Markdown)
+	opts.SourceLines = true // para desplazar juntas las dos columnas del editor (§4.2)
+	html, toc, err := wiki.Render(in.Markdown, opts)
 	if err != nil {
 		a.fail(w, r, err)
 		return

@@ -1,18 +1,23 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { EditorView } from '@codemirror/view';
-  import { api, ApiError, codeOf, rankOf, type Area, type Conflict, type Level, type Page, type Upload } from '../lib/api';
+  import { api, ApiError, codeOf, rankOf, type Area, type Conflict, type Level, type Page, type PageRef, type Upload } from '../lib/api';
   import { createEditor } from '../lib/editor';
   import { enhance } from '../lib/enhance';
+  import { syncScroll } from '../lib/scrollsync';
   import { t, errorText } from '../lib/i18n/index.svelte';
-  import { navigate } from '../lib/router.svelte';
+  import { navigate, route } from '../lib/router.svelte';
   import Icon from '../components/Icon.svelte';
   import DiffView from '../components/DiffView.svelte';
+  import Dialog from '../components/Dialog.svelte';
+  import FolderPicker from '../components/FolderPicker.svelte';
+  import MarkdownGuide from '../components/MarkdownGuide.svelte';
 
   // Editor a pantalla completa, con el diseño aprobado (SPEC §15). Sin slug es una página nueva.
   // Guardar envía base_revision: si otra persona guardó antes, el servidor responde 409 con su
   // revisión y el diff, y se resuelve aquí sin perder lo escrito (SPEC §4.1).
-  let { area, slug, onsaved }: { area: Area; slug?: string; onsaved: () => void } = $props();
+  // refs: el árbol del área, para elegir la carpeta sin adivinar la ruta.
+  let { area, slug, refs, onsaved }: { area: Area; slug?: string; refs: PageRef[]; onsaved: () => void } = $props();
 
   let title = $state('');
   // Ruta de la página: en una nueva es dónde se crea; en una existente, cambiarla la mueve al
@@ -33,10 +38,14 @@
   let busy = $state(false);
   let error = $state('');
   let conflict = $state<Conflict | null>(null);
+  let picking = $state(false);
+  let guide = $state(false);
   let host: HTMLDivElement;
   let view: EditorView | undefined;
   let timer: ReturnType<typeof setTimeout>;
   let preview = $state<HTMLElement>();
+  let previewPane: HTMLElement;
+  let unsync: (() => void) | undefined;
 
   const back = $derived(slug ? `/w/${area.slug}/p/${slug}` : `/w/${area.slug}`);
 
@@ -147,6 +156,20 @@
     }
   }
 
+  // Desde la guía de Markdown: un bloque necesita su propia línea, así que se abre una si el
+  // cursor está a mitad de otra. El foco vuelve al texto cuando el diálogo ya se cerró.
+  async function insert(text: string, block: boolean) {
+    guide = false;
+    if (!view) return;
+    const { from, to } = view.state.selection.main;
+    const line = view.state.doc.lineAt(from);
+    const before = block && from > line.from ? '\n' : '';
+    const after = block && view.state.doc.lineAt(to).to > to ? '\n' : '';
+    view.dispatch(view.state.replaceSelection(before + text + after));
+    await tick();
+    view.focus();
+  }
+
   // Guardar encima: se toma la revisión que ganó como base, a sabiendas de lo que se pisa.
   function keepMine() {
     if (!conflict) return;
@@ -175,9 +198,13 @@
         onSave: () => save(),
         onFiles: attach,
       });
+      // Las dos columnas se desplazan juntas, y un clic en la vista previa lleva a esa línea (§4.2).
+      unsync = syncScroll(view, previewPane);
       schedulePreview();
     };
     if (!slug) {
+      // "Escribir portada" en el inicio del área llega con la ruta ya puesta (?path=portada, §4.17).
+      path = new URLSearchParams(route.query).get('path') ?? '';
       mount('');
     } else {
       api<Page>('GET', `/w/${area.slug}/pages/${slug}`)
@@ -196,6 +223,7 @@
     }
     return () => {
       clearTimeout(timer);
+      unsync?.();
       view?.destroy();
     };
   });
@@ -220,9 +248,11 @@
             bind:value={path}
           />
         </label>
+        <button type="button" class="path-pick" onclick={() => (picking = true)}><Icon name="folder" size={14} /> {t('picker.open')}</button>
         {#if slug}<span>· {t('editor.editing_rev', { n: String(base) })}</span>{/if}
       </div>
     </div>
+    <button type="button" class="editor-btn" onclick={() => (guide = true)}><Icon name="help" size={16} /> {t('mdguide.open')}</button>
     <a class="editor-btn" href={back}>{t('editor.discard')}</a>
     <button type="submit" class="editor-btn editor-save" disabled={busy}>{busy ? t('common.saving') : t('common.save')}</button>
   </header>
@@ -282,7 +312,7 @@
       ondblclick={() => setSplit(50)}
     ></div>
     <!-- Vista previa: HTML saneado por el servidor, igual al del lector. -->
-    <section class="editor-preview" aria-label={t('page.preview')}>
+    <section class="editor-preview" aria-label={t('page.preview')} bind:this={previewPane}>
       <p class="side-title">{t('page.preview')}</p>
       <div class="prose" lang={lang} bind:this={preview}>{@html previewHtml}</div>
     </section>
@@ -292,3 +322,13 @@
     <label>{t('page.summary')} <input maxlength="200" placeholder={t('editor.summary_placeholder')} bind:value={summary} /></label>
   </footer>
 </form>
+
+<!-- Fuera del formulario: nada de aquí adentro lo envía. -->
+<Dialog title={t('picker.title')} bind:open={picking}>
+  <FolderPicker {refs} rootLabel={area.name} bind:path {title} exclude={slug} />
+  <p class="picker-result">{t('picker.result')} <code>{area.slug}/{path}</code></p>
+  <button type="button" class="primary" onclick={() => (picking = false)}>{t('picker.done')}</button>
+</Dialog>
+<Dialog title={t('mdguide.title')} bind:open={guide} wide>
+  <MarkdownGuide oninsert={insert} />
+</Dialog>

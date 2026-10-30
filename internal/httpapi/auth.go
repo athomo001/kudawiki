@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/audit"
@@ -27,10 +26,7 @@ func (a api) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, err := a.Auth.Login(r.Context(), clientIP(r), in.Email, in.Password)
-	var limited auth.RateLimitedError
-	if errors.As(err, &limited) {
-		w.Header().Set("Retry-After", strconv.Itoa(int(limited.RetryAfter.Seconds())+1))
-		a.error(w, r, http.StatusTooManyRequests, "rate_limited", nil)
+	if a.rateLimited(w, r, err) {
 		return
 	}
 	if err != nil {
@@ -69,17 +65,25 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 	a.json(w, http.StatusOK, map[string]any{
 		"id": u.ID, "email": u.Email, "full_name": u.FullName,
 		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
+		"has_avatar": u.HasAvatar,
 	})
 }
 
-// setPreferences es PATCH /me: idioma y preferencias de lectura (SPEC §14.1, §15).
+// setPreferences es PATCH /me: nombre, idioma y preferencias de lectura (SPEC §14.1, §15).
 func (a api) setPreferences(w http.ResponseWriter, r *http.Request) {
 	var in struct {
+		FullName     *string            `json:"full_name"`
 		Locale       *string            `json:"locale"`
 		ReadingPrefs *repo.ReadingPrefs `json:"reading_prefs"`
 	}
 	if !a.decode(w, r, &in) {
 		return
+	}
+	if in.FullName != nil {
+		if err := a.Auth.SetFullName(r.Context(), currentUser(r).ID, *in.FullName); err != nil {
+			a.fail(w, r, err)
+			return
+		}
 	}
 	if err := a.Auth.SetPreferences(r.Context(), currentUser(r).ID, auth.Preferences{Locale: in.Locale, ReadingPrefs: in.ReadingPrefs}); err != nil {
 		a.fail(w, r, err)

@@ -22,6 +22,7 @@ func scopeOf(r *http.Request) repo.Scope { return r.Context().Value(scopeKey{}).
 func (a api) areaRoutes(r chi.Router) {
 	r.Use(a.workspaceBoundary)
 	a.pageRoutes(r)
+	a.areaHomeRoutes(r)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/settings", a.areaSettings)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Patch("/settings", a.updateAreaSettings)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/health", a.areaHealth)

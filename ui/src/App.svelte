@@ -2,10 +2,11 @@
   import { api, ApiError, canEdit, codeOf, type Me, type ReadingPrefs } from './lib/api';
   import { setLocale, errorText } from './lib/i18n/index.svelte';
   import { applyPrefs } from './lib/prefs';
-  import { route } from './lib/router.svelte';
+  import { navigate, route } from './lib/router.svelte';
   import TopBar from './components/TopBar.svelte';
   import Login from './Login.svelte';
   import Home from './pages/Home.svelte';
+  import Profile from './pages/Profile.svelte';
   import Admin from './pages/Admin.svelte';
   import Members from './pages/Members.svelte';
   import Audit from './pages/Audit.svelte';
@@ -19,6 +20,7 @@
   let me = $state<Me | null>(null);
   let ready = $state(false);
   let error = $state('');
+  let avatarRev = $state(0);
 
   // El idioma y la lectura siguen al perfil; sin sesión, el navegador y la fuente por defecto.
   $effect(() => {
@@ -48,6 +50,12 @@
     }
   }
 
+  // El perfil cambió el nombre o la foto: se vuelve a leer y la foto se pide con otra URL.
+  async function profileChanged() {
+    await loadMe();
+    avatarRev++;
+  }
+
   // El cambio se ve al instante, sin recargar (SPEC §15); si el servidor lo rechaza, se deshace.
   async function savePrefs(change: { locale?: 'es' | 'en'; reading_prefs?: ReadingPrefs }) {
     if (!me) return;
@@ -69,6 +77,30 @@
   // El editor tiene su propia cabecera (diseño aprobado, SPEC §15): mientras se edita no hay barra superior.
   const editing = $derived(!!area && canEdit(area) && /^(new$|edit\/)/.test(areaPath?.[2] ?? ''));
 
+  // Al entrar se cae directo en la wiki (SPEC §15): en la última área abierta en este navegador,
+  // si la persona sigue siendo miembro, o en la primera. Inicio queda solo para quien no tiene
+  // áreas. El identificador del área ya está en el historial del navegador: guardarlo no agrega nada.
+  const LAST_AREA_KEY = 'kw.last_area';
+  $effect(() => {
+    if (!me || route.path !== '/') return;
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(LAST_AREA_KEY);
+    } catch {
+      // sin almacenamiento (modo privado estricto): la primera área
+    }
+    const to = me.workspaces.find((w) => w.slug === last) ?? me.workspaces[0];
+    if (to) navigate(`/w/${to.slug}`, { replace: true });
+  });
+  $effect(() => {
+    if (!area) return;
+    try {
+      localStorage.setItem(LAST_AREA_KEY, area.slug);
+    } catch {
+      // ídem: solo se pierde el recuerdo
+    }
+  });
+
   loadMe();
 </script>
 
@@ -77,14 +109,16 @@
   <SiteFooter />
 {:else if ready}
   {#if me}
-    {#if !editing}<TopBar {me} {area} onprefs={savePrefs} onlogout={logout} />{/if}
+    {#if !editing}<TopBar {me} {area} {avatarRev} onprefs={savePrefs} onlogout={logout} />{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if area}
       <Area {area} sub={areaPath?.[2] ?? ''} selfId={me.id} onareachanged={loadMe} />
     {:else}
       <main class="view">
         {#if route.path === '/'}
-          <Home {me} />
+          {#if !me.workspaces.length}<Home {me} />{/if}
+        {:else if route.path === '/me/profile'}
+          <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
         {:else if route.path === '/admin' && me.is_global_admin}
           <Admin />
         {:else if route.path === '/admin/audit' && me.is_global_admin}

@@ -40,6 +40,11 @@ type authService interface {
 	ResendInvite(ctx context.Context, actorID, userID string) (string, error)
 	AcceptInvite(ctx context.Context, token, password string) error
 	SetPreferences(ctx context.Context, userID string, p auth.Preferences) error
+	SetFullName(ctx context.Context, userID, name string) error
+	ChangePassword(ctx context.Context, userID, sessionToken, current, next string, revokeOthers bool) error
+	SetAvatar(ctx context.Context, userID string, data []byte) error
+	DeleteAvatar(ctx context.Context, userID string) error
+	Avatar(ctx context.Context, userID string) ([]byte, error)
 }
 
 type workspaceService interface {
@@ -59,6 +64,8 @@ type wikiService interface {
 	SetLevel(ctx context.Context, sc repo.Scope, actorID, slug string, level int) error
 	Delete(ctx context.Context, sc repo.Scope, actorID, slug string) error
 	Restore(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Announce(ctx context.Context, sc repo.Scope, actorID, title, body string) (string, error)
+	DeleteAnnouncement(ctx context.Context, sc repo.Scope, actorID, id string) error
 }
 
 type mediaService interface {
@@ -90,6 +97,10 @@ type reader interface {
 	RecordMiss(ctx context.Context, s repo.Scope, query string) error
 	Misses(ctx context.Context, s repo.Scope) ([]repo.Miss, error)
 	Trash(ctx context.Context, s repo.Scope, actorID string) ([]repo.TrashItem, error)
+	// Inicio del área (§4.17).
+	Announcements(ctx context.Context, s repo.Scope, limit int) ([]repo.Announcement, error)
+	AreaStats(ctx context.Context, s repo.Scope, limit int) (repo.AreaStats, error)
+	RecordView(ctx context.Context, s repo.Scope, slug string) error
 	AuditEvents(ctx context.Context, f repo.AuditFilter) ([]repo.AuditEntry, error)
 	AreaAudit(ctx context.Context, s repo.Scope, f repo.AuditFilter) ([]repo.AuditEntry, error)
 	// Salud del contenido (§13.7): lo que pide health.Check.
@@ -166,6 +177,7 @@ func New(d Deps) http.Handler {
 			r.Post("/auth/logout", a.logout)
 			r.Get("/auth/me", a.me)
 			r.Patch("/me", a.setPreferences)
+			a.profileRoutes(r)
 			r.Route("/admin", a.adminRoutes)
 			r.Route("/w/{ws}", a.areaRoutes)
 		})
@@ -280,6 +292,9 @@ var domainErrors = map[error]int{
 	auth.ErrInvalidInvite:       http.StatusGone,
 	auth.ErrNotInvited:          http.StatusConflict,
 	auth.ErrInvalidPreferences:  http.StatusUnprocessableEntity,
+	auth.ErrWrongPassword:       http.StatusUnprocessableEntity,
+	auth.ErrAvatarTooLarge:      http.StatusRequestEntityTooLarge,
+	auth.ErrAvatarType:          http.StatusUnsupportedMediaType,
 	workspace.ErrInvalidArea:    http.StatusUnprocessableEntity,
 	workspace.ErrSlugTaken:      http.StatusConflict,
 	workspace.ErrInvalidRole:    http.StatusUnprocessableEntity,
@@ -293,6 +308,7 @@ var domainErrors = map[error]int{
 	wiki.ErrInvalidMove:         http.StatusUnprocessableEntity,
 	wiki.ErrInvalidLevel:        http.StatusUnprocessableEntity,
 	wiki.ErrLevelBelowParent:    http.StatusUnprocessableEntity,
+	wiki.ErrInvalidAnnouncement: http.StatusUnprocessableEntity,
 	media.ErrTooLarge:           http.StatusRequestEntityTooLarge,
 	media.ErrUnsupportedType:    http.StatusUnsupportedMediaType,
 	branding.ErrInvalid:         http.StatusUnprocessableEntity,

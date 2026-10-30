@@ -57,6 +57,7 @@ type store interface {
 	SetLevel(ctx context.Context, s repo.Scope, actorID, slug string, level int) (string, int, error)
 	DeletePages(ctx context.Context, s repo.Scope, actorID, slug string) (string, int, error)
 	RestorePages(ctx context.Context, s repo.Scope, actorID, id string) (int, error)
+	announcementStore
 }
 
 type Service struct {

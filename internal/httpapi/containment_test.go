@@ -140,6 +140,14 @@ func probes(s seeded, lvl int) []probe {
 		// La ruta de la página borrada está ocupada: restaurar choca y no cambia nada.
 		{"/api/w/{ws}/trash/{id}/restore", "POST", "/api/w/ti/trash/" + s.trashID + "/restore", "", 2, false, 409},
 		{"/api/w/{ws}/media/{id}", "GET", s.trashMedia, "", 4, false, 0},
+		// Inicio del área (§4.17). La visita sí suma, pero solo en las páginas que quien la
+		// pide ve; el barrido de fugas revisa después que las más vistas no delaten las otras.
+		{"/api/w/{ws}/views/*", "POST", "/api/w/ti/views/" + p, "", 1, true, 204},
+		{"/api/w/{ws}/stats", "GET", "/api/w/ti/stats", "", 1, false, 200},
+		{"/api/w/{ws}/announcements", "GET", "/api/w/ti/announcements", "", 1, false, 200},
+		{"/api/w/{ws}/announcements", "POST", "/api/w/ti/announcements", `{"title":"","body":""}`, 2, false, 422},
+		// Uno que no existe: para todos el 404 uniforme (quién puede borrar, en TestAnnouncements).
+		{"/api/w/{ws}/announcements/{id}", "DELETE", "/api/w/ti/announcements/no-existe", "", 2, false, 404},
 	}
 }
 
@@ -201,14 +209,15 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		covered[p.method+" "+p.route] = true
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
-	// en TestLoginMeLogout, TestPreferences, TestInviteFlow, TestInviteResend, TestHealthViews, TestAreaAdminLimits,
-	// TestRoutingFallbacks y TestBranding (la marca es de la instalación, no de un área). Borrar
+	// en TestLoginMeLogout, TestPreferences, TestProfile, TestInviteFlow, TestInviteResend, TestHealthViews,
+	// TestAreaAdminLimits, TestRoutingFallbacks y TestBranding (la marca es de la instalación, no de un área). Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
 	// del superadmin se prueba en TestAuditViews.
 	elsewhere := []string{
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
+		"POST /api/me/password", "GET /api/me/avatar", "PUT /api/me/avatar", "DELETE /api/me/avatar",
 		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces",
 		"GET /api/admin/workspaces/{id}/members/", "POST /api/admin/workspaces/{id}/members/",
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",

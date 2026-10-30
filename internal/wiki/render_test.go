@@ -86,6 +86,12 @@ func TestRenderExtensions(t *testing.T) {
 	for src, want := range map[string]string{
 		"> [!WARNING]\n> Cuidado con la red.": `<div class="callout callout-warning"><p>Cuidado con la red.</p>`,
 		"> cita normal":                       "<blockquote>",
+		// Avisos de Wiki.js: la clase en la línea siguiente, con o sin ">"; el tipo sale del color.
+		"> Si no está, no existe.\n{.is-info}":                             `<div class="callout callout-note"><p>Si no está, no existe.</p>`,
+		"> Clúster sano.\n> {.is-success}":                                 `<div class="callout callout-tip"><p>Clúster sano.</p>`,
+		"> uno\n>\n> dos\n{.is-danger}":                                    `<div class="callout callout-danger"><p>uno</p>`,
+		"> Otra clase.\n{.is-foo}":                                         "<blockquote>\n<p>Otra clase.\n{.is-foo}</p>",
+		"{.is-info}":                                                       "<p>{.is-info}</p>",
 		":::tabs\n::: tab Linux\nuno\n:::\n::: tab Windows\ndos\n:::\n:::": `<section class="tab"><p class="tab-title">Linux</p><p>uno</p>`,
 		":::steps\n1. a\n2. b\n:::":                                        `<div class="steps"><ol>`,
 		":::details Mas info\noculto\n:::":                                 `<details><summary>Mas info</summary><p>oculto</p>`,
@@ -109,15 +115,47 @@ func TestRenderExtensions(t *testing.T) {
 }
 
 // El fuzzing del render es parte de SPEC §17: ninguna entrada produce HTML peligroso.
+// §4.2: la vista previa marca cada bloque con su línea de origen; el lector, nunca.
+func TestRenderSourceLines(t *testing.T) {
+	src := "# Título\n\nUn párrafo\nen dos líneas.\n\n- uno\n- dos\n\n> [!NOTE]\n> aviso\n\n" +
+		":::details Más\nadentro\n:::\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n```go\nx := 1\n```\n\n## Fin"
+	out, _ := render(t, src, Options{SourceLines: true})
+	for _, want := range []string{
+		`data-line="1">Título</h1>`,
+		`<p data-line="3">Un párrafo`,
+		`<li data-line="6">uno`,
+		`<li data-line="7">dos`,
+		`<div class="callout callout-note" data-line="9">`,
+		`<details data-line="12">`,
+		`<p data-line="13">adentro`,
+		`<table data-line="16">`,
+		`<tr data-line="18">`,
+		`<h2 id="fin" data-line="24">`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in:\n%s", want, out)
+		}
+	}
+	if out, _ := render(t, src, Options{}); strings.Contains(out, "data-line") {
+		t.Errorf("the reader must not carry source lines: %s", out)
+	}
+	// El autor no puede poner su propio data-line: el HTML crudo no pasa.
+	if out, _ := render(t, `<p data-line="x" onclick="y">z</p>`, Options{SourceLines: true}); strings.Contains(out, `data-line="x"`) {
+		t.Errorf("author data-line leaked: %s", out)
+	}
+}
+
 func FuzzRender(f *testing.F) {
 	for _, s := range []string{"<script>x</script>", "[a](javascript:b)", "<img onerror=x>", "```\n<b>\n```", "**x**",
-		":::tabs\n::: tab x\ny\n:::\n:::", "> [!NOTE]\n> x", "$x$ [[a|b]] [[Ctrl+K]]", "```mermaid\nx\n```"} {
+		":::tabs\n::: tab x\ny\n:::\n:::", "> [!NOTE]\n> x", "> <b>x</b>\n{.is-info}", "$x$ [[a|b]] [[Ctrl+K]]", "```mermaid\nx\n```"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
-		out, _, err := Render(src, Options{Base: "/w/ti", Children: []Child{{Slug: "a", Title: "<b>"}}})
-		if bad := dangerous(out); err == nil && bad != "" {
-			t.Fatalf("Render(%q) leaked %s in: %s", src, bad, out)
+		for _, lines := range []bool{false, true} {
+			out, _, err := Render(src, Options{Base: "/w/ti", Children: []Child{{Slug: "a", Title: "<b>"}}, SourceLines: lines})
+			if bad := dangerous(out); err == nil && bad != "" {
+				t.Fatalf("Render(%q) leaked %s in: %s", src, bad, out)
+			}
 		}
 	})
 }

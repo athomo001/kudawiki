@@ -64,6 +64,9 @@ func TestPurge(t *testing.T) {
 		`UPDATE pages SET deleted_at = datetime('now', '-31 days') WHERE slug = 'vieja'`,
 		`UPDATE media_assets SET created_at = datetime('now', '-8 days') WHERE id = '` + orphan.ID + `'`,
 		`UPDATE search_misses SET day = date('now', '-91 days')`,
+		// Visitas (§4.17): una de hace 91 días se va y la de hoy se queda.
+		`INSERT INTO page_views (page_id, workspace_id, day) SELECT id, workspace_id, date('now', '-91 days') FROM pages WHERE slug = 'reciente'`,
+		`INSERT INTO page_views (page_id, workspace_id, day) SELECT id, workspace_id, date('now') FROM pages WHERE slug = 'reciente'`,
 	} {
 		if _, err := db.Write.Exec(q); err != nil {
 			t.Fatal(err)
@@ -102,6 +105,9 @@ func TestPurge(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM search_misses`); n != 0 {
 		t.Error("search misses older than 90 days not purged")
+	}
+	if n := count(`SELECT COUNT(*) FROM page_views WHERE day = date('now')`); n != 1 || count(`SELECT COUNT(*) FROM page_views`) != 1 {
+		t.Error("page views: want only today's left after the purge")
 	}
 	// Lo hizo el sistema: sin actor y con meta.system (§11.2).
 	if n := count(`SELECT COUNT(*) FROM audit_log WHERE action = 'page.purge' AND actor_id IS NULL AND meta_json = '{"system":"daily_purge"}'`); n != 1 {

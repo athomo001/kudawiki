@@ -2,6 +2,7 @@
 // agrega contenido del autor: solo da comportamiento a pestañas, fórmulas y diagramas.
 
 import { t } from './i18n/index.svelte';
+import { iconSvg } from '../components/Icon.svelte';
 
 let tabGroup = 0;
 
@@ -124,11 +125,88 @@ function mermaid(root: HTMLElement) {
   }
 }
 
+// Copiar un bloque de código con un clic (§4.10). El botón va en un envoltorio y no dentro del
+// <pre>: no se corre con el código ancho ni se copia a sí mismo. El {@html} es el único hijo de
+// .prose, así que Svelte lo reemplaza entero y el envoltorio no le estorba. Como los avisos, el
+// texto accesible se vuelve a escribir en cada llamada para que siga al idioma.
+function copyButtons(root: HTMLElement) {
+  for (const pre of root.querySelectorAll<HTMLElement>('pre:not([data-ready])')) {
+    pre.dataset.ready = '';
+    const box = document.createElement('div');
+    box.className = 'code-block';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'code-copy';
+    button.append(iconSvg('copy'), iconSvg('check'));
+    const status = document.createElement('span');
+    status.className = 'sr-only';
+    status.setAttribute('role', 'status');
+    let timer = 0;
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText((pre.textContent ?? '').replace(/\n$/, ''));
+      } catch {
+        // Sin contexto seguro (HTTP fuera de localhost) no hay portapapeles: queda seleccionado
+        // para copiarlo con Ctrl+C.
+        getSelection()?.selectAllChildren(pre);
+        return;
+      }
+      box.classList.add('copied');
+      status.textContent = t('code.copied');
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        box.classList.remove('copied');
+        status.textContent = '';
+      }, 2000);
+    });
+    pre.replaceWith(box);
+    box.append(button, pre, status);
+  }
+  for (const button of root.querySelectorAll<HTMLButtonElement>('.code-copy')) {
+    button.setAttribute('aria-label', t('code.copy'));
+    button.title = t('code.copy');
+  }
+}
+
+// Tablas: en una columna angosta el código de una celda quedaba cortado en el guion
+// ("{.is-" arriba y "success}" abajo). Ahora se corta solo donde se lee bien: en los espacios
+// y después de cada "/", así una ruta larga baja por carpeta sin ensanchar la tabla. Cada
+// tramo va en un span que no se parte; el texto que se copia o se busca es el mismo. Si aun así
+// la tabla no cabe (un celular), se desplaza dentro de su caja en vez de correr la página.
+function codeInCell(code: HTMLElement) {
+  const nodes: Node[] = [];
+  for (const word of (code.textContent ?? '').split(/(\s+)/)) {
+    if (/^\s+$/.test(word)) nodes.push(document.createTextNode(word));
+    else if (word)
+      word.split(/(?<=\/)/).forEach((part, i) => {
+        if (i) nodes.push(document.createElement('wbr'));
+        const span = document.createElement('span');
+        span.className = 'nobr';
+        span.textContent = part;
+        nodes.push(span);
+      });
+  }
+  code.replaceChildren(...nodes);
+}
+
+function tables(root: HTMLElement) {
+  for (const table of root.querySelectorAll<HTMLElement>('table:not([data-ready])')) {
+    table.dataset.ready = '';
+    for (const code of table.querySelectorAll<HTMLElement>('td code, th code')) codeInCell(code);
+    const box = document.createElement('div');
+    box.className = 'table-scroll';
+    table.replaceWith(box);
+    box.append(table);
+  }
+}
+
 export function enhance(root: HTMLElement | undefined) {
   if (!root) return;
   callouts(root);
   anchors(root);
   tabs(root);
   mermaid(root);
+  copyButtons(root);
+  tables(root);
   void math(root);
 }

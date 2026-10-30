@@ -44,6 +44,7 @@ type User struct {
 	Locale        string
 	ReadingPrefs  ReadingPrefs
 	Invited       bool // creado por invitación y todavía sin contraseña (SPEC §8.5.3)
+	HasAvatar     bool // la foto se lee aparte (Avatar): no viaja en cada request
 }
 
 // ReadingPrefs son las preferencias de lectura de SPEC §15. Los valores los valida auth.
@@ -68,7 +69,8 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 	return conflict(err)
 }
 
-const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json, invited_at IS NOT NULL`
+const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
+	invited_at IS NOT NULL, avatar_png IS NOT NULL`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -92,7 +94,7 @@ type scanner interface{ Scan(dest ...any) error }
 func scanUser(row scanner) (User, error) {
 	var u User
 	var prefs string
-	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited)
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -201,6 +203,53 @@ func (r *Repo) SetPassword(ctx context.Context, userID, passwordHash string) err
 		}
 	}
 	return tx.Commit()
+}
+
+// ChangePassword cambia la contraseña desde el perfil (SPEC §8.5.2). A diferencia de
+// SetPassword no cierra sesiones: cerrar las demás lo decide la persona (DeleteOtherSessions).
+func (r *Repo) ChangePassword(ctx context.Context, userID, passwordHash string) error {
+	return r.updateUser(ctx, `UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, passwordHash, userID)
+}
+
+// DeleteOtherSessions cierra las sesiones de una persona menos la que está usando (§8.2).
+func (r *Repo) DeleteOtherSessions(ctx context.Context, userID, keepTokenHash string) (int64, error) {
+	res, err := r.db.Write.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?`, userID, keepTokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SetFullName cambia el nombre con que la persona aparece en la wiki (SPEC §14.1).
+func (r *Repo) SetFullName(ctx context.Context, userID, fullName string) error {
+	return r.updateUser(ctx, `UPDATE users SET full_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, fullName, userID)
+}
+
+// SetAvatar guarda la foto ya procesada (PNG de 128 px) o la quita con nil (SPEC §8.6.3).
+func (r *Repo) SetAvatar(ctx context.Context, userID string, png []byte) error {
+	return r.updateUser(ctx, `UPDATE users SET avatar_png = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, png, userID)
+}
+
+// Avatar devuelve la foto de una persona; ErrNotFound si no tiene.
+func (r *Repo) Avatar(ctx context.Context, userID string) ([]byte, error) {
+	var png []byte
+	err := r.db.Read.QueryRowContext(ctx, `SELECT avatar_png FROM users WHERE id = ? AND avatar_png IS NOT NULL`, userID).Scan(&png)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return png, err
+}
+
+// updateUser corre un UPDATE de una fila de users; ErrNotFound si la persona no existe.
+func (r *Repo) updateUser(ctx context.Context, query string, args ...any) error {
+	res, err := r.db.Write.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UnlockLogin deja la hora del desbloqueo (SPEC §13.6); el servidor la lee al ver el bloqueo.

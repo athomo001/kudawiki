@@ -15,6 +15,7 @@ import (
 const (
 	orphanAge     = 7 * 24 * time.Hour  // media sin página → papelera (§4.4)
 	missRetention = 90 * 24 * time.Hour // búsquedas sin resultados (§9.6)
+	viewRetention = 90 * 24 * time.Hour // visitas por página (§4.17)
 	system        = "daily_purge"       // meta.system de lo que registra este job
 )
 
@@ -22,6 +23,7 @@ type store interface {
 	TrashOrphanMedia(ctx context.Context, cutoff time.Time) (int64, error)
 	PurgeTrash(ctx context.Context, cutoff time.Time) ([]repo.PurgedPage, []repo.MediaFile, error)
 	PurgeSearchMisses(ctx context.Context, cutoff time.Time) error
+	PurgePageViews(ctx context.Context, cutoff time.Time) error
 	PurgeAudit(ctx context.Context, cutoff string) (int64, error)
 }
 
@@ -29,8 +31,8 @@ type files interface {
 	Remove(wsID, id string) error
 }
 
-// Purge es la purga diaria: la papelera (§4.5), las búsquedas sin resultados (§9.6) y la
-// auditoría vencida (§11.1).
+// Purge es la purga diaria: la papelera (§4.5), las búsquedas sin resultados (§9.6), las
+// visitas por página (§4.17) y la auditoría vencida (§11.1).
 type Purge struct {
 	Store          store
 	Files          files
@@ -61,6 +63,7 @@ func (p Purge) Run(ctx context.Context) error {
 		errs = errors.Join(errs, p.Files.Remove(f.WsID, f.ID))
 	}
 	errs = errors.Join(errs, p.Store.PurgeSearchMisses(ctx, now.Add(-missRetention)))
+	errs = errors.Join(errs, p.Store.PurgePageViews(ctx, now.Add(-viewRetention)))
 	events, err := p.Store.PurgeAudit(ctx, now.Add(-p.AuditRetention).UTC().Format(audit.TimeFormat))
 	errs = errors.Join(errs, err)
 	p.Log.Info("daily purge", "pages", len(pages), "media_files", len(purged), "orphans_trashed", orphans, "audit_events", events)

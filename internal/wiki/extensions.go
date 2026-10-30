@@ -11,6 +11,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -29,7 +30,10 @@ type Options struct {
 	// Exists dice si quien lee ve una página en esa ruta. Una que existe pero no ve se marca
 	// como rota igual que una inexistente: marcarla como válida la delataría (SPEC §17).
 	Exists func(slug string) bool
-	toc    []Heading // lo llena el transformador
+	// SourceLines marca cada bloque con la línea del Markdown donde empieza (data-line). Solo lo
+	// pide la vista previa del editor, para desplazar juntas sus dos columnas (SPEC §4.2).
+	SourceLines bool
+	toc         []Heading // lo llena el transformador
 }
 
 var optionsKey = parser.NewContextKey()
@@ -54,6 +58,7 @@ type directive struct {
 	ast.BaseBlock
 	name, title string
 	open        int // directivas hijas abiertas: el ":::" de cierre es de la más interna
+	start       int // primer byte de la línea ":::", para data-line (no tiene líneas propias)
 }
 
 type wikiToken struct {
@@ -134,7 +139,7 @@ func (directiveParser) Open(parent ast.Node, reader text.Reader, _ parser.Contex
 		}
 	}
 	advanceLine(reader, line, seg)
-	return &directive{name: string(m[1]), title: string(m[2])}, parser.HasChildren
+	return &directive{name: string(m[1]), title: string(m[2]), start: seg.Start}, parser.HasChildren
 }
 
 // Continue recibe la línea primero en la directiva más externa: si una hija sigue abierta,
@@ -270,16 +275,35 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 	}
 }
 
-// asCallout convierte "> [!NOTE]\n> texto" en un aviso; la marca va sola en la primera línea.
+// asCallout convierte una cita en aviso. Con la sintaxis de GitHub la marca va sola en la
+// primera línea ("> [!NOTE]"); con la de Wiki.js, la clase va sola en la última ("{.is-info}").
 func asCallout(bq *ast.Blockquote, src []byte) ast.Node {
+	kind := githubCallout(bq, src)
+	if kind == "" {
+		kind = wikijsCallout(bq, src)
+	}
+	if kind == "" {
+		return nil
+	}
+	c := &callout{kind: kind}
+	for child := bq.FirstChild(); child != nil; {
+		next := child.NextSibling()
+		c.AppendChild(c, child)
+		child = next
+	}
+	return c
+}
+
+// githubCallout quita la marca "[!NOTE]" de la primera línea y dice qué aviso es.
+func githubCallout(bq *ast.Blockquote, src []byte) string {
 	p, ok := bq.FirstChild().(*ast.Paragraph)
 	if !ok || p.Lines().Len() == 0 {
-		return nil
+		return ""
 	}
 	first := p.Lines().At(0)
 	m := calloutRe.FindSubmatch(util.TrimRightSpace(first.Value(src)))
 	if m == nil {
-		return nil
+		return ""
 	}
 	for c := p.FirstChild(); c != nil; { // quita los nodos de la línea de la marca
 		next := c.NextSibling()
@@ -292,13 +316,45 @@ func asCallout(bq *ast.Blockquote, src []byte) ast.Node {
 	if p.ChildCount() == 0 {
 		bq.RemoveChild(bq, p)
 	}
-	c := &callout{kind: strings.ToLower(string(m[1]))}
-	for child := bq.FirstChild(); child != nil; {
-		next := child.NextSibling()
-		c.AppendChild(c, child)
-		child = next
+	return strings.ToLower(string(m[1]))
+}
+
+// Los cuatro avisos de Wiki.js, por color: el verde de "success" es el de "tip".
+var (
+	wikijsCalloutRe = regexp.MustCompile(`^\{\.is-(info|success|warning|danger)\}$`)
+	wikijsKinds     = map[string]string{"info": "note", "success": "tip", "warning": "warning", "danger": "danger"}
+)
+
+// wikijsCallout acepta los avisos escritos para Wiki.js, para que una página pegada desde allá
+// se vea igual (§4.10): la clase va sola en la línea siguiente al texto, con o sin ">".
+func wikijsCallout(bq *ast.Blockquote, src []byte) string {
+	p, ok := bq.LastChild().(*ast.Paragraph)
+	if !ok || p.Lines().Len() == 0 {
+		return ""
 	}
-	return c
+	last := p.Lines().At(p.Lines().Len() - 1)
+	m := wikijsCalloutRe.FindSubmatch(bytes.TrimSpace(last.Value(src)))
+	if m == nil {
+		return ""
+	}
+	for c := p.LastChild(); c != nil; { // quita los nodos de la línea de la clase
+		t, ok := c.(*ast.Text)
+		if !ok || t.Segment.Start < last.Start {
+			break
+		}
+		prev := c.PreviousSibling()
+		p.RemoveChild(p, c)
+		c = prev
+	}
+	// El salto antes de la clase ya no separa nada.
+	if t, ok := p.LastChild().(*ast.Text); ok {
+		t.SetSoftLineBreak(false)
+		t.SetHardLineBreak(false)
+	}
+	if p.ChildCount() == 0 {
+		bq.RemoveChild(bq, p)
+	}
+	return wikijsKinds[string(m[1])]
 }
 
 // ----- HTML -----
@@ -310,7 +366,9 @@ func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
 		// El título ("Nota", "Atención"…) lo pone la hoja de estilos según el idioma de la
 		// interfaz: el HTML no depende de quién lee.
 		if entering {
-			fmt.Fprintf(w, `<div class="callout callout-%s">`, n.(*callout).kind)
+			fmt.Fprintf(w, `<div class="callout callout-%s"`, n.(*callout).kind)
+			gmhtml.RenderAttributes(w, n, nil) // solo data-line, en la vista previa
+			w.WriteString(">")
 		} else {
 			w.WriteString("</div>\n")
 		}
@@ -319,17 +377,24 @@ func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
 	r.Register(kindDirective, func(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 		d := n.(*directive)
 		title := html.EscapeString(d.title)
+		open := func(tag string) {
+			w.WriteString(tag)
+			gmhtml.RenderAttributes(w, n, nil) // solo data-line, en la vista previa
+			w.WriteString(">")
+		}
 		switch {
 		case d.name == "tab" && entering:
-			fmt.Fprintf(w, `<section class="tab"><p class="tab-title">%s</p>`, title)
+			open(`<section class="tab"`)
+			fmt.Fprintf(w, `<p class="tab-title">%s</p>`, title)
 		case d.name == "tab":
 			w.WriteString("</section>\n")
 		case d.name == "details" && entering:
-			fmt.Fprintf(w, `<details><summary>%s</summary>`, title)
+			open(`<details`)
+			fmt.Fprintf(w, `<summary>%s</summary>`, title)
 		case d.name == "details":
 			w.WriteString("</details>\n")
 		case entering: // tabs, steps
-			fmt.Fprintf(w, `<div class="%s">`, d.name)
+			open(fmt.Sprintf(`<div class="%s"`, d.name))
 		default:
 			w.WriteString("</div>\n")
 		}

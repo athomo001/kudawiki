@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"html"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -69,38 +68,21 @@ func (a api) previewSite(w http.ResponseWriter, r *http.Request) {
 // uploadSiteAsset recibe el archivo en el campo "file" y devuelve los avisos (§15.1.3) y la
 // marca con la versión nueva.
 func (a api) uploadSiteAsset(w http.ResponseWriter, r *http.Request) {
-	mr, err := r.MultipartReader()
+	data, ok := a.uploadedFile(w, r, branding.MaxAssetBytes)
+	if !ok {
+		return
+	}
+	warnings, err := a.Branding.Upload(r.Context(), currentUser(r).ID, chi.URLParam(r, "kind"), data)
 	if err != nil {
-		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
+		a.fail(w, r, err)
 		return
 	}
-	for {
-		part, err := mr.NextPart()
-		if err != nil { // io.EOF incluido: no vino el campo "file"
-			a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
-			return
-		}
-		if part.FormName() != "file" {
-			continue
-		}
-		data, err := io.ReadAll(io.LimitReader(part, branding.MaxAssetBytes+1))
-		if err != nil {
-			a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
-			return
-		}
-		warnings, err := a.Branding.Upload(r.Context(), currentUser(r).ID, chi.URLParam(r, "kind"), data)
-		if err != nil {
-			a.fail(w, r, err)
-			return
-		}
-		site, err := a.Branding.Site(r.Context())
-		if err != nil {
-			a.fail(w, r, err)
-			return
-		}
-		a.json(w, http.StatusOK, map[string]any{"warnings": warnings, "site": site})
+	site, err := a.Branding.Site(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
 		return
 	}
+	a.json(w, http.StatusOK, map[string]any{"warnings": warnings, "site": site})
 }
 
 func (a api) deleteSiteAsset(w http.ResponseWriter, r *http.Request) {

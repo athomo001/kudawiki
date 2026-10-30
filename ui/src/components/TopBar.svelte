@@ -1,40 +1,35 @@
 <script lang="ts">
   import type { Area, Me, ReadingPrefs } from '../lib/api';
   import { t, locale } from '../lib/i18n/index.svelte';
+  import Avatar from './Avatar.svelte';
   import Brand from './Brand.svelte';
   import Icon from './Icon.svelte';
   import Dropdown from './Dropdown.svelte';
   import SearchBox from './SearchBox.svelte';
+  import ReadingPrefsForm from './ReadingPrefsForm.svelte';
 
   // Barra superior del diseño aprobado (SPEC §15): logo, área, búsqueda, idioma, lectura y usuario.
   // La campana de notificaciones llega con F4.
   let {
     me,
     area,
+    avatarRev,
     onprefs,
     onlogout,
   }: {
     me: Me;
     area?: Area;
+    avatarRev: number;
     onprefs: (change: { locale?: 'es' | 'en'; reading_prefs?: ReadingPrefs }) => void;
     onlogout: () => void;
   } = $props();
-
-  const fonts = ['default', 'dyslexic', 'legible'] as const;
-  const initials = $derived(
-    me.full_name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w.charAt(0).toUpperCase())
-      .join(''),
-  );
 </script>
 
 <header class="topbar">
   <a class="brand" href="/"><Brand onBar /></a>
 
-  {#if me.workspaces.length}
+  <!-- Con una sola área no hay nada que elegir (SPEC §15). -->
+  {#if me.workspaces.length > 1}
     <Dropdown label={t('nav.areas_menu')} class="topbar-btn area-switch" align="start">
       {#snippet trigger()}
         <span class="topbar-muted">{t('nav.area')}</span>
@@ -64,36 +59,18 @@
       {#snippet trigger()}Aa{/snippet}
       <section class="prefs" aria-label={t('prefs.title')}>
         <h2>{t('prefs.title')}</h2>
-        <fieldset>
-          <legend class="side-title">{t('prefs.font')}</legend>
-          {#each fonts as f (f)}
-            <label class={`prefs-option font-${f}`}>
-              <input
-                type="radio"
-                name="reading-font"
-                checked={me.reading_prefs.font === f}
-                onchange={() => onprefs({ reading_prefs: { ...me.reading_prefs, font: f } })}
-              />
-              {t(`prefs.font_${f}`)}
-            </label>
-          {/each}
-        </fieldset>
-        <label class="prefs-option">
-          <input
-            type="checkbox"
-            checked={me.reading_prefs.wide}
-            onchange={(e) => onprefs({ reading_prefs: { ...me.reading_prefs, wide: e.currentTarget.checked } })}
-          />
-          {t('prefs.wide')}
-        </label>
+        <ReadingPrefsForm prefs={me.reading_prefs} onchange={(p) => onprefs({ reading_prefs: p })} />
         <p class="muted small">{t('prefs.note')}</p>
       </section>
     </Dropdown>
 
     <Dropdown label={t('nav.user_menu')} class="topbar-btn">
-      {#snippet trigger()}<span class="avatar">{initials}</span>{/snippet}
+      {#snippet trigger()}<Avatar {me} rev={avatarRev} />{/snippet}
       <div class="menu">
         <p class="menu-who"><strong>{me.full_name}</strong><span class="muted">{me.email}</span></p>
+        <ul>
+          <li><a href="/me/profile">{t('nav.profile')}</a></li>
+        </ul>
         {#if me.is_global_admin}
           <ul>
             <li><a href="/admin">{t('nav.admin')}</a></li>

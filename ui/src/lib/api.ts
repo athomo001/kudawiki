@@ -23,6 +23,7 @@ export type Me = {
   reading_prefs: ReadingPrefs;
   is_global_admin: boolean;
   workspaces: Area[];
+  has_avatar: boolean;
 };
 
 export type Member = { user_id: string; email: string; full_name: string; role: Role };
@@ -79,6 +80,15 @@ export type DiffLine = { op: '=' | '+' | '-'; text: string; parts?: { text: stri
 // Lo que trae el 409 al guardar: la revisión que ganó y el diff de ella a lo que quisiste guardar.
 export type Conflict = { revision: number; updated_by: string; updated_at: string; diff: DiffLine[] };
 export type TagCount = { tag: string; count: number };
+// Inicio del área (SPEC §4.17). html ya viene saneado y rendido para quien lee.
+export type Announcement = { id: string; title: string; html: string; author: string; created_at: string; can_delete: boolean };
+export type AreaStats = {
+  pages: number;
+  changes_30d: number;
+  new_30d: number;
+  recent: { slug: string; title: string; icon: string; updated_at: string }[];
+  top_viewed: { slug: string; title: string; icon: string; views: number }[];
+};
 export type Access = {
   level: Level;
   members: { name: string; email: string; role: Role; can_read: boolean; can_read_simulated?: boolean }[];

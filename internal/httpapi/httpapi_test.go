@@ -169,7 +169,7 @@ func TestPreferences(t *testing.T) {
 		`{"locale":"fr"}`:                               http.StatusUnprocessableEntity,
 		`{"reading_prefs":{"font":"comic"}}`:            http.StatusUnprocessableEntity,
 		`{"reading_prefs":{"font":"default","size":3}}`: http.StatusBadRequest,
-		`{"full_name":"Otro"}`:                          http.StatusBadRequest,
+		`{"email":"otro@empresa.cl"}`:                   http.StatusBadRequest, // el correo no se cambia desde el perfil
 	} {
 		if w := f.do("viewerTI", "PATCH", "/api/me", body); w.Code != want {
 			t.Errorf("%s: %d, want %d", body, w.Code, want)

@@ -330,7 +330,8 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 
 /* ===== Lector: artículo, columna derecha y columna de acciones ===== */
 .reader { display: flex; flex: 1; }
-.article { flex: 999 1 32.5rem; min-width: 0; max-width: 51.25rem; padding: 2.25rem 3rem 4rem; }
+/* Sin el tope de 820 px del mockup: el artículo usa el ancho libre (SPEC §15); 90rem solo frena las pantallas ultra anchas. */
+.article { flex: 999 1 32.5rem; min-width: 0; max-width: 90rem; padding: 2.25rem 3rem 4rem; }
 .article > hr { margin: 0 0 0.5rem; }
 /* Descripción corta (§4.1) bajo el título, como en el mockup; también la del área en su inicio. */
 .lead { margin: 0 0 1.75rem; font-size: 1.0625rem; line-height: 1.55; color: var(--kw-text-muted); }
@@ -369,7 +370,9 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .page-actions .dropdown-panel { top: 0; right: calc(100% + 0.25rem); }
 
 /* ===== Contenido de la página (tipografía del mockup) ===== */
-.prose { overflow-wrap: anywhere; color: var(--kw-text-body); }
+/* break-word y no anywhere: los dos cortan una URL larga que no cabe, pero anywhere además le dice
+   a la tabla que cualquier palabra mide una letra, y la columna angosta quedaba "Estad / o". */
+.prose { overflow-wrap: break-word; color: var(--kw-text-body); }
 .prose :is(h2, h3) { color: var(--kw-text); }
 .prose h2 { font-size: 1.375rem; margin: 2.5rem 0 0.75rem; letter-spacing: -0.01em; }
 .prose h3 { font-size: 1.0625rem; font-weight: 600; margin: 1.75rem 0 0.5rem; }
@@ -383,11 +386,35 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   background: var(--kw-pre-bg); color: var(--kw-pre-text); font-size: 0.84375rem; line-height: 1.6;
 }
 .prose pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
-.prose table { width: 100%; margin: 0 0 1.125rem; font-size: 0.9375rem; }
+/* Todo el ancho de la página: el tope de 56rem es para las tablas del panel. */
+.prose table { width: 100%; max-width: none; margin: 0 0 1.125rem; font-size: 0.9375rem; }
+/* Las palabras de una celda no se parten, y el código solo se corta en los espacios y después
+   de "/"; si la tabla no cabe, se desplaza en su caja (lib/enhance.ts). */
+.prose :is(td, th) code .nobr { white-space: nowrap; }
+.table-scroll { margin: 0 0 1.125rem; overflow-x: auto; }
+.table-scroll > table { margin: 0; }
 .prose th { padding: 0.5rem 0.75rem; border-bottom: 2px solid #d8dde3; color: var(--kw-text); font-size: inherit; }
 .prose td { padding: 0.5rem 0.75rem; color: var(--kw-text-body); }
 .prose img { max-width: 100%; }
+/* El "# Título" repetido al comienzo (ver Reader.svelte) y el bloque que se está leyendo en voz alta. */
+.prose > h1.dup-title { display: none; }
+.prose .reading-now {
+  background: color-mix(in oklch, var(--kw-accent) 14%, transparent);
+  box-shadow: 0 0 0 0.25rem color-mix(in oklch, var(--kw-accent) 14%, transparent); border-radius: 2px;
+}
 .prose blockquote { margin: 0 0 1rem; padding-left: 1rem; border-left: 3px solid var(--kw-line); color: var(--kw-text-muted); }
+/* Copiar un bloque de código (ver lib/enhance.ts): arriba a la derecha, siempre a la vista para
+   que se encuentre también en pantallas táctiles; el código deja lugar a su lado. */
+.code-block { position: relative; }
+.code-block pre { padding-right: 3.25rem; }
+.code-copy {
+  position: absolute; top: 0.5rem; right: 0.5rem; display: grid; place-items: center; width: 2rem; height: 2rem;
+  padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--kw-pre-text); opacity: 0.65;
+}
+.code-copy:hover, .code-copy:focus-visible { opacity: 1; background: color-mix(in oklch, var(--kw-pre-text) 14%, transparent); }
+.code-copy .icon-check, .code-block.copied .icon-copy { display: none; }
+.code-block.copied .icon-check { display: block; }
+.code-block.copied .code-copy { opacity: 1; }
 
 /* ===== Editor a pantalla completa (mockup "Editor", SPEC §15) ===== */
 .editor { display: flex; flex-direction: column; height: 100vh; }
@@ -431,6 +458,8 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .editor-source:focus-within { box-shadow: inset 0 0 0 2px var(--kw-focus-ring); }
 .editor-preview { min-height: 0; overflow: auto; padding: 1.5rem 2.5rem 3rem; }
 .editor-preview .side-title { margin-bottom: 0.25rem; }
+/* Un clic en la vista previa pone el cursor en esa línea del Markdown (ver lib/scrollsync.ts). */
+.editor-preview .prose { cursor: text; }
 .cm-host, .cm-host .cm-editor { height: 100%; }
 .cm-host .cm-editor { background: transparent; font-size: 0.84375rem; }
 .cm-host .cm-editor.cm-focused { outline: none; }
@@ -498,8 +527,9 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 
 /* ===== Impresión: solo el contenido ===== */
 @media print {
-  .topbar, .sidebar, .crumbs, .page-actions, .page-info, .pager, .heading-anchor { display: none; }
+  .topbar, .sidebar, .crumbs, .page-actions, .page-info, .pager, .heading-anchor, .code-copy { display: none; }
   .article { max-width: none; padding: 0; }
+  .table-scroll { overflow: visible; } /* el papel no se desplaza: mejor que no corte la tabla */
   .print-only { display: inline; }
   .site-footer { padding-inline: 0; }
 }
@@ -519,7 +549,8 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
   .callout-danger { background: #3a1513; color: #ffd2cd; }
 }
 
-.tabs [role='tablist'] { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--kw-line); }
+/* Las que no caben pasan a otra fila: un nombre ya no se parte por letra (ver .prose). */
+.tabs [role='tablist'] { display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid var(--kw-line); }
 .tabs [role='tab'] { padding: 0.375rem 0.875rem; border: 0; border-bottom: 2px solid transparent; background: none; color: inherit; }
 .tabs [role='tab'][aria-selected='true'] { border-bottom-color: var(--kw-accent); font-weight: 600; }
 .tab-title { font-weight: 600; }
@@ -542,6 +573,30 @@ kbd { padding: 0.0625rem 0.375rem; border: 1px solid var(--kw-border); border-bo
 .tags { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.375rem 0.875rem; font-size: 0.875rem; }
 .tags a { color: var(--kw-text-soft); }
 .tags a::before { content: '#'; }
+
+/* ===== Inicio del área (SPEC §4.17): portada, anuncios y actividad, sin cajas ===== */
+.area-cover { margin: 0 0 2rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--kw-line); }
+.area-cover-edit, .area-cover-empty a { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; }
+.area-cover-empty { display: grid; gap: 0.25rem; margin: 0 0 2rem; font-size: 0.875rem; }
+.area-section { margin: 0 0 2.25rem; }
+.area-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.area-section-head h2 { margin: 0; }
+.area-section-head .secondary { display: inline-flex; align-items: center; gap: 0.375rem; }
+.news { list-style: none; margin: 0; padding: 0; }
+.news-item { padding: 1rem 0; border-bottom: 1px solid var(--kw-line); }
+.news-item h3 { margin: 0; font-size: 1rem; }
+.news-meta { margin: 0.125rem 0 0.5rem; font-size: 0.8125rem; color: var(--kw-text-muted); }
+.news-meta .link { font-size: inherit; }
+.news-item .prose > div > :last-child, .news-item .prose > :last-child { margin-bottom: 0; }
+.stat-row { display: flex; flex-wrap: wrap; gap: 0.75rem 2.5rem; margin: 0.75rem 0 1.5rem; }
+.stat-row dt { font-size: 0.8125rem; color: var(--kw-text-muted); }
+.stat-row dd { margin: 0; font-size: 1.75rem; font-weight: 600; color: var(--kw-text); font-variant-numeric: tabular-nums; }
+.stat-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.5rem 2.5rem; }
+/* Columnas lado a lado: sin el margen global entre secciones seguidas, que las desalinea. */
+.stat-lists > section { margin: 0; }
+.stat-lists h3 { margin: 0 0 0.25rem; font-size: 0.9375rem; }
+.stat-lists ol { margin: 0; }
+.stat-lists li { overflow-wrap: break-word; }
 .wikilink.broken { color: var(--kw-state-error); text-decoration-style: dashed; }
 
 /* ===== Búsqueda (SPEC §9.4) ===== */
@@ -644,3 +699,49 @@ mark { background: #fff1a8; color: inherit; }
 /* El logo para fondo oscuro se muestra sobre la barra oscura de Kudawiki. */
 .asset-view.dark { background: #15171c; color: #9aa0a6; }
 .asset-view img { max-width: 100%; max-height: 2.5rem; }
+
+/* Mi perfil (SPEC §8.5.2): una columna sin cajas, como Apariencia. */
+.profile { max-width: 36rem; }
+.profile h2 { margin: 1.75rem 0 0.25rem; }
+.profile fieldset { display: grid; gap: 0.125rem; margin: 0; padding: 0; border: 0; }
+.profile-photo { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: flex-start; }
+.profile-photo .field { flex: 1 1 18rem; }
+.profile-photo h2 { margin-top: 0; }
+.profile-photo .link { justify-self: start; }
+.profile-value { font-weight: 400; }
+.prefs-panel { display: grid; gap: 0.75rem; font-size: 0.875rem; }
+.lang-options { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+img.avatar { object-fit: cover; }
+.avatar.large { width: 5rem; height: 5rem; font-size: 1.75rem; }
+
+/* Selector de carpetas (editor y "Mover", SPEC §15): el árbol del área con radios, sin cajas. */
+.path-pick {
+  display: inline-flex; align-items: center; gap: 0.25rem; min-height: 0; padding: 0.125rem 0.375rem; border: 0; border-radius: 4px;
+  background: transparent; color: var(--kw-topbar-text); font-size: 0.78125rem;
+}
+.path-pick:hover { background: var(--kw-topbar-hover); }
+.picker { min-width: 0; margin: 0; padding: 0; border: 0; }
+.picker-tree { max-height: 45vh; overflow: auto; margin-top: 0.375rem; font-size: 0.875rem; }
+.picker-tree ul { list-style: none; margin: 0; padding-left: 1.25rem; }
+.picker-tree > ul { padding-left: 0; }
+.picker-row { display: flex; align-items: center; gap: 0.125rem; }
+.picker-toggle { flex: 0 0 1.5rem; height: 1.5rem; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--kw-text-muted); }
+button.picker-toggle:hover { background: var(--kw-hover); }
+.picker-toggle[aria-expanded='false'] svg { transform: rotate(-90deg); }
+.picker-option { flex: 1; display: flex; align-items: center; gap: 0.5rem; min-width: 0; padding: 0.3125rem 0.5rem; border-radius: 6px; cursor: pointer; }
+.picker-option:hover, .picker-option:has(input:checked) { background: var(--kw-hover); }
+.picker-option:has(input:checked) { font-weight: 600; }
+.picker-result { margin: 0.75rem 0; font-size: 0.875rem; overflow-wrap: anywhere; }
+
+/* Guía de Markdown del editor (SPEC §15). */
+.modal.wide { width: min(52rem, 94vw); }
+.md-guide { font-size: 0.875rem; }
+.md-guide h3 { margin: 1.25rem 0 0.375rem; font-size: 0.9375rem; }
+.md-guide h3:first-child { margin-top: 0; }
+.md-guide table { width: 100%; border-collapse: collapse; }
+.md-guide th { padding: 0.25rem 0.5rem; color: var(--kw-text-muted); font-size: 0.75rem; font-weight: 600; text-align: left; }
+.md-guide td { padding: 0.375rem 0.5rem; border-top: 1px solid var(--kw-line); vertical-align: top; }
+.md-guide td:first-child { width: 50%; }
+.md-guide pre { margin: 0; font-family: var(--kw-font-mono); font-size: 0.8125rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.375rem 1rem; margin: 0; }
+.md-keys dd { margin: 0; }

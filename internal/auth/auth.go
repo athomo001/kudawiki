@@ -54,6 +54,12 @@ type store interface {
 	SetPassword(ctx context.Context, userID, passwordHash string) error
 	UnlockLogin(ctx context.Context, userID string, at time.Time) error
 	LoginUnlockedAt(ctx context.Context, email string) (time.Time, error)
+	// Perfil (SPEC §8.5.2, §14.1).
+	SetFullName(ctx context.Context, userID, fullName string) error
+	ChangePassword(ctx context.Context, userID, passwordHash string) error
+	DeleteOtherSessions(ctx context.Context, userID, keepTokenHash string) (int64, error)
+	SetAvatar(ctx context.Context, userID string, png []byte) error
+	Avatar(ctx context.Context, userID string) ([]byte, error)
 }
 
 type Service struct {

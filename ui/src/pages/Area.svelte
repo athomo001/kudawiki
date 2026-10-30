@@ -3,6 +3,7 @@
   import { t, errorText, type Key } from '../lib/i18n/index.svelte';
   import Tree, { buildTree } from '../components/Tree.svelte';
   import Reader from './Reader.svelte';
+  import AreaHome from './AreaHome.svelte';
   import History from './History.svelte';
   import Members from './Members.svelte';
   import TagPages from './TagPages.svelte';
@@ -76,7 +77,7 @@
 
 {#if editing}
   {#await loadEditor() then { default: Editor }}
-    {#key pageSlug}<Editor {area} slug={kind === 'edit' ? pageSlug : undefined} onsaved={loadTree} />{/key}
+    {#key pageSlug}<Editor {area} slug={kind === 'edit' ? pageSlug : undefined} {refs} onsaved={loadTree} />{/key}
   {/await}
 {:else}
 <div class="area">
@@ -124,23 +125,7 @@
     {:else}
       <div class="view">
         {#if sub === ''}
-          <h1>{area.name}</h1>
-          {#if area.description}<p class="lead">{area.description}</p>{/if}
-          <p class="muted">{refs.length ? t('area.pick_page') : t('area.empty')}</p>
-          {#if tags.length}
-            <h2>{t('area.tags')}</h2>
-            <ul class="tags">
-              {#each tags as tg (tg.tag)}
-                <li><a href={`${base}/tags/${encodeURIComponent(tg.tag)}`}>{tg.tag}</a> <span class="muted">{tg.count}</span></li>
-              {/each}
-            </ul>
-          {/if}
-          {#if misses.length}
-            <h2>{t('search.misses')}</h2>
-            <ul class="plain">
-              {#each misses as m (m.query)}<li>{m.query} <span class="muted">· {m.count}</span></li>{/each}
-            </ul>
-          {/if}
+          <AreaHome {area} {tags} {misses} />
         {:else if sub === 'search'}
           <SearchResults {area} />
         {:else if kind === 'tags'}

@@ -20,8 +20,29 @@
     settings: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6',
     print: 'M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z',
     pulse: 'M3 12h4l3-7 4 14 3-7h4',
+    speaker: 'M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12',
+    pause: 'M8 5v14M16 5v14',
+    stop: 'M6 6h12v12H6z',
+    help: 'M12 3a9 9 0 1 1 0 18a9 9 0 0 1 0-18M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17v.5',
+    copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+    check: 'M5 12l5 5L20 7',
   };
   export type IconName = keyof typeof paths | 'more';
+
+  // El mismo ícono, armado fuera de un componente: lib/enhance.ts lo agrega al HTML de la página.
+  export function iconSvg(name: keyof typeof paths): SVGSVGElement {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', `icon icon-${name}`);
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', paths[name]);
+    svg.append(path);
+    return svg;
+  }
 </script>
 
 <script lang="ts">

@@ -25,29 +25,35 @@ type Action struct{ name string }
 func (a Action) String() string { return a.name }
 
 var (
-	AuthLogin        = Action{"auth.login"}
-	AuthLoginFailed  = Action{"auth.login_failed"}
-	AuthLockout      = Action{"auth.lockout"}
-	AuthLogout       = Action{"auth.logout"}
-	UserInvite       = Action{"user.invite"}
-	UserInviteAccept = Action{"user.invite_accept"}
-	WsCreate         = Action{"ws.create"}
-	WsUpdate         = Action{"ws.update"}
-	BackupRun        = Action{"backup.run"}
-	WsMemberAdd      = Action{"ws.member_add"}
-	WsMemberRemove   = Action{"ws.member_remove"}
-	WsMemberRole     = Action{"ws.member_role_change"}
-	PageCreate       = Action{"page.create"}
-	PageUpdate       = Action{"page.update"}
-	PageRevert       = Action{"page.revert"}
-	PageMove         = Action{"page.move"}
-	PageLevelChange  = Action{"page.level_change"}
-	PageDelete       = Action{"page.delete"}
-	PageRestore      = Action{"page.restore"}
-	PagePurge        = Action{"page.purge"}
-	PageRead         = Action{"page.read"}             // solo páginas N3 (§11.1)
-	PathUnavailable  = Action{"page.path_unavailable"} // §19.35
-	MediaUpload      = Action{"media.upload"}
+	AuthLogin       = Action{"auth.login"}
+	AuthLoginFailed = Action{"auth.login_failed"}
+	AuthLockout     = Action{"auth.lockout"}
+	AuthLogout      = Action{"auth.logout"}
+	// Perfil de la persona misma (§8.5.2, §14.1).
+	AuthPasswordChange = Action{"auth.password_change"}
+	UserProfileUpdate  = Action{"user.profile_update"}
+	UserInvite         = Action{"user.invite"}
+	UserInviteAccept   = Action{"user.invite_accept"}
+	WsCreate           = Action{"ws.create"}
+	WsUpdate           = Action{"ws.update"}
+	BackupRun          = Action{"backup.run"}
+	WsMemberAdd        = Action{"ws.member_add"}
+	WsMemberRemove     = Action{"ws.member_remove"}
+	WsMemberRole       = Action{"ws.member_role_change"}
+	PageCreate         = Action{"page.create"}
+	PageUpdate         = Action{"page.update"}
+	PageRevert         = Action{"page.revert"}
+	PageMove           = Action{"page.move"}
+	PageLevelChange    = Action{"page.level_change"}
+	PageDelete         = Action{"page.delete"}
+	PageRestore        = Action{"page.restore"}
+	PagePurge          = Action{"page.purge"}
+	PageRead           = Action{"page.read"}             // solo páginas N3 (§11.1)
+	PathUnavailable    = Action{"page.path_unavailable"} // §19.35
+	MediaUpload        = Action{"media.upload"}
+	// Anuncios del inicio del área (§4.17).
+	AnnouncementCreate = Action{"announcement.create"}
+	AnnouncementDelete = Action{"announcement.delete"}
 	// Recuperación por consola (§13.6): las corre quien tiene shell en el servidor.
 	CLIUnlock           = Action{"admin.cli_unlock"}
 	CLISetPassword      = Action{"admin.cli_set_password"}
@@ -61,10 +67,10 @@ var (
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
 var All = []Action{
-	AuthLogin, AuthLoginFailed, AuthLockout, AuthLogout, UserInvite, UserInviteAccept,
+	AuthLogin, AuthLoginFailed, AuthLockout, AuthLogout, AuthPasswordChange, UserProfileUpdate, UserInvite, UserInviteAccept,
 	WsCreate, WsUpdate, BackupRun, WsMemberAdd, WsMemberRemove, WsMemberRole,
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
-	PageRead, PathUnavailable, MediaUpload,
+	PageRead, PathUnavailable, MediaUpload, AnnouncementCreate, AnnouncementDelete,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete,
 }
@@ -89,7 +95,7 @@ func actorFrom(ctx context.Context) Actor {
 type Event struct {
 	Action     Action
 	WsID       string
-	TargetType string // page, user, workspace, media
+	TargetType string // page, user, workspace, media, announcement
 	TargetID   string
 	Meta       map[string]any
 	Actor      *Actor // quien lo hizo, cuando todavía no está en el contexto (el login)

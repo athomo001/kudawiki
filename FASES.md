@@ -107,6 +107,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [x] Salud del contenido (`kudawiki doctor` y la pantalla Salud): enlaces, árbol, media y búsqueda. *(Vigencia, sellados y propuestas se suman en F5, F7 y F4)*
 - [x] Recuperación por consola (§13.6): `kudawiki admin unlock`, `set-password`, `create-superadmin` y `revoke-sessions`, auditados como evento del sistema `cli`. *(F3.6; `reset-2fa` llega con el 2FA en F6 y el aviso a los superadmins con las notificaciones en F4)*
 - [x] Marca de la empresa: título, colores con contraste automático, logo y favicon con sus variantes, sin parpadeo (§15.1). Pantalla **Administración → Apariencia** con vista previa en vivo, paletas sugeridas y "Restablecer a Kudawiki"; lo que fija el archivo de configuración gana y se ve bloqueado. *(F3.6; las variantes para el correo y la marca de agua llegan con F4 y F7, la vista oscura del panel con el modo oscuro (B4), y Apariencia, sin mockup propio, usa el marco y los formularios del diseño aprobado)*
+- [x] Ajustes que pidió el dueño al probar F3 (2026-10-29): **Mi perfil** con foto, nombre, áreas, idioma, lectura y **cambio de contraseña** (§8.5.2, adelantado de F4); al entrar, directo a la wiki y selector de área solo con más de una; lector a todo el ancho, sin el título repetido y con **Escuchar** (voces del equipo); en el editor, **Elegir carpeta** (también en "Mover"), **Guía de Markdown**, `Ctrl+B` / `Ctrl+I` (§15) y **columnas sincronizadas**, con clic en la vista previa para ir a esa línea (§4.2); **avisos de Wiki.js** (`{.is-info}`) y botón **Copiar** en los bloques de código, y tablas que no cortan palabras ni código por la mitad (§4.10); **inicio del área** con portada, anuncios, actividad y más vistas (§4.17). *(F3.7; el inicio del área no tiene mockup propio y usa el marco y los formularios del diseño aprobado; el aviso por correo del cambio de contraseña llega con F4)*
 
 **Criterio de salida:** restaurar un backup en otra máquina y que `audit verify` pase; los tests de contención cubren los tres niveles; todas las pantallas siguen el diseño aprobado.
 
@@ -120,7 +121,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [ ] Notificaciones in-app y email: outbox, agrupación, ventana de email, baja en un clic.
 - [ ] Seguir páginas.
 - [ ] Correos con la marca de la empresa (logo incrustado) y correo de prueba.
-- [ ] Recuperación de contraseña, envío de invitaciones por correo y cambio de contraseña (§8.5). El alta con enlace manual ya está desde F2.
+- [ ] Recuperación de contraseña, envío de invitaciones por correo y el aviso *"Tu contraseña cambió"* (§8.5). El alta con enlace manual ya está desde F2 y el cambio de contraseña desde el perfil, desde F3.7.
 - [ ] Autoguardado en servidor y aviso de edición concurrente.
 
 **Criterio de salida:** un área en modo `required` funciona de punta a punta con dos personas reales; un usuario local recupera su contraseña por correo.
@@ -178,4 +179,4 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 
 ## F9 — Después de v1.0
 
-Sin orden fijo; se prioriza según el uso real: regla de dos personas, comentarios, PDF, búsqueda en adjuntos, draw.io/Excalidraw, espejo Git de salida, tokens de API + servidor MCP, "¿te sirvió esta página?", estadísticas por área.
+Sin orden fijo; se prioriza según el uso real: regla de dos personas, comentarios, PDF, búsqueda en adjuntos, draw.io/Excalidraw, espejo Git de salida, tokens de API + servidor MCP, "¿te sirvió esta página?", búsquedas sin resultados a la vista de más personas (la actividad y las más vistas se adelantaron a F3.7, §4.17).

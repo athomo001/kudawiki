@@ -3,6 +3,8 @@
   import Icon from '../components/Icon.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Dropdown from '../components/Dropdown.svelte';
+  import ReadAloud from '../components/ReadAloud.svelte';
+  import FolderPicker from '../components/FolderPicker.svelte';
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import { navigate, route } from '../lib/router.svelte';
   import { tick } from 'svelte';
@@ -59,6 +61,14 @@
   $effect(() => {
     void locale();
     if (page && prose) enhance(prose);
+  });
+
+  // Es común repetir el título como "# Título" al comienzo del Markdown: el lector ya lo muestra
+  // arriba, así que ese primer encabezado se oculta cuando dice lo mismo (§15).
+  const plain = (s: string) => s.normalize('NFD').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+  $effect(() => {
+    const first = page && prose?.firstElementChild;
+    if (page && first?.tagName === 'H1') first.classList.toggle('dup-title', plain(first.textContent ?? '') === plain(page.title));
   });
 
   // Atajos (§15): E edita, G H abre el historial. Ctrl+K busca y Ctrl+S guarda en el editor.
@@ -121,6 +131,8 @@
         page = p;
         moveTo = p.slug;
         remember(area.slug, { slug: p.slug, title: p.title });
+        // Una visita para "más vistas" del inicio del área (§4.17); si falla, la página igual se lee.
+        api('POST', `${base}/views/${p.slug}`).catch(() => {});
         // El servidor redirigió desde una ruta vieja (alias): se corrige la URL sin otra entrada.
         if (p.slug !== slug) navigate(`${base}/p/${p.slug}`, { replace: true });
         return api<PageRef[]>('GET', `${base}/backlinks/${p.slug}`);
@@ -226,6 +238,7 @@
         <Icon name="code" />
       </button>
       <button type="button" class="action" aria-label={t('page.print')} title={t('page.print')} onclick={() => print()}><Icon name="print" /></button>
+      <ReadAloud root={prose} title={page.title} lang={page.lang} />
       {#if area.role === 'admin'}
         <button type="button" class="action" aria-label={t('access.title')} title={t('access.title')} onclick={openAccess}><Icon name="people" /></button>
       {/if}
@@ -279,6 +292,7 @@
           <input required pattern="[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*" bind:value={moveTo} />
         </label>
         <small class="muted">{t('page.move_hint')}</small>
+        <FolderPicker {refs} rootLabel={area.name} bind:path={moveTo} title={page.title} exclude={page.slug} />
         {#if error}<p class="error" role="alert">{error}</p>{/if}
         <button type="submit" class="primary">{t('page.move_submit')}</button>
       </form>
