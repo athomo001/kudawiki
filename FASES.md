@@ -120,7 +120,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [ ] Propuestas: ciclo completo, diff, merge a 3 vías, aprobar con cambios, excepciones por subárbol.
 - [ ] Notificaciones in-app y email: outbox, agrupación, ventana de email, baja en un clic.
 - [ ] Seguir páginas.
-- [ ] Correos con la marca de la empresa (logo incrustado) y correo de prueba.
+- [x] Correos con la marca de la empresa (logo incrustado) y correo de prueba (§12): **Administración → Correo** con candados, contraseña cifrada con la MASTER_KEY y la respuesta del servidor a la vista. *(F4.1; la cola con reintentos llega con la recuperación de contraseña, su primer uso)*
 - [ ] Recuperación de contraseña, envío de invitaciones por correo y el aviso *"Tu contraseña cambió"* (§8.5). El alta con enlace manual ya está desde F2 y el cambio de contraseña desde el perfil, desde F3.7.
 - [ ] Autoguardado en servidor y aviso de edición concurrente.
 

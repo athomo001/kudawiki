@@ -18,7 +18,8 @@ type SiteAsset struct {
 
 // SiteSettings devuelve las claves guardadas que empiezan con prefix, con su valor en JSON.
 func (r *Repo) SiteSettings(ctx context.Context, prefix string) (map[string]string, error) {
-	rows, err := r.db.Read.QueryContext(ctx, `SELECT key, value_json FROM site_settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix)
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT key, value_json FROM site_settings
+		WHERE substr(key, 1, length(?)) = ? AND value_json IS NOT NULL`, prefix, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -37,11 +38,48 @@ func (r *Repo) SiteSettings(ctx context.Context, prefix string) (map[string]stri
 // SetSiteSettings guarda las claves en una transacción; un valor nil borra la fila (vuelve al
 // valor por defecto).
 func (r *Repo) SetSiteSettings(ctx context.Context, values map[string]*string, by string) error {
+	return r.SaveSiteSettings(ctx, values, nil, by)
+}
+
+// SiteSecret devuelve un secreto de configuración tal como está guardado: cifrado, con la
+// versión de la llave. Lo abre quien tiene la MASTER_KEY; ErrNotFound si no hay.
+func (r *Repo) SiteSecret(ctx context.Context, key string) ([]byte, int, error) {
+	var enc []byte
+	var version int
+	err := r.db.Read.QueryRowContext(ctx, `SELECT secret_enc, key_version FROM site_settings WHERE key = ? AND secret_enc IS NOT NULL`,
+		key).Scan(&enc, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, 0, ErrNotFound
+	}
+	return enc, version, err
+}
+
+// SealedSetting es un secreto ya cifrado; Enc nil lo borra.
+type SealedSetting struct {
+	Enc        []byte
+	KeyVersion int
+}
+
+// SaveSiteSettings guarda valores y secretos juntos: un cambio de servidor SMTP con su
+// contraseña no queda a medias.
+func (r *Repo) SaveSiteSettings(ctx context.Context, values map[string]*string, secrets map[string]SealedSetting, by string) error {
 	tx, err := r.db.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	for k, v := range secrets {
+		if v.Enc == nil {
+			_, err = tx.ExecContext(ctx, `DELETE FROM site_settings WHERE key = ?`, k)
+		} else {
+			_, err = tx.ExecContext(ctx, `INSERT INTO site_settings (key, secret_enc, key_version, updated_by) VALUES (?, ?, ?, ?)
+				ON CONFLICT(key) DO UPDATE SET secret_enc = excluded.secret_enc, key_version = excluded.key_version,
+					updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`, k, v.Enc, v.KeyVersion, by)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	for k, v := range values {
 		if v == nil {
 			_, err = tx.ExecContext(ctx, `DELETE FROM site_settings WHERE key = ?`, k)

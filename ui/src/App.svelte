@@ -12,6 +12,7 @@
   import Audit from './pages/Audit.svelte';
   import Health from './pages/Health.svelte';
   import Appearance from './pages/Appearance.svelte';
+  import Email from './pages/Email.svelte';
   import SiteFooter from './components/SiteFooter.svelte';
   import Area from './pages/Area.svelte';
   import Invite from './pages/Invite.svelte';
@@ -127,6 +128,8 @@
           <Health endpoint="/admin/health" global />
         {:else if route.path === '/admin/appearance' && me.is_global_admin}
           <Appearance />
+        {:else if route.path === '/admin/email' && me.is_global_admin}
+          <Email email={me.email} />
         {:else if adminAreaId && me.is_global_admin}
           <Members endpoint={`/admin/workspaces/${adminAreaId}/members`} canGrantAdmin selfId={me.id} />
         {:else}

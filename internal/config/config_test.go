@@ -113,3 +113,23 @@ func TestBranding(t *testing.T) {
 		t.Error("want error for a bad boolean")
 	}
 }
+
+// El servidor de correo del archivo queda presente y las variables ganan, también el puerto.
+func TestSMTP(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("smtp:\n  host: smtp.acme.cl\n  port: 587\n  from: wiki@acme.cl\n"), 0o600)
+	t.Setenv("KUDAWIKI_SMTP_PASSWORD", "secreta")
+	t.Setenv("KUDAWIKI_SMTP_PORT", "465")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := c.SMTP
+	if *m.Host != "smtp.acme.cl" || *m.Port != 465 || *m.From != "wiki@acme.cl" || *m.Password != "secreta" || m.Security != nil || m.Username != nil {
+		t.Errorf("smtp = %+v", m)
+	}
+	t.Setenv("KUDAWIKI_SMTP_PORT", "veinticinco")
+	if _, err := Load(path); err == nil {
+		t.Error("want error for a bad port")
+	}
+}

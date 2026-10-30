@@ -63,6 +63,9 @@ var (
 	SiteBrandingUpdate = Action{"site.branding_update"}
 	SiteAssetUpload    = Action{"site.asset_upload"}
 	SiteAssetDelete    = Action{"site.asset_delete"}
+	// Correo (§12).
+	SiteSMTPUpdate = Action{"site.smtp_update"}
+	SMTPTestSend   = Action{"smtp.test_send"}
 )
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
@@ -72,7 +75,7 @@ var All = []Action{
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
 	PageRead, PathUnavailable, MediaUpload, AnnouncementCreate, AnnouncementDelete,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
-	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete,
+	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.

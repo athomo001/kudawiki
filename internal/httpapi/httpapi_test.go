@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -22,6 +23,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
+	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/repo"
@@ -61,8 +63,12 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mailer, err := mail.NewService(store, brand, rec, bytes.Repeat([]byte{1}, 32), mail.Patch{}, os.DirFS("../../ui/src/lib/i18n"), origin, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-		Media: media.NewService(store, rec, storage, 1<<20), Branding: brand, Read: store, DB: db, StorageDir: storage,
+		Media: media.NewService(store, rec, storage, 1<<20), Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 

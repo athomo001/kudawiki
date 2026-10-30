@@ -32,6 +32,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/health"
 	"github.com/athomo001/kudawiki/internal/httpapi"
 	"github.com/athomo001/kudawiki/internal/jobs"
+	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
@@ -179,8 +180,10 @@ func readPassword() (string, error) {
 func runServe(ctx context.Context, cfg config.Config) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	// Sin llave no se arranca: sin ella los sellados de F7 serían ilegibles (SPEC §6.3).
-	if _, err := crypto.LoadMasterKey(cfg.MasterKeyFile); err != nil {
+	// Sin llave no se arranca: sin ella la contraseña SMTP guardada y los sellados de F7 serían
+	// ilegibles (SPEC §6.3).
+	masterKey, err := crypto.LoadMasterKey(cfg.MasterKeyFile)
+	if err != nil {
 		return fmt.Errorf("%w (run `kudawiki init` first)", err)
 	}
 	db, err := database.Open(cfg.DBPath())
@@ -228,6 +231,12 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	m := cfg.SMTP
+	mailer, err := mail.NewService(store, brand, rec, masterKey, mail.Patch{Host: m.Host, Port: m.Port, Security: m.Security,
+		Username: m.Username, Password: m.Password, From: m.From}, kudawiki.I18n(), cfg.BaseURL, time.Now)
+	if err != nil {
+		return err
+	}
 
 	// Los jobs terminan antes de cerrar la BD: este defer corre antes que el de db.Close.
 	jobCtx, stopJobs := context.WithCancel(ctx)
@@ -246,7 +255,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-			Media: files, Branding: brand, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
+			Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

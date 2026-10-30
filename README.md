@@ -65,7 +65,7 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F1 · Esqueleto | 🟡 Falta el CI en GitHub |
 | F2 · Wiki con aislamiento | ✅ Hecha |
 | F3 · Niveles, auditoría y respaldos | ✅ Hecha |
-| F4 · Propuestas y notificaciones | ⚪ Pendiente |
+| F4 · Propuestas y notificaciones | 🟡 En curso: correo listo |
 | F5 · Espacio personal y vigencia | ⚪ Pendiente |
 | F6 · Identidad, AD y 2FA | ⚪ Pendiente |
 | F7 · Documentos sellados | ⚪ Pendiente |

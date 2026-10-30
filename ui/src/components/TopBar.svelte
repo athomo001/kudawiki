@@ -77,6 +77,7 @@
             <li><a href="/admin/audit">{t('audit.title')}</a></li>
             <li><a href="/admin/health">{t('health.short')}</a></li>
             <li><a href="/admin/appearance">{t('appearance.title')}</a></li>
+            <li><a href="/admin/email">{t('smtp.title')}</a></li>
           </ul>
         {/if}
         <button type="button" class="menu-item" onclick={onlogout}>{t('auth.logout')}</button>

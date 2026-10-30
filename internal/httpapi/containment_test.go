@@ -210,7 +210,8 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
 	// en TestLoginMeLogout, TestPreferences, TestProfile, TestInviteFlow, TestInviteResend, TestHealthViews,
-	// TestAreaAdminLimits, TestRoutingFallbacks y TestBranding (la marca es de la instalación, no de un área). Borrar
+	// TestAreaAdminLimits, TestRoutingFallbacks, TestBranding y TestSMTPAdmin (la marca y el correo son de la instalación,
+	// no de un área). Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
 	// del superadmin se prueba en TestAuditViews.
 	elsewhere := []string{
@@ -223,6 +224,7 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",
 		"GET /api/admin/site", "PATCH /api/admin/site", "POST /api/admin/site/preview",
 		"PUT /api/admin/site/assets/{kind}", "DELETE /api/admin/site/assets/{kind}", "GET /_site/{name}",
+		"GET /api/admin/smtp", "PUT /api/admin/smtp", "POST /api/admin/smtp/test",
 	}
 	err := chi.Walk(f.h.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		key := method + " " + route

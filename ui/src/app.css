@@ -698,6 +698,19 @@ mark { background: #fff1a8; color: inherit; }
 }
 /* El logo para fondo oscuro se muestra sobre la barra oscura de Kudawiki. */
 .asset-view.dark { background: #15171c; color: #9aa0a6; }
+
+/* Administración → Correo: el mismo marco que Apariencia. */
+.email-settings { max-width: 44rem; }
+.email-settings h2 { margin: 1.5rem 0 0; }
+.email-settings fieldset { margin: 0; padding: 0; border: 0; }
+.email-settings legend { padding: 0; }
+.email-settings .port { width: 7rem; }
+.email-settings section > button { margin-right: 0.75rem; }
+/* Lo que contestó el servidor SMTP, tal cual: puede ser largo y sin espacios. */
+.smtp-detail {
+  margin: 0.5rem 0 0; padding: 0.625rem 0.75rem; border-radius: 6px; background: var(--kw-bg-subtle);
+  font-size: 0.8125rem; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .asset-view img { max-width: 100%; max-height: 2.5rem; }
 
 /* Mi perfil (SPEC §8.5.2): una columna sin cajas, como Apariencia. */

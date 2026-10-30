@@ -149,6 +149,7 @@ type Service struct {
 	audit  *audit.Recorder
 	fixed  map[string]*string // claves del archivo o de las variables, ya validadas
 	locked []string
+	email  emailLogo
 }
 
 // NewService valida lo que viene del archivo de configuración: un color mal escrito ahí impide

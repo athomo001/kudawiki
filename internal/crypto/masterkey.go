@@ -1,4 +1,5 @@
-// Package crypto maneja la MASTER_KEY; el cifrado de sobre de los sellados llega en F7 (SPEC §6.3).
+// Package crypto maneja la MASTER_KEY y los secretos de configuración que cifra (SPEC §1, §10.2);
+// el cifrado de sobre de los sellados llega en F7 (§6.3).
 package crypto
 
 import (

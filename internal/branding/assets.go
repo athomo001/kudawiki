@@ -135,8 +135,11 @@ func readSVG(svg []byte) (icon *oksvg.SvgIcon, err error) {
 }
 
 // render dibuja la imagen con su lado mayor de size px; nil si un SVG no se puede rasterizar.
-func (s source) render(size int) image.Image {
-	scale := float64(size) / math.Max(s.width, s.height)
+func (s source) render(size int) image.Image { return s.fit(size, size) }
+
+// fit dibuja la imagen lo más grande que entre en maxW × maxH, sin deformarla.
+func (s source) fit(maxW, maxH int) image.Image {
+	scale := math.Min(float64(maxW)/s.width, float64(maxH)/s.height)
 	w, h := max(1, int(math.Round(s.width*scale))), max(1, int(math.Round(s.height*scale)))
 	out := image.NewRGBA(image.Rect(0, 0, w, h))
 	if s.raster != nil {

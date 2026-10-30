@@ -50,6 +50,16 @@ type Config struct {
 		LoginMessage  *string `yaml:"login_message"`
 		ShowPoweredBy *bool   `yaml:"show_powered_by"`
 	} `yaml:"branding"`
+	// SMTP: el servidor de correo (SPEC §12). Misma regla que la marca: lo que esté aquí gana
+	// sobre el panel y se muestra bloqueado. Lo valida el paquete mail.
+	SMTP struct {
+		Host     *string `yaml:"host"`
+		Port     *int    `yaml:"port"`
+		Security *string `yaml:"security"` // starttls | tls | none
+		Username *string `yaml:"username"`
+		Password *string `yaml:"password"`
+		From     *string `yaml:"from"`
+	} `yaml:"smtp"`
 }
 
 // AuditFloorDays es el piso de retención de la auditoría (SPEC §11.2): el superadmin es a quien
@@ -124,6 +134,11 @@ func Load(path string) (Config, error) {
 		"KUDAWIKI_BRANDING_COLOR_HEADER":  &c.Branding.ColorHeader,
 		"KUDAWIKI_BRANDING_COLOR_SIDEBAR": &c.Branding.ColorSidebar,
 		"KUDAWIKI_BRANDING_LOGIN_MESSAGE": &c.Branding.LoginMessage,
+		"KUDAWIKI_SMTP_HOST":              &c.SMTP.Host,
+		"KUDAWIKI_SMTP_SECURITY":          &c.SMTP.Security,
+		"KUDAWIKI_SMTP_USERNAME":          &c.SMTP.Username,
+		"KUDAWIKI_SMTP_PASSWORD":          &c.SMTP.Password,
+		"KUDAWIKI_SMTP_FROM":              &c.SMTP.From,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = &v
@@ -135,6 +150,13 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("KUDAWIKI_BRANDING_SHOW_POWERED_BY: %w", err)
 		}
 		c.Branding.ShowPoweredBy = &b
+	}
+	if v, ok := os.LookupEnv("KUDAWIKI_SMTP_PORT"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_SMTP_PORT: %w", err)
+		}
+		c.SMTP.Port = &n
 	}
 	if v, ok := os.LookupEnv("KUDAWIKI_UPLOAD_MAX_BYTES"); ok {
 		n, err := strconv.ParseInt(v, 10, 64)

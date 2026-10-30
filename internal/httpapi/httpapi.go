@@ -23,6 +23,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/repo"
@@ -122,6 +123,13 @@ type brandingService interface {
 	File(ctx context.Context, name string) (repo.SiteAsset, error)
 }
 
+// mailService es el correo (SPEC §12).
+type mailService interface {
+	Settings(ctx context.Context) (mail.Settings, error)
+	Update(ctx context.Context, actorID string, p mail.Patch) (mail.Settings, error)
+	SendTest(ctx context.Context, to repo.User) error
+}
+
 type readiness interface {
 	Ready(ctx context.Context) error
 }
@@ -132,6 +140,7 @@ type Deps struct {
 	Wiki       wikiService
 	Media      mediaService
 	Branding   brandingService
+	Mail       mailService
 	Read       reader
 	DB         readiness
 	UI         fs.FS // contenido de ui/dist
@@ -315,6 +324,9 @@ var domainErrors = map[error]int{
 	branding.ErrLocked:          http.StatusConflict,
 	branding.ErrTooLarge:        http.StatusRequestEntityTooLarge,
 	branding.ErrUnsupportedType: http.StatusUnsupportedMediaType,
+	mail.ErrInvalid:             http.StatusUnprocessableEntity,
+	mail.ErrLocked:              http.StatusConflict,
+	mail.ErrNotConfigured:       http.StatusConflict,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.
