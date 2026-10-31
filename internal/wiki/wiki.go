@@ -21,6 +21,14 @@ var (
 	// ErrPathUnavailable vale para una ruta ocupada y para una bajo un padre que quien escribe no
 	// ve: un solo mensaje, para que la diferencia no delate páginas ocultas (§19.35).
 	ErrPathUnavailable = errors.New("path_unavailable")
+	// ErrSecretInHeading: un título de sección se indexa y arma el ancla de la URL con su texto,
+	// así que un texto oculto ahí quedaría a la vista (§4.10).
+	ErrSecretInHeading = errors.New("secret_in_heading")
+	// ErrSecretUnclosed: un [[secret: que no se cierra en su línea no se reconoce y se vería tal
+	// cual; para ocultar varias líneas está :::secret (§4.10).
+	ErrSecretUnclosed = errors.New("secret_unclosed")
+	// ErrSummaryRequired: el área exige resumen del cambio y no vino (§4.3).
+	ErrSummaryRequired = errors.New("summary_required")
 )
 
 const (
@@ -46,6 +54,45 @@ func mediaRefs(markdown string) []string {
 
 func ValidSlug(slug string) bool { return len(slug) <= 255 && slugRe.MatchString(slug) }
 
+// CheckPage valida lo que se publica, y lo que se propone, con las mismas reglas (§4.1, §5.2).
+// El título llega ya sin espacios alrededor; un idioma vacío es "el de siempre".
+func CheckPage(slug, title, markdown, lang string) error {
+	if !ValidSlug(slug) || title == "" || utf8.RuneCountInString(title) > maxTitle || len(markdown) > maxMarkdown ||
+		(lang != "" && lang != "es" && lang != "en") {
+		return ErrInvalidPage
+	}
+	if strings.Contains(markdown, "secret") {
+		return checkSecrets(markdown)
+	}
+	return nil
+}
+
+// CheckDraft valida un borrador del autoguardado (§4.11) con los topes de una página, pero sin
+// exigir lo que todavía se está escribiendo: puede no tener título ni un texto oculto cerrado.
+func CheckDraft(slug, title, markdown string, base int) error {
+	if !ValidSlug(slug) || utf8.RuneCountInString(title) > maxTitle || len(markdown) > maxMarkdown || base < 0 {
+		return ErrInvalidPage
+	}
+	return nil
+}
+
+// CheckSummary aplica el resumen obligatorio del área (§4.3) a un cambio de una página que
+// existe (base > 0): crear una página no lo exige, y revertir, mover o borrar escriben el suyo.
+// Lo usan guardar directo y proponer.
+func (s *Service) CheckSummary(ctx context.Context, sc repo.Scope, base int, summary string) error {
+	if base == 0 || strings.TrimSpace(summary) != "" {
+		return nil
+	}
+	ws, err := s.store.WorkspaceByID(ctx, sc.WsID)
+	if err != nil {
+		return err
+	}
+	if ws.RequireChangeSummary {
+		return ErrSummaryRequired
+	}
+	return nil
+}
+
 type store interface {
 	PageBySlug(ctx context.Context, s repo.Scope, slug string) (repo.Page, error)
 	CreatePage(ctx context.Context, s repo.Scope, w repo.PageWrite) (string, error)
@@ -58,6 +105,7 @@ type store interface {
 	DeletePages(ctx context.Context, s repo.Scope, actorID, slug string) (string, int, error)
 	RestorePages(ctx context.Context, s repo.Scope, actorID, id string) (int, error)
 	announcementStore
+	approvalStore
 }
 
 type Service struct {
@@ -94,6 +142,12 @@ func (s *Service) Get(ctx context.Context, sc repo.Scope, slug string) (repo.Pag
 // Save crea la página (base 0) o publica una revisión nueva sobre base. Si el título y el
 // contenido no cambiaron, no se crea revisión (SPEC §4.3).
 func (s *Service) Save(ctx context.Context, sc repo.Scope, actorID string, base int, w repo.PageWrite) error {
+	if err := s.direct(ctx, sc, w.Slug); err != nil {
+		return err
+	}
+	if err := s.CheckSummary(ctx, sc, base, w.Summary); err != nil {
+		return err
+	}
 	id, rev, err := s.save(ctx, sc, actorID, base, w)
 	switch {
 	case err != nil || rev == 0:
@@ -110,9 +164,8 @@ func (s *Service) Save(ctx context.Context, sc repo.Scope, actorID string, base 
 func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base int, w repo.PageWrite) (string, int, error) {
 	w.Title, w.Summary, w.AuthorID = strings.TrimSpace(w.Title), strings.TrimSpace(w.Summary), actorID
 	w.MediaIDs, w.Links = mediaRefs(w.Markdown), Links(w.Markdown)
-	if !ValidSlug(w.Slug) || w.Title == "" || utf8.RuneCountInString(w.Title) > maxTitle || len(w.Markdown) > maxMarkdown ||
-		(w.Lang != "" && w.Lang != "es" && w.Lang != "en") {
-		return "", 0, ErrInvalidPage
+	if err := CheckPage(w.Slug, w.Title, w.Markdown, w.Lang); err != nil {
+		return "", 0, err
 	}
 	if base == 0 {
 		if w.Lang == "" {
@@ -152,6 +205,9 @@ func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base 
 
 // Revert publica una revisión nueva con el contenido de la n; la historia no se reescribe.
 func (s *Service) Revert(ctx context.Context, sc repo.Scope, actorID, slug string, n, base int) error {
+	if err := s.direct(ctx, sc, slug); err != nil {
+		return err
+	}
 	p, err := s.store.PageBySlug(ctx, sc, slug)
 	if err != nil {
 		return err
@@ -169,6 +225,9 @@ func (s *Service) Revert(ctx context.Context, sc repo.Scope, actorID, slug strin
 
 // Delete manda a la papelera la página y las subpáginas que quien borra ve (SPEC §4.5, §19.37).
 func (s *Service) Delete(ctx context.Context, sc repo.Scope, actorID, slug string) error {
+	if err := s.direct(ctx, sc, slug); err != nil {
+		return err
+	}
 	id, n, err := s.store.DeletePages(ctx, sc, actorID, slug)
 	if err == nil {
 		s.record(ctx, sc, audit.PageDelete, id, map[string]any{"pages": n})

@@ -65,7 +65,7 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F1 · Esqueleto | 🟡 Falta el CI en GitHub |
 | F2 · Wiki con aislamiento | ✅ Hecha |
 | F3 · Niveles, auditoría y respaldos | ✅ Hecha |
-| F4 · Propuestas y notificaciones | 🟡 En curso: correo listo |
+| F4 · Propuestas y notificaciones | 🟡 En curso: correo, recuperación de contraseña, propuestas, barra de formato, notificaciones, autoguardado, aviso de edición concurrente, resumen obligatorio, retención del historial, navegador de archivos y autocompletado de `[[enlaces]]` listos, con el criterio de salida cumplido; falta sumar las propuestas a la pantalla Salud (§13.7) |
 | F5 · Espacio personal y vigencia | ⚪ Pendiente |
 | F6 · Identidad, AD y 2FA | ⚪ Pendiente |
 | F7 · Documentos sellados | ⚪ Pendiente |

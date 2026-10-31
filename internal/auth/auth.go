@@ -47,7 +47,10 @@ type store interface {
 	DeleteSession(ctx context.Context, tokenHash string) error
 	CreateInvitedUser(ctx context.Context, u repo.User, t repo.AuthToken) error
 	AcceptInvite(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
-	ReplaceInvite(ctx context.Context, userID string, t repo.AuthToken) error
+	ReplaceToken(ctx context.Context, userID, kind string, t repo.AuthToken) error
+	ResetTokenUser(ctx context.Context, tokenHash string, now time.Time) (string, error)
+	CompleteReset(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
+	ListUsers(ctx context.Context) ([]repo.User, error)
 	SetPreferences(ctx context.Context, userID, locale string, prefs repo.ReadingPrefs) error
 	// Recuperación por consola (SPEC §13.6).
 	DeleteSessions(ctx context.Context, userID string) (int64, error)
@@ -68,14 +71,19 @@ type Service struct {
 	now       func() time.Time
 	dummyHash string // se verifica contra él cuando el email no existe, para no revelarlo por el tiempo
 	relaxed   bool   // política de contraseñas de desarrollo (SPEC §8.1)
+	email     Email  // el correo de §8.5; vacío en la consola
+	resetTTL  time.Duration
+	inviteTTL time.Duration
+	async     func(func()) // lo que corre fuera de la petición; los tests lo hacen sincrónico
 
 	mu       sync.Mutex
 	attempts map[string]attempt
 }
 
 type attempt struct {
-	count int
-	since time.Time
+	count  int
+	since  time.Time
+	window time.Duration
 }
 
 func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolicy bool) (*Service, error) {
@@ -83,7 +91,8 @@ func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolic
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{}}, nil
+	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{},
+		resetTTL: defaultResetTTL, inviteTTL: defaultInviteTTL, async: func(f func()) { go f() }}, nil
 }
 
 // CreateSuperadmin es el único alta de usuarios de F1: la usa `kudawiki init` (SPEC §13.6).
@@ -178,25 +187,28 @@ func actorOf(u repo.User) *audit.Actor {
 	return &audit.Actor{ID: u.ID, Email: u.Email, Name: u.FullName}
 }
 
-// allow cuenta intentos por ventana fija; al pasar el tope, bloquea hasta que la ventana venza.
-// Devuelve el número de este intento dentro de la ventana.
-func (s *Service) allow(key string) (int, error) {
+// allow cuenta intentos de login por ventana fija; al pasar el tope, bloquea hasta que la
+// ventana venza. Devuelve el número de este intento dentro de la ventana.
+func (s *Service) allow(key string) (int, error) { return s.count(key, loginMaxAttempts, loginWindow) }
+
+// count es el contador de allow con otro tope y otra ventana (el formulario de §8.5.1).
+func (s *Service) count(key string, limit int, window time.Duration) (int, error) {
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.attempts) > 10_000 { // barrido perezoso para que el mapa no crezca sin límite
 		for k, a := range s.attempts {
-			if now.Sub(a.since) >= loginWindow {
+			if now.Sub(a.since) >= a.window {
 				delete(s.attempts, k)
 			}
 		}
 	}
 	a := s.attempts[key]
-	if now.Sub(a.since) >= loginWindow {
-		a = attempt{since: now}
+	if now.Sub(a.since) >= a.window {
+		a = attempt{since: now, window: window}
 	}
-	if a.count >= loginMaxAttempts {
-		return 0, RateLimitedError{RetryAfter: a.since.Add(loginWindow).Sub(now)}
+	if a.count >= limit {
+		return 0, RateLimitedError{RetryAfter: a.since.Add(window).Sub(now)}
 	}
 	a.count++
 	s.attempts[key] = a
@@ -217,6 +229,17 @@ func (s *Service) lift(key string, unlockedAt time.Time) bool {
 
 // Authenticate valida la sesión y devuelve su usuario. Una sesión vencida se borra al verla.
 func (s *Service) Authenticate(ctx context.Context, token string) (repo.User, error) {
+	return s.session(ctx, token, true)
+}
+
+// Check valida la sesión como Authenticate pero no cuenta como actividad: lo que se repite
+// solo, como el latido del aviso de edición (§4.11), no debe mantener viva una sesión que
+// nadie usa (la inactividad de §8.2).
+func (s *Service) Check(ctx context.Context, token string) (repo.User, error) {
+	return s.session(ctx, token, false)
+}
+
+func (s *Service) session(ctx context.Context, token string, touch bool) (repo.User, error) {
 	if token == "" {
 		return repo.User{}, ErrNoSession
 	}
@@ -239,7 +262,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (repo.User, er
 	if !u.IsActive {
 		return repo.User{}, ErrNoSession
 	}
-	if now.Sub(sess.LastSeenAt) > touchEvery {
+	if touch && now.Sub(sess.LastSeenAt) > touchEvery {
 		if err := s.store.TouchSession(ctx, h, now); err != nil {
 			return repo.User{}, err
 		}

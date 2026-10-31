@@ -1,6 +1,7 @@
 package wiki
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -95,10 +96,13 @@ func TestRenderExtensions(t *testing.T) {
 		":::tabs\n::: tab Linux\nuno\n:::\n::: tab Windows\ndos\n:::\n:::": `<section class="tab"><p class="tab-title">Linux</p><p>uno</p>`,
 		":::steps\n1. a\n2. b\n:::":                                        `<div class="steps"><ol>`,
 		":::details Mas info\noculto\n:::":                                 `<details><summary>Mas info</summary><p>oculto</p>`,
+		":::secret\n1. **uno**\n2. dos\n:::":                               `<div class="secret secret-block"><div class="secret-value"><ol>`,
 		"```mermaid\ngraph TD; A-->B\n```":                                 `<pre class="mermaid">graph TD; A--&gt;B`,
 		"Area $a^2$ y precio $5 o $ x $":                                   `<span class="math-inline">a^2</span> y precio $5 o $ x $`,
 		"$$E=mc^2$$":                                                       `<span class="math-display">E=mc^2</span>`,
 		"Pulsa [[Ctrl+K]].":                                                "<kbd>Ctrl</kbd>+<kbd>K</kbd>",
+		"Clave: [[secret:P@ss<w0rd>|x]]":                                   `Clave: <span class="secret"><span class="secret-value">P@ss&lt;w0rd&gt;|x</span></span>`,
+		"[[secret:]]":                                                      "<p>[[secret:]]</p>",
 		"Ver [[redes/vpn|la VPN]].":                                        `<a class="wikilink" href="/w/ti/p/redes/vpn" rel="nofollow">la VPN</a>`,
 		"[[children]]":                                                     `<ul class="children"><li><a href="/w/ti/p/redes/vpn" rel="nofollow">VPN</a></li></ul>`,
 		"[[toc]]\n\n## Uno\n\n### Dos":                                     `<ul class="toc"><li><a href="#uno" rel="nofollow">Uno</a></li><li class="sub"><a href="#dos" rel="nofollow">Dos</a></li></ul>`,
@@ -158,4 +162,87 @@ func FuzzRender(f *testing.F) {
 			}
 		}
 	})
+}
+
+// Tamaño y posición de imagen como en Wiki.js: ![texto](imagen =ANCHOxALTO){.align-center},
+// sin HTML ni estilos (§4.4).
+func TestImageSize(t *testing.T) {
+	for src, want := range map[string][]string{
+		"![Banner](/api/w/ti/media/01M66SH8QSRJCFWVV42VE905M9 =480x)": {`src="/api/w/ti/media/01M66SH8QSRJCFWVV42VE905M9"`, `alt="Banner"`, `width="480"`},
+		"![a](/a.png =480x270)": {`width="480"`, `height="270"`},
+		"![a](/a.png =x200)":    {`height="200"`},
+		// Porcentaje del ancho de la página, y posición con las clases de Wiki.js.
+		"![a](/a.png =50%)":                    {`width="50%"`},
+		"![a](/a.png =25%){.align-left} Texto": {`<img src="/a.png" alt="a" width="25%" class="align-left"> Texto`},
+		"![a](/a.png){.align-center}":          {`<img src="/a.png" alt="a" class="align-center">`},
+		"![a](/a.png =320x){.align-right}":     {`width="320"`, `class="align-right"`},
+		// Dos en la misma línea, o en líneas seguidas: el mismo párrafo, una al lado de la otra.
+		"![a](/a.png =300x) ![b](/b.png =300x)":  {`<p><img src="/a.png" alt="a" width="300"> <img src="/b.png" alt="b" width="300"></p>`},
+		"![a](/a.png =300x)\n![b](/b.png =300x)": {`width="300">` + "\n" + `<img src="/b.png"`},
+	} {
+		out, _ := render(t, src, Options{})
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("Render(%q)\n got: %s\nwant: %s", src, out, w)
+			}
+		}
+	}
+	for src, notWant := range map[string]string{
+		"![a](/a.png =x)":       "<img",  // sin número no es tamaño: queda como texto
+		"![a](/a.png =0x)":      "<img",  // cero tampoco
+		"![a](/a.png =12345x)":  "<img",  // ni más de cuatro cifras
+		"`![a](/a.png =300x)`":  "<img",  // en código es código
+		"![a](data:x =300x)":    "data:", // el resto de las reglas sigue igual
+		"![a\"b](/a.png =300x)": `a"b"`,  // el texto se escapa
+		"![a](/a.png =150%)":    "<img",  // más de 100 % no
+		"![a](/a.png =0%)":      "<img",  // ni 0 %
+		"![a](/a.png =50%x20)":  "<img",  // porcentaje con alto, tampoco
+		"![a](/a.png =480)":     "<img",  // en píxeles va con x, como en Wiki.js
+		// Una clase que no es de posición no pasa: queda como texto al lado de la imagen.
+		"![a](/a.png){.evil}": "class=",
+	} {
+		if out, _ := render(t, src, Options{}); strings.Contains(out, notWant) {
+			t.Errorf("Render(%q) = %s, must not contain %s", src, out, notWant)
+		}
+	}
+	if out, _ := render(t, "![a](/a.png)", Options{}); strings.Contains(out, "width") {
+		t.Errorf("without size: %s", out)
+	}
+}
+
+// Texto oculto (§4.10): no entra a la búsqueda ni al índice, y no puede ir en un título de
+// sección, porque el título se indexa y arma el ancla de la URL con su texto.
+func TestSecret(t *testing.T) {
+	d := IndexDoc("VPN", "", "Usuario soporte, clave [[secret:Hunter2!]] y [[redes/vpn]].", "es")
+	if strings.Contains(d.Content, "Hunter2") || !strings.Contains(d.Content, "soporte") {
+		t.Errorf("indexed content: %q", d.Content)
+	}
+	for _, md := range []string{"## Clave [[secret:Hunter2!]]\n", "Clave [[secret:Hunter2!]]\n=====\n"} {
+		if err := CheckPage("redes/vpn", "VPN", md, "es"); !errors.Is(err, ErrSecretInHeading) {
+			t.Errorf("secret in heading %q: %v", md, err)
+		}
+	}
+	// En un párrafo sí; dentro de código no es texto oculto, es código.
+	if err := CheckPage("redes/vpn", "VPN", "Clave\n=====\n\n[[secret:x]] en `[[secret:y]]`\n\n```\n# [[secret:z]]\n```\n", "es"); err != nil {
+		t.Errorf("secret outside headings: %v", err)
+	}
+
+	// El bloque oculta párrafos enteros: no se busca, y un título dentro saldría en el índice.
+	d = IndexDoc("VPN", "", "Antes.\n\n:::secret\nUsuario root\n\n1. **Clave:** Hunter2!\n:::\n\nDespués.", "es")
+	if strings.Contains(d.Content, "Hunter2") || strings.Contains(d.Content, "root") || !strings.Contains(d.Content, "Después") {
+		t.Errorf("indexed block: %q", d.Content)
+	}
+	if err := CheckPage("redes/vpn", "VPN", ":::secret\n## Claves\nx\n:::\n", "es"); !errors.Is(err, ErrSecretInHeading) {
+		t.Errorf("heading in secret block: %v", err)
+	}
+
+	// Un [[secret: sin cerrar en su línea no se reconoce y se publicaría a la vista: se rechaza.
+	for _, md := range []string{"[[secret:uno\n\ndos]]", "Clave [[secret:uno\ndos]] fin", "- [[secret:x"} {
+		if err := CheckPage("redes/vpn", "VPN", md, "es"); !errors.Is(err, ErrSecretUnclosed) {
+			t.Errorf("unclosed %q: %v", md, err)
+		}
+	}
+	if err := CheckPage("redes/vpn", "VPN", "Se escribe `[[secret:clave` y se cierra.\n\n```\n[[secret:\n```\n", "es"); err != nil {
+		t.Errorf("unclosed inside code: %v", err)
+	}
 }

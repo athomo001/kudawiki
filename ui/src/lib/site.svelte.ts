@@ -8,9 +8,10 @@ export type Site = {
   header_dark: boolean; // sobre la barra va texto claro: ahí se usa el logo para fondo oscuro
   logo: string; // versión del logo subido, o vacío (logo de Kudawiki)
   logo_dark: string;
+  password_reset: boolean; // el login ofrece "¿Olvidaste tu contraseña?" (§8.5.1): hay correo
 };
 
-const fallback: Site = { title: 'Kudawiki', company: '', login_message: '', show_powered_by: true, header_dark: true, logo: '', logo_dark: '' };
+const fallback: Site = { title: 'Kudawiki', company: '', login_message: '', show_powered_by: true, header_dark: true, logo: '', logo_dark: '', password_reset: false };
 
 function embedded(): Site {
   try {

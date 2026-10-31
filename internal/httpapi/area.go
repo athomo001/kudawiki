@@ -22,7 +22,9 @@ func scopeOf(r *http.Request) repo.Scope { return r.Context().Value(scopeKey{}).
 func (a api) areaRoutes(r chi.Router) {
 	r.Use(a.workspaceBoundary)
 	a.pageRoutes(r)
+	a.proposalRoutes(r)
 	a.areaHomeRoutes(r)
+	a.draftRoutes(r)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/settings", a.areaSettings)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Patch("/settings", a.updateAreaSettings)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/health", a.areaHealth)
@@ -111,26 +113,35 @@ func (a api) removeMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// areaSettings es la configuración del área para su admin (SPEC §14.3). En F3: nombre y
-// descripción; el modo de aprobación y lo demás llegan con F4.
+// areaSettings es la configuración del área para su admin (SPEC §14.3): nombre, descripción,
+// propuestas (§5.1) e historial (§4.3); las excepciones por subárbol van en /approval-overrides.
 func (a api) areaSettings(w http.ResponseWriter, r *http.Request) {
 	ws, err := a.Read.WorkspaceByID(r.Context(), scopeOf(r).WsID)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.json(w, http.StatusOK, map[string]string{"name": ws.Name, "description": ws.Description})
+	a.json(w, http.StatusOK, map[string]any{"name": ws.Name, "description": ws.Description,
+		"approval_mode": ws.ApprovalMode, "viewers_can_propose": ws.ViewersCanPropose,
+		"require_change_summary": ws.RequireChangeSummary, "keep_last": ws.KeepLast, "keep_days": ws.KeepDays})
 }
 
 func (a api) updateAreaSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
+		Name              *string `json:"name"`
+		Description       *string `json:"description"`
+		ApprovalMode      *string `json:"approval_mode"`
+		ViewersCanPropose *bool   `json:"viewers_can_propose"`
+		RequireSummary    *bool   `json:"require_change_summary"`
+		KeepLast          *int    `json:"keep_last"`
+		KeepDays          *int    `json:"keep_days"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
-	if err := a.Workspaces.Update(r.Context(), scopeOf(r), in.Name, in.Description); err != nil {
+	s := workspace.Settings{Name: in.Name, Description: in.Description, ApprovalMode: in.ApprovalMode, ViewersCanPropose: in.ViewersCanPropose,
+		RequireChangeSummary: in.RequireSummary, KeepLast: in.KeepLast, KeepDays: in.KeepDays}
+	if err := a.Workspaces.Update(r.Context(), scopeOf(r), s); err != nil {
 		a.fail(w, r, err)
 		return
 	}

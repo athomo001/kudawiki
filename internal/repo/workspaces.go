@@ -31,6 +31,12 @@ type Workspace struct {
 	Slug        string
 	Name        string
 	Description string // la escribe el admin del área (§3.1)
+	// Propuestas (§5.1): direct o required, y si los lectores pueden proponer (§19.5).
+	ApprovalMode      string
+	ViewersCanPropose bool
+	// Historial (§4.3): resumen obligatorio y retención; 0 = sin límite.
+	RequireChangeSummary bool
+	KeepLast, KeepDays   int
 }
 
 // Membership es un área vista por uno de sus miembros.
@@ -51,15 +57,20 @@ func (r *Repo) CreateWorkspace(ctx context.Context, w Workspace) error {
 	return conflict(err)
 }
 
-// UpdateWorkspace cambia el nombre y la descripción del área del Scope (§3.1).
-func (r *Repo) UpdateWorkspace(ctx context.Context, s Scope, name, description string) error {
-	_, err := r.db.Write.ExecContext(ctx, `UPDATE workspaces SET name = ?, description = ? WHERE id = ?`, name, description, s.WsID)
+// UpdateWorkspace cambia la configuración del área del Scope (§3.1, §5.1).
+func (r *Repo) UpdateWorkspace(ctx context.Context, s Scope, w Workspace) error {
+	_, err := r.db.Write.ExecContext(ctx, `UPDATE workspaces SET name = ?, description = ?, approval_mode = ?, viewers_can_propose = ?,
+		 require_change_summary = ?, revisions_keep_last = nullif(?, 0), revisions_keep_days = nullif(?, 0) WHERE id = ?`,
+		w.Name, w.Description, w.ApprovalMode, w.ViewersCanPropose, w.RequireChangeSummary, w.KeepLast, w.KeepDays, s.WsID)
 	return err
 }
 
+const workspaceColumns = `w.id, w.slug, w.name, w.description, w.approval_mode, w.viewers_can_propose,
+	w.require_change_summary, coalesce(w.revisions_keep_last, 0), coalesce(w.revisions_keep_days, 0)`
+
 // ListWorkspaces y WorkspaceByID son del panel del superadmin, que administra áreas sin ser miembro.
 func (r *Repo) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
-	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, slug, name, description FROM workspaces ORDER BY name`)
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces w ORDER BY w.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,12 +78,12 @@ func (r *Repo) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 func (r *Repo) WorkspaceByID(ctx context.Context, id string) (Workspace, error) {
-	return scanWorkspace(r.db.Read.QueryRowContext(ctx, `SELECT id, slug, name, description FROM workspaces WHERE id = ?`, id))
+	return scanWorkspace(r.db.Read.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces w WHERE w.id = ?`, id))
 }
 
 func scanWorkspace(row scanner) (Workspace, error) {
 	var w Workspace
-	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description)
+	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description, &w.ApprovalMode, &w.ViewersCanPropose, &w.RequireChangeSummary, &w.KeepLast, &w.KeepDays)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Workspace{}, ErrNotFound
 	}
@@ -83,7 +94,7 @@ func scanWorkspace(row scanner) (Workspace, error) {
 // membresía dan el mismo ErrNotFound, en una sola consulta, para que no se distingan (SPEC §3.3).
 func (r *Repo) MembershipBySlug(ctx context.Context, slug, userID string) (Membership, error) {
 	return scanMembership(r.db.Read.QueryRowContext(ctx,
-		`SELECT w.id, w.slug, w.name, w.description, m.role FROM workspaces w
+		`SELECT `+workspaceColumns+`, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
 		 WHERE w.slug = ? AND m.user_id = ?`, slug, userID))
 }
@@ -91,7 +102,7 @@ func (r *Repo) MembershipBySlug(ctx context.Context, slug, userID string) (Membe
 // Memberships lista las áreas de una persona (para /auth/me).
 func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT w.id, w.slug, w.name, w.description, m.role FROM workspaces w
+		`SELECT `+workspaceColumns+`, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
 		 WHERE m.user_id = ? ORDER BY w.name`, userID)
 	if err != nil {
@@ -102,7 +113,8 @@ func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, er
 
 func scanMembership(row scanner) (Membership, error) {
 	var m Membership
-	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.Role)
+	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.ApprovalMode, &m.ViewersCanPropose,
+		&m.RequireChangeSummary, &m.KeepLast, &m.KeepDays, &m.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Membership{}, ErrNotFound
 	}

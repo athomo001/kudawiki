@@ -32,6 +32,7 @@ type Service struct {
 	texts         map[string]map[string]string // idioma → clave → texto
 	baseURL       string
 	now           func() time.Time
+	wake          chan struct{}  // Enqueue despierta al worker
 	roots         *x509.CertPool // nil: los certificados del sistema; los tests ponen el de su servidor
 }
 
@@ -45,7 +46,7 @@ func NewService(s store, b brand, rec *audit.Recorder, masterKey []byte, fromCon
 	}
 	// locked nunca es nil: la interfaz espera una lista, aunque esté vacía.
 	svc := &Service{store: s, brand: b, audit: rec, key: masterKey, fixed: fixed, locked: []string{}, texts: map[string]map[string]string{},
-		baseURL: strings.TrimSuffix(baseURL, "/"), now: now}
+		baseURL: strings.TrimSuffix(baseURL, "/"), now: now, wake: make(chan struct{}, 1)}
 	if hasPassword {
 		svc.fixedPassword = &password
 		svc.locked = append(svc.locked, "password")
@@ -83,7 +84,7 @@ func (s *Service) SendTest(ctx context.Context, to repo.User) error {
 	if !c.Enabled {
 		return ErrNotConfigured
 	}
-	msg, err := s.build(ctx, c, to.Email, to.Locale, "test", nil, s.baseURL+"/")
+	msg, err := s.build(ctx, c, Message{To: to.Email, Lang: to.Locale, Template: "test", URL: s.baseURL + "/"})
 	if err == nil {
 		err = s.deliver(ctx, c, to.Email, msg)
 	}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, canEdit, codeOf, type Area, type PageRef, type TagCount } from '../lib/api';
+  import { api, canEdit, canWrite, codeOf, type Area, type PageRef, type Proposal, type TagCount } from '../lib/api';
   import { t, errorText, type Key } from '../lib/i18n/index.svelte';
   import Tree, { buildTree } from '../components/Tree.svelte';
   import Reader from './Reader.svelte';
@@ -9,10 +9,12 @@
   import TagPages from './TagPages.svelte';
   import SearchResults from './SearchResults.svelte';
   import Trash from './Trash.svelte';
+  import Files from './Files.svelte';
   import Audit from './Audit.svelte';
   import Icon from '../components/Icon.svelte';
   import Settings from './Settings.svelte';
   import Health from './Health.svelte';
+  import Proposals from './Proposals.svelte';
   import NotFound from './NotFound.svelte';
   import SiteFooter from '../components/SiteFooter.svelte';
 
@@ -27,6 +29,9 @@
   const view = $derived(sub.match(/^(p|edit|history|tags)\/(.+)$/));
   const kind = $derived(view?.[1]);
   const pageSlug = $derived(view?.[2] ?? '');
+  // Bandeja de propuestas: proposals, proposals/{id} y proposals/{id}/edit (SPEC §5.2).
+  const proposalView = $derived(sub.match(/^proposals(?:\/([^/]+)(\/edit)?)?$/));
+  let pending = $state(0);
   const titles = $derived(new Map(refs.map((r) => [r.slug, r.title])));
 
   // Migas de pan (SPEC §15): área / carpetas / página. Una carpeta que no es página va sin enlace.
@@ -41,6 +46,7 @@
   // Lo que se ve, si no es una página: va al final de las migas.
   const viewKeys: Record<string, Key | undefined> = {
     trash: 'trash.title',
+    files: 'files.title',
     audit: 'audit.title',
     members: 'admin.members_link',
     settings: 'settings.title',
@@ -50,10 +56,11 @@
     history: 'page.history',
     edit: 'page.edit',
   };
-  const viewKey = $derived(viewKeys[kind ?? sub]);
+  const viewKey = $derived(proposalView ? 'proposals.title' : viewKeys[kind ?? sub]);
   const viewLabel = $derived(kind === 'tags' ? `#${decodeURIComponent(pageSlug)}` : viewKey ? t(viewKey) : '');
 
-  const editing = $derived((sub === 'new' || kind === 'edit') && canEdit(area));
+  // Un lector entra al editor solo para proponer (§19.5); una página nueva no la propone.
+  const editing = $derived((sub === 'new' && canEdit(area)) || (kind === 'edit' && canWrite(area)) || !!proposalView?.[2]);
   // CodeMirror pesa: se descarga solo al abrir el editor, no para leer.
   const loadEditor = () => import('./Editor.svelte');
 
@@ -65,11 +72,28 @@
     }
   }
 
+  // El número junto a "Propuestas" es lo que espera al admin (diseño aprobado).
+  async function loadPending() {
+    if (area.role !== 'admin') return;
+    try {
+      pending = (await api<Proposal[]>('GET', `${base}/proposals?view=pending`)).length;
+    } catch {
+      pending = 0;
+    }
+  }
+
+  function changed() {
+    loadTree();
+    loadPending();
+  }
+
   // Al cambiar de área se recarga todo: nada del área anterior queda en pantalla (SPEC §15).
   $effect(() => {
     refs = [];
     misses = [];
+    pending = 0;
     loadTree();
+    loadPending();
     // "Lo que buscan y no encuentran" es solo para el admin del área (SPEC §9.6).
     if (area.role === 'admin') api<typeof misses>('GET', `${base}/search-misses`).then((m) => (misses = m)).catch(() => {});
   });
@@ -77,7 +101,7 @@
 
 {#if editing}
   {#await loadEditor() then { default: Editor }}
-    {#key pageSlug}<Editor {area} slug={kind === 'edit' ? pageSlug : undefined} {refs} onsaved={loadTree} />{/key}
+    {#key sub}<Editor {area} slug={kind === 'edit' ? pageSlug : undefined} proposal={proposalView?.[1]} {selfId} {refs} onsaved={changed} />{/key}
   {/await}
 {:else}
 <div class="area">
@@ -89,10 +113,16 @@
       {/if}
     </div>
     <a class="nav-item" href={base} aria-current={sub === '' ? 'page' : undefined}><Icon name="home" size={16} /> {t('nav.area_home')}</a>
+    {#if canWrite(area)}
+      <a class="nav-item" href={`${base}/proposals`} aria-current={proposalView ? 'page' : undefined}>
+        <Icon name="list" size={16} /> {t('proposals.title')}{#if pending}<span class="nav-count">{pending}</span>{/if}
+      </a>
+    {/if}
     <hr />
     <Tree nodes={buildTree(refs)} {base} current={pageSlug} />
     {#if canEdit(area)}
       <hr />
+      <a class="nav-item" href={`${base}/files`} aria-current={sub === 'files' ? 'page' : undefined}><Icon name="files" size={16} /> {t('files.title')}</a>
       <a class="nav-item" href={`${base}/trash`} aria-current={sub === 'trash' ? 'page' : undefined}><Icon name="trash" size={16} /> {t('trash.title')}</a>
       {#if area.role === 'admin'}
         <a class="nav-item" href={`${base}/members`} aria-current={sub === 'members' ? 'page' : undefined}><Icon name="people" size={16} /> {t('admin.members_link')}</a>
@@ -122,6 +152,8 @@
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
       <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
+    {:else if proposalView && canWrite(area)}
+      <Proposals {area} id={proposalView[1] ?? ''} {selfId} onchanged={changed} />
     {:else}
       <div class="view">
         {#if sub === ''}
@@ -132,6 +164,8 @@
           <TagPages {area} tag={decodeURIComponent(pageSlug)} />
         {:else if kind === 'history'}
           <History {area} slug={pageSlug} onreverted={loadTree} />
+        {:else if sub === 'files' && canEdit(area)}
+          <Files {area} />
         {:else if sub === 'trash' && canEdit(area)}
           <Trash {area} onrestored={loadTree} />
         {:else if sub === 'audit' && area.role === 'admin'}

@@ -12,7 +12,7 @@
 
   const BLOCKS = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, figcaption';
   // Lo que no se lee dentro de un bloque: listas anidadas (van aparte), fórmulas y adornos.
-  const NOT_READ = 'ul, ol, pre, svg, .katex, .heading-anchor, .footnote-backref, [aria-hidden="true"]';
+  const NOT_READ = 'ul, ol, pre, svg, .katex, .heading-anchor, .footnote-backref, .secret-value, [aria-hidden="true"]';
 
   const synth = 'speechSynthesis' in window ? speechSynthesis : undefined;
   let voices = $state(synth?.getVoices() ?? []);

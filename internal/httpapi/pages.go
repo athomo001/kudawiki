@@ -24,6 +24,9 @@ func (a api) pageRoutes(r chi.Router) {
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/access/*", a.access)
 	r.Get("/tags", a.tags)
 	r.Get("/tags/{tag}", a.taggedPages)
+	// Seguir una página: lo puede hacer cualquiera que la lea (§12.1).
+	r.Put("/watch/*", a.watch)
+	r.Delete("/watch/*", a.unwatch)
 	r.Get("/search", a.search)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/search-misses", a.searchMisses)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/audit", a.areaAudit)
@@ -31,8 +34,10 @@ func (a api) pageRoutes(r chi.Router) {
 		r.Use(a.requireRank(repo.RoleRank("editor")))
 		r.Put("/pages/*", a.savePage)
 		r.Post("/revert/*", a.revert)
-		r.Post("/render", a.preview)
 		r.Post("/media", a.uploadMedia)
+		// Navegador de archivos y borrar (§4.4): de los editores, cada archivo con el nivel de su página.
+		r.Get("/media", a.listMedia)
+		r.Delete("/media/{id}", a.deleteMedia)
 		r.Patch("/meta/*", a.setMeta)
 		r.Post("/move/*", a.move)
 		r.Delete("/pages/*", a.deletePage)
@@ -103,9 +108,19 @@ func (a api) getPage(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	watch, err := a.Notify.WatchOf(r.Context(), scopeOf(r), currentUser(r).ID, p)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	// Abrirla marca como leídos sus avisos de cambios (§12.1). Si falla, la página se lee igual.
+	if err := a.Notify.PageOpened(r.Context(), currentUser(r).ID, p.ID); err != nil {
+		a.Log.Error("mark notifications read", "err", err)
+	}
 	a.json(w, http.StatusOK, map[string]any{
 		"slug": p.Slug, "title": p.Title, "markdown": p.Markdown, "html": html, "toc": toc, "tags": tags, "lang": p.Lang, "level": p.MinRank,
 		"revision": p.Revision, "updated_by": p.UpdatedBy, "updated_at": p.UpdatedAt, "description": p.Description, "icon": p.Icon,
+		"watch": watch.Mode, "watch_via": watch.Via,
 	})
 }
 
@@ -273,6 +288,7 @@ func (a api) savePage(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	a.forgetDraft(r, chi.URLParam(r, "*"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -301,7 +317,7 @@ func (a api) history(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, len(revs))
 	for i, v := range revs {
 		out[i] = map[string]any{"revision": v.Number, "kind": v.Kind, "title": v.Title,
-			"author": v.Author, "summary": v.Summary, "created_at": v.CreatedAt}
+			"author": v.Author, "approved_by": v.Approver, "summary": v.Summary, "created_at": v.CreatedAt}
 	}
 	a.json(w, http.StatusOK, out)
 }

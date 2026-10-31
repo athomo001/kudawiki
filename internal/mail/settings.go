@@ -133,6 +133,7 @@ type store interface {
 	SiteSettings(ctx context.Context, prefix string) (map[string]string, error)
 	SiteSecret(ctx context.Context, key string) ([]byte, int, error)
 	SaveSiteSettings(ctx context.Context, values map[string]*string, secrets map[string]repo.SealedSetting, by string) error
+	queueStore
 }
 
 // config es la configuración con la contraseña en claro: solo vive en memoria, para enviar.

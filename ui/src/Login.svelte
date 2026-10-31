@@ -43,6 +43,7 @@
       {busy ? t('auth.logging_in') : t('auth.login')}
     </button>
   </form>
+  {#if site.password_reset}<p class="login-alt"><a href="/forgot">{t('reset.forgot_link')}</a></p>{/if}
   <!-- Aviso de uso de la empresa (§15.1.1): texto plano, nunca HTML. -->
   {#if site.login_message}<p class="login-message">{site.login_message}</p>{/if}
 </main>

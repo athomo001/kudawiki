@@ -10,7 +10,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F1](#f1--esqueleto-m0) | Esqueleto (M0) | Binario que arranca y permite iniciar sesión | 🟡 |
 | [F2](#f2--wiki-con-aislamiento-m1) | Wiki con aislamiento (M1) | Wiki usable por áreas + tests de contención | ✅ |
 | [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | ✅ |
-| [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ⚪ |
+| [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | 🟡 |
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ⚪ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | ⚪ |
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ⚪ |
@@ -117,12 +117,19 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 
 ## F4 — Propuestas y notificaciones (M3)
 
-- [ ] Propuestas: ciclo completo, diff, merge a 3 vías, aprobar con cambios, excepciones por subárbol.
-- [ ] Notificaciones in-app y email: outbox, agrupación, ventana de email, baja en un clic.
-- [ ] Seguir páginas.
-- [x] Correos con la marca de la empresa (logo incrustado) y correo de prueba (§12): **Administración → Correo** con candados, contraseña cifrada con la MASTER_KEY y la respuesta del servidor a la vista. *(F4.1; la cola con reintentos llega con la recuperación de contraseña, su primer uso)*
-- [ ] Recuperación de contraseña, envío de invitaciones por correo y el aviso *"Tu contraseña cambió"* (§8.5). El alta con enlace manual ya está desde F2 y el cambio de contraseña desde el perfil, desde F3.7.
-- [ ] Autoguardado en servidor y aviso de edición concurrente.
+- [x] Propuestas: ciclo completo, diff, merge a 3 vías, aprobar con cambios, excepciones por subárbol (§5), y lectores que proponen si el área lo permite (§19.5). *(F4.3; sus notificaciones, en F4.5)*
+- [x] Barra de formato del editor (diseño aprobado, §4.2) y texto oculto `[[secret:…]]` y `:::secret` (§4.10), pedidos por el dueño el 2026-10-30. *(F4.4)*
+- [x] Notificaciones in-app y email: outbox, agrupación, ventana de email, baja en un clic (§12.1), con las de propuestas y el recordatorio al aprobador (§5.3). *(F4.5; las demás categorías llegan con su función, y la purga de los avisos leídos, con §13.10 en F8)*
+- [x] Seguir páginas, solas o con sus subpáginas, y seguir lo que uno crea o edita. *(F4.5)*
+- [x] Correos con la marca de la empresa (logo incrustado) y correo de prueba (§12): **Administración → Correo** con candados, contraseña cifrada con la MASTER_KEY y la respuesta del servidor a la vista. *(F4.1; la cola con reintentos, con F4.2)*
+- [x] Recuperación de contraseña, envío de invitaciones por correo y el aviso *"Tu contraseña cambió"* (§8.5), con la cola persistente de correos (§12.1). El alta con enlace manual ya está desde F2 y el cambio de contraseña desde el perfil, desde F3.7. *(F4.2)*
+- [x] El superadmin cambia el nombre y la descripción de un área desde **Administración → Áreas**, sin ser miembro (§3.1, §14.2), pedido por el dueño el 2026-10-30. *(La dirección `/slug` sigue en F8, B17)*
+- [x] Tamaño (`=480x`, `=50%`) y posición (centrada, izquierda, derecha) de imagen como en Wiki.js, y dos imágenes lado a lado, sin HTML, con el menú *Imagen: tamaño y posición* en la barra del editor (§4.4), pedido por el dueño el 2026-10-30.
+- [x] Autoguardado en servidor y aviso de edición concurrente (§4.11): recuperar o descartar al volver, borradores de páginas nuevas y *"Ana también está editando esta página"*. *(El borrador cifrado de los sellados, con F7)*
+- [x] Resumen del cambio obligatorio por área y retención del historial (§4.3, B8).
+- [x] Navegador de archivos del área y borrar media (§4.4, B10).
+- [x] Autocompletado de `[[enlaces]]` en el editor (§15, B6). *(Las plantillas, con F5)*
+- [ ] Salud del contenido: chequeos de propuestas (pendientes hace más de N días, las que hay que rehacer), §13.7. *(Estaba en `docs/trazabilidad.md` como parte de F4 y faltaba en esta lista)*
 
 **Criterio de salida:** un área en modo `required` funciona de punta a punta con dos personas reales; un usuario local recupera su contraseña por correo.
 

@@ -151,7 +151,8 @@ const (
 // brandPage pone la marca en index.html, así la primera pintura ya sale con los colores de la
 // empresa, sin un parpadeo azul (§15.1.2). El <style> va al final del <head>, después de la hoja
 // de la interfaz, para ganarle a sus valores por defecto; la CSP lo deja pasar por su nonce.
-func brandPage(page []byte, site branding.Site, nonce string) []byte {
+// resetAvailable dice si el login muestra "¿Olvidaste tu contraseña?" (§8.5.1).
+func brandPage(page []byte, site branding.Site, resetAvailable bool, nonce string) []byte {
 	head := brandHead(site)
 	if i, j := bytes.Index(page, []byte(brandStart)), bytes.Index(page, []byte(brandEnd)); i >= 0 && j > i {
 		page = append(page[:i:i], append([]byte(head), page[j+len(brandEnd):]...)...)
@@ -164,6 +165,7 @@ func brandPage(page []byte, site branding.Site, nonce string) []byte {
 		"title": site.Title, "company": site.Company, "login_message": site.LoginMessage, "show_powered_by": site.ShowPoweredBy,
 		"header_dark": site.Palette.HeaderDark,
 		"logo":        site.Assets["logo"], "logo_dark": site.Assets["logo_dark"],
+		"password_reset": resetAvailable,
 	})
 	tail := `<script type="application/json" id="kw-site">` + string(public) + `</script>`
 	if css := site.Palette.CSS(); css != "" {

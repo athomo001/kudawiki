@@ -7,10 +7,10 @@
   let { oninsert }: { oninsert: (text: string, block: boolean) => void } = $props();
 
   const groups = [
-    { key: 'text', rows: ['bold', 'italic', 'strike', 'code', 'kbd', 'math'], block: false },
+    { key: 'text', rows: ['bold', 'italic', 'strike', 'code', 'kbd', 'math', 'secret'], block: false },
     { key: 'structure', rows: ['h2', 'h3', 'ul', 'ol', 'task', 'quote', 'table', 'codeblock', 'hr'], block: true },
-    { key: 'links', rows: ['link', 'wikilink', 'wikilink_text', 'image'], block: false },
-    { key: 'blocks', rows: ['callout', 'tabs', 'steps', 'details', 'toc', 'children', 'footnote', 'mermaid'], block: true },
+    { key: 'links', rows: ['link', 'wikilink', 'wikilink_text', 'image', 'image_size', 'image_center', 'image_left', 'image_row'], block: false },
+    { key: 'blocks', rows: ['callout', 'tabs', 'steps', 'details', 'secret_block', 'toc', 'children', 'footnote', 'mermaid'], block: true },
   ] as const;
 
   const keys = [

@@ -34,6 +34,9 @@ import (
 	"github.com/athomo001/kudawiki/internal/jobs"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
+	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/presence"
+	"github.com/athomo001/kudawiki/internal/proposals"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -237,6 +240,8 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: cfg.BaseURL, PasswordReset: cfg.Auth.Local.PasswordReset,
+		ResetTTL: cfg.ResetTTL(), InviteTTL: cfg.InviteTTL(), Log: logger})
 
 	// Los jobs terminan antes de cerrar la BD: este defer corre antes que el de db.Close.
 	jobCtx, stopJobs := context.WithCancel(ctx)
@@ -245,6 +250,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		jobs.Purge{Store: store, Files: files, Audit: rec, Retention: cfg.TrashRetention(), AuditRetention: cfg.AuditRetention(),
 			Now: time.Now, Log: logger}.Daily(jobCtx)
 	})
+	jobsDone.Go(func() { mailer.Run(jobCtx, logger) })
+	pages := wiki.NewService(store, rec)
+	props := proposals.NewService(store, pages, rec)
+	notes := notify.NewService(store, mailer, props, masterKey, cfg.BaseURL, cfg.EmailDelay(), cfg.RemindAfter(), time.Now)
+	jobsDone.Go(func() { notes.Run(jobCtx, logger) })
 	hour, minute := cfg.BackupAt()
 	jobsDone.Go(func() {
 		jobs.Backup{DB: db.Read, StorageDir: cfg.StorageDir(), Dir: cfg.BackupDir(), Hour: hour, Minute: minute, Audit: rec, Now: time.Now, Log: logger,
@@ -252,15 +262,19 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	})
 	defer func() { stopJobs(); jobsDone.Wait() }()
 
+	editing := presence.NewHub()
 	srv := &http.Server{
 		Addr: cfg.Listen,
-		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
-			Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
+		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
+			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	// Shutdown espera a que terminen las peticiones; los avisos de edición abiertos no terminan
+	// solos (§4.11).
+	srv.RegisterOnShutdown(editing.Close)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	logger.Info("listening", "addr", cfg.Listen, "base_url", cfg.BaseURL)

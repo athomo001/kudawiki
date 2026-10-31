@@ -27,6 +27,8 @@ const trashed = "kwpapelera"
 type seeded struct {
 	slug       map[int]string // nivel → ruta; 0 = ruta inexistente
 	media      map[int]string // nivel → URL de su media
+	proposal   map[int]string // nivel → id de una propuesta pendiente sobre esa página (§5)
+	newPage    string         // propuesta de una página nueva bajo la N3: nace N3
 	trashID    string         // la unidad de la papelera, borrada por editorTI
 	trashMedia string         // URL de la media de la página borrada
 }
@@ -44,7 +46,8 @@ func setLevel(t *testing.T, f fixture, slug string, rank int) {
 // y enlaces cruzados; en "finanzas", una página que nadie de "ti" debe ver.
 func seed(t *testing.T, f fixture) seeded {
 	t.Helper()
-	s := seeded{slug: map[int]string{0: "nivel/no-existe"}, media: map[int]string{0: "/api/w/ti/media/01ARZ3NDEKTSV4RRFFQ69G5FAV"}}
+	s := seeded{slug: map[int]string{0: "nivel/no-existe"}, media: map[int]string{0: "/api/w/ti/media/01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		proposal: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}}
 	for lvl := 1; lvl <= 3; lvl++ {
 		mark, slug := leaks[lvl], []string{"", "nivel/uno", "nivel/dos", "nivel/tres"}[lvl]
 		w := f.upload("adminTI", "ti", mark+".png", pngBytes(t))
@@ -65,7 +68,22 @@ func seed(t *testing.T, f fixture) seeded {
 		t.Fatalf("seed finanzas: %d %s", w.Code, w.Body)
 	}
 	s.trashID, s.trashMedia = seedTrash(t, f)
+	// Propuestas con la marca de su página: solo las ve su autor (adminTI) y el admin del área.
+	for lvl := 1; lvl <= 3; lvl++ {
+		s.proposal[lvl] = propose(t, f, `{"slug":"`+s.slug[lvl]+`","title":"Propuesta `+leaks[lvl]+`","markdown":"Cambio `+leaks[lvl]+`","base_revision":1}`)
+	}
+	s.newPage = propose(t, f, `{"slug":"nivel/tres/nueva","title":"Nueva `+leaks[3]+`","markdown":"Nueva `+leaks[3]+`","base_revision":0}`)
 	return s
+}
+
+func propose(t *testing.T, f fixture, body string) string {
+	t.Helper()
+	w := f.do("adminTI", "POST", "/api/w/ti/proposals", body)
+	var out struct{ ID string }
+	if json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusCreated {
+		t.Fatalf("seed proposal: %d %s", w.Code, w.Body)
+	}
+	return out.ID
 }
 
 // seedTrash borra (editorTI) una página N1 con media, etiquetas y enlaces, y crea otra viva en
@@ -104,7 +122,7 @@ type probe struct {
 }
 
 func probes(s seeded, lvl int) []probe {
-	p, m := s.slug[lvl], s.media[lvl]
+	p, m, prop := s.slug[lvl], s.media[lvl], "/api/w/ti/proposals/"+s.proposal[lvl]
 	return []probe{
 		{"/api/w/{ws}/pages/*", "GET", "/api/w/ti/pages/" + p, "", 1, true, 200},
 		{"/api/w/{ws}/history/*", "GET", "/api/w/ti/history/" + p, "", 1, true, 200},
@@ -127,6 +145,10 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/search", "GET", "/api/w/ti/search?q=kwleakdoss", "", 1, false, 200}, // tipeo: "¿quisiste decir?"
 		{"/api/w/{ws}/render", "POST", "/api/w/ti/render", `{"markdown":"[[nivel/tres]] [[children]]"}`, 2, false, 200},
 		{"/api/w/{ws}/media", "POST", "/api/w/ti/media", "not-multipart", 2, false, 400},
+		// Navegador de archivos (§4.4): el nombre de cada archivo lleva la marca de su página, así
+		// el barrido ve si se cuela uno de más nivel. Borrar uno en uso responde 409 y no cambia nada.
+		{"/api/w/{ws}/media", "GET", "/api/w/ti/media", "", 2, false, 200},
+		{"/api/w/{ws}/media/{id}", "DELETE", m, "", 2, true, 409},
 		{"/api/w/{ws}/search-misses", "GET", "/api/w/ti/search-misses", "", 3, false, 200},
 		{"/api/w/{ws}/audit", "GET", "/api/w/ti/audit", "", 3, false, 200},
 		{"/api/w/{ws}/members/", "GET", "/api/w/ti/members", "", 3, false, 200},
@@ -148,6 +170,34 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/announcements", "POST", "/api/w/ti/announcements", `{"title":"","body":""}`, 2, false, 422},
 		// Uno que no existe: para todos el 404 uniforme (quién puede borrar, en TestAnnouncements).
 		{"/api/w/{ws}/announcements/{id}", "DELETE", "/api/w/ti/announcements/no-existe", "", 2, false, 404},
+		// Propuestas (§5). Cada una la ve su autor (adminTI) o un admin; para los demás no existe.
+		// Los lectores no proponen en "ti" (viewers_can_propose apagado): el 404 uniforme.
+		{"/api/w/{ws}/proposals", "GET", "/api/w/ti/proposals?view=pending", "", 1, false, 200},
+		{"/api/w/{ws}/proposals", "GET", "/api/w/ti/proposals?view=resolved", "", 1, false, 200},
+		{"/api/w/{ws}/proposals", "POST", "/api/w/ti/proposals", `{"slug":"x","title":"","markdown":"y","base_revision":0}`, 2, false, 422},
+		{"/api/w/{ws}/proposals/{id}", "GET", prop, "", 3, true, 200},
+		{"/api/w/{ws}/proposals/{id}", "GET", "/api/w/ti/proposals/" + s.newPage, "", 3, false, 200},
+		{"/api/w/{ws}/proposals/{id}", "PATCH", prop, `{"title":"","markdown":"y","base_revision":1}`, 3, true, 422},
+		// Reenviar una pendiente no corresponde: 409, y nada cambia.
+		{"/api/w/{ws}/proposals/{id}/submit", "POST", prop + "/submit", "", 3, true, 409},
+		{"/api/w/{ws}/proposals/{id}/withdraw", "POST", "/api/w/ti/proposals/no-existe/withdraw", "", 4, false, 0},
+		{"/api/w/{ws}/proposals/{id}/approve", "POST", prop + "/approve", `{"edit":{"title":"","markdown":"y"}}`, 3, true, 422},
+		{"/api/w/{ws}/proposals/{id}/reject", "POST", prop + "/reject", `{"comment":""}`, 3, true, 422},
+		{"/api/w/{ws}/approval/*", "GET", "/api/w/ti/approval/" + p, "", 2, false, 200},
+		{"/api/w/{ws}/approval-overrides", "GET", "/api/w/ti/approval-overrides", "", 3, false, 200},
+		{"/api/w/{ws}/approval-overrides/*", "PUT", "/api/w/ti/approval-overrides/" + p, `{"approval_mode":"mal"}`, 3, false, 422},
+		{"/api/w/{ws}/approval-overrides/*", "DELETE", "/api/w/ti/approval-overrides/no/existe", "", 3, false, 404},
+		{"/api/w/{ws}/proposals/seen", "POST", "/api/w/ti/proposals/seen", "", 3, false, 204},
+		// Seguir (§12.1): lo puede quien lee la página. Seguir y dejar de seguir, en ese orden,
+		// para que la matriz termine sin cambios.
+		{"/api/w/{ws}/watch/*", "PUT", "/api/w/ti/watch/" + p, `{"subtree":true}`, 1, true, 204},
+		{"/api/w/{ws}/watch/*", "DELETE", "/api/w/ti/watch/" + p, "", 1, true, 204},
+		// Autoguardado (§4.11): cada borrador es de quien lo escribe, y en la matriz nadie tiene
+		// uno; guardar va con datos que se rechazan. Quién ve qué borrador, en TestDrafts.
+		{"/api/w/{ws}/drafts", "GET", "/api/w/ti/drafts", "", 2, false, 200},
+		{"/api/w/{ws}/drafts/*", "GET", "/api/w/ti/drafts/" + p, "", 2, false, 404},
+		{"/api/w/{ws}/drafts/*", "PUT", "/api/w/ti/drafts/" + p, `{"title":"x","markdown":"y","base_revision":-1}`, 2, false, 422},
+		{"/api/w/{ws}/drafts/*", "DELETE", "/api/w/ti/drafts/" + p, "", 2, false, 204},
 	}
 }
 
@@ -205,26 +255,31 @@ func TestContainmentMatrix(t *testing.T) {
 func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	f := newFixture(t)
 	covered := map[string]bool{}
-	for _, p := range probes(seeded{slug: map[int]string{1: "x"}, media: map[int]string{1: "x"}}, 1) {
+	for _, p := range probes(seeded{slug: map[int]string{1: "x"}, media: map[int]string{1: "x"}, proposal: map[int]string{1: "x"}}, 1) {
 		covered[p.method+" "+p.route] = true
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
 	// en TestLoginMeLogout, TestPreferences, TestProfile, TestInviteFlow, TestInviteResend, TestHealthViews,
-	// TestAreaAdminLimits, TestRoutingFallbacks, TestBranding y TestSMTPAdmin (la marca y el correo son de la instalación,
-	// no de un área). Borrar
+	// TestAreaAdminLimits, TestAdminAreaRename, TestRoutingFallbacks, TestBranding, TestSMTPAdmin y TestPasswordResetAPI (la marca y el correo son de la instalación,
+	// no de un área). La bandeja y las preferencias de avisos son de cada persona, y la baja va
+	// sin sesión: TestNotifications, TestNotificationLevels y TestUnsubscribeRoute. Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
-	// del superadmin se prueba en TestAuditViews.
+	// del superadmin se prueba en TestAuditViews. El aviso de edición es un flujo que no termina:
+	// tiene su propia matriz en TestPresence.
 	elsewhere := []string{
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
 		"POST /api/me/password", "GET /api/me/avatar", "PUT /api/me/avatar", "DELETE /api/me/avatar",
-		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces",
+		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces", "PATCH /api/admin/workspaces/{id}",
 		"GET /api/admin/workspaces/{id}/members/", "POST /api/admin/workspaces/{id}/members/",
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",
 		"GET /api/admin/site", "PATCH /api/admin/site", "POST /api/admin/site/preview",
 		"PUT /api/admin/site/assets/{kind}", "DELETE /api/admin/site/assets/{kind}", "GET /_site/{name}",
 		"GET /api/admin/smtp", "PUT /api/admin/smtp", "POST /api/admin/smtp/test",
+		"POST /api/auth/password-reset", "POST /api/auth/password-reset/complete", "POST /api/admin/users/{id}/password-reset",
+		"GET /api/me/notifications", "POST /api/me/notifications/read", "GET /api/me/notification-prefs", "PUT /api/me/notification-prefs",
+		"GET /unsubscribe", "POST /unsubscribe", "GET /api/w/{ws}/presence/*",
 	}
 	err := chi.Walk(f.h.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		key := method + " " + route

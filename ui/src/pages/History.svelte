@@ -67,7 +67,7 @@
       <tr>
         <td>{r.revision}</td>
         <td>{t(`history.kind_${r.kind}`)}{#if r.summary}: {r.summary}{/if}</td>
-        <td>{r.author}</td>
+        <td>{r.author}{#if r.approved_by}<span class="muted"> · {t('history.approved_by', { name: r.approved_by })}</span>{/if}</td>
         <td>{formatDate(r.created_at, locale())}</td>
         <td>
           {#if canEdit(area) && r.revision !== current}
@@ -78,6 +78,10 @@
     {/each}
   </tbody>
 </table>
+<!-- La retención del área (§4.3) borró las más viejas: se dice, para que nadie las busque. -->
+{#if (revisions.at(-1)?.revision ?? 1) > 1}
+  <p class="muted small">{t('history.trimmed', { n: String(revisions.at(-1)?.revision) })}</p>
+{/if}
 
 {#if revisions.length > 1}
   <h2>{t('history.compare')}</h2>

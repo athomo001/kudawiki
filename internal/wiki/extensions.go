@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -67,6 +68,17 @@ type wikiToken struct {
 	broken    bool
 }
 
+// secretPrefix abre un texto oculto, [[secret:valor]] (§4.10). Nunca es una ruta: una ruta no
+// lleva ":".
+const secretPrefix = "secret:"
+
+// secret es el valor de un [[secret:valor]], tal cual (puede llevar "|" o mayúsculas).
+func (t *wikiToken) secret() (string, bool) {
+	value, ok := strings.CutPrefix(t.raw, secretPrefix)
+	value = strings.TrimSpace(value)
+	return value, ok && value != ""
+}
+
 // target es la ruta de un [[ruta|texto]], o "" si el token no es un enlace.
 func (t *wikiToken) target() string {
 	target, _, _ := strings.Cut(t.raw, "|")
@@ -116,10 +128,10 @@ func (n *math) Dump(src []byte, l int)      { ast.DumpHelper(n, src, l, nil, nil
 func (n *mermaid) Dump(src []byte, l int)   { ast.DumpHelper(n, src, l, nil, nil) }
 func (n *blockList) Dump(src []byte, l int) { ast.DumpHelper(n, src, l, nil, nil) }
 
-// ----- :::tabs, ::: tab Linux, :::steps, :::details Título, y el cierre ::: -----
+// ----- :::tabs, ::: tab Linux, :::steps, :::details Título, :::secret y el cierre ::: -----
 
 var (
-	directiveOpen  = regexp.MustCompile(`^:::\s*(tabs|tab|steps|details)(?:\s+(.*?))?\s*$`)
+	directiveOpen  = regexp.MustCompile(`^:::\s*(tabs|tab|steps|details|secret)(?:\s+(.*?))?\s*$`)
 	directiveClose = regexp.MustCompile(`^:::\s*$`)
 )
 
@@ -172,7 +184,7 @@ func (directiveParser) Close(ast.Node, text.Reader, parser.Context) {} // sin na
 func (directiveParser) CanInterruptParagraph() bool                 { return true }
 func (directiveParser) CanAcceptIndentedLine() bool                 { return false }
 
-// ----- [[toc]], [[children]], [[ruta|texto]] (§4.7) y [[Ctrl+K]] -----
+// ----- [[toc]], [[children]], [[ruta|texto]] (§4.7), [[Ctrl+K]] y [[secret:valor]] -----
 
 type wikiTokenParser struct{}
 
@@ -187,6 +199,61 @@ func (wikiTokenParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) as
 	block.Advance(end + 2)
 	return &wikiToken{raw: strings.TrimSpace(string(line[2:end]))}
 }
+
+// ----- ![texto](imagen =480x){.align-center}: tamaño y posición como en Wiki.js (§4.4) -----
+
+// placedImage es una imagen con tamaño antes del cierre, posición después, o las dos cosas.
+// Tamaño: " =ANCHOxALTO" en píxeles (uno de los dos al menos, de 1 a 9999) o " =50%" del ancho
+// de la página (1 a 100). Posición: las clases de Wiki.js {.align-left}, {.align-center} y
+// {.align-right}. goldmark no las reconoce, así que se leen antes que él y salen como una
+// imagen común con width, height y class: sin estilos en línea, que la CSP no deja pasar. El
+// texto va sin corchetes y la dirección sin espacios ni paréntesis, como las que escribe el
+// editor al subir un archivo. Lo que no cumple queda como lo leería goldmark.
+var placedImage = regexp.MustCompile(`^!\[([^\]\n]*)\]\(([^\s()]+)(?: +=([0-9]*)(%?)(x?)([0-9]*))?\)(?:\{\.align-(left|center|right)\})?`)
+
+type imageSizeParser struct{}
+
+func (imageSizeParser) Trigger() []byte { return []byte{'!'} }
+
+func (imageSizeParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) ast.Node {
+	line, seg := block.PeekLine()
+	m := placedImage.FindSubmatch(line)
+	if m == nil {
+		return nil
+	}
+	sized, align := m[5] != nil, string(m[7])
+	width, height := string(m[3]), string(m[6])
+	if sized && !validSize(width, string(m[4]) == "%", string(m[5]) == "x", height) || !sized && align == "" {
+		return nil
+	}
+	idx := placedImage.FindSubmatchIndex(line)
+	link := ast.NewLink()
+	link.Destination = m[2]
+	img := ast.NewImage(link)
+	img.AppendChild(img, ast.NewTextSegment(text.NewSegment(seg.Start+idx[2], seg.Start+idx[3])))
+	if width != "" {
+		img.SetAttributeString("width", []byte(width+string(m[4])))
+	}
+	if height != "" {
+		img.SetAttributeString("height", []byte(height))
+	}
+	if align != "" {
+		img.SetAttributeString("class", []byte("align-"+align))
+	}
+	block.Advance(len(m[0]))
+	return img
+}
+
+// validSize: "=50%" sin alto, o "=ANCHOxALTO" en píxeles con al menos uno de los dos.
+func validSize(width string, percent, x bool, height string) bool {
+	if percent {
+		n, err := strconv.Atoi(width)
+		return err == nil && !x && height == "" && n >= 1 && n <= 100 && width[0] != '0'
+	}
+	return x && (width != "" || height != "") && pixels(width) && pixels(height)
+}
+
+func pixels(s string) bool { return s == "" || len(s) <= 4 && s[0] != '0' }
 
 // ----- $…$ y $$…$$: el navegador las dibuja con KaTeX como MathML, sin estilos en línea -----
 
@@ -393,6 +460,12 @@ func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
 			fmt.Fprintf(w, `<summary>%s</summary>`, title)
 		case d.name == "details":
 			w.WriteString("</details>\n")
+		case d.name == "secret" && entering:
+			// El bloque de [[secret:…]] para párrafos enteros (§4.10): mismas clases, mismo botón.
+			open(`<div class="secret secret-block"`)
+			w.WriteString(`<div class="secret-value">`)
+		case d.name == "secret":
+			w.WriteString("</div></div>\n")
 		case entering: // tabs, steps
 			open(fmt.Sprintf(`<div class="%s"`, d.name))
 		default:
@@ -445,11 +518,17 @@ func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
 	})
 }
 
-// renderWikiToken decide qué es un [[…]]: una ruta del área es un enlace (nunca a otra área,
-// §4.7); con "+" o mayúsculas son teclas; cualquier otra cosa queda como texto.
+// renderWikiToken decide qué es un [[…]]: un texto oculto; una ruta del área es un enlace
+// (nunca a otra área, §4.7); con "+" o mayúsculas son teclas; cualquier otra cosa queda como texto.
 func renderWikiToken(w util.BufWriter, t *wikiToken) {
 	target := t.target()
+	secret, isSecret := t.secret()
 	switch {
+	case isSecret:
+		// El valor viaja en la página: lo esconde la interfaz hasta un clic y lo cambia por
+		// "[contenido censurado]" al copiar (lib/enhance.ts). Ocultar en pantalla, no proteger:
+		// para eso están los sellados (§6).
+		fmt.Fprintf(w, `<span class="secret"><span class="secret-value">%s</span></span>`, html.EscapeString(secret))
 	case target != "" && t.base != "":
 		_, label, hasLabel := strings.Cut(t.raw, "|")
 		if !hasLabel {
@@ -478,7 +557,7 @@ func (kudawikiExtensions) Extend(m goldmark.Markdown) {
 	m.Parser().AddOptions(
 		parser.WithBlockParsers(util.Prioritized(directiveParser{}, 50)),
 		// Antes que las notas al pie (101) y que los enlaces (200), que también empiezan con "[".
-		parser.WithInlineParsers(util.Prioritized(wikiTokenParser{}, 99), util.Prioritized(mathParser{}, 150)),
+		parser.WithInlineParsers(util.Prioritized(wikiTokenParser{}, 99), util.Prioritized(imageSizeParser{}, 100), util.Prioritized(mathParser{}, 150)),
 		parser.WithASTTransformers(util.Prioritized(transformer{}, 100)),
 	)
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(util.Prioritized(extRenderer{}, 100)))

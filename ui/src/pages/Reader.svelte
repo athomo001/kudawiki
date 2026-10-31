@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { api, ApiError, canEdit, codeOf, formatDate, timeAgo, type Access, type Area, type Page, type PageRef } from '../lib/api';
+  import { api, ApiError, canEdit, canWrite, codeOf, formatDate, timeAgo, type Access, type Area, type Page, type PageRef } from '../lib/api';
   import Icon from '../components/Icon.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Dropdown from '../components/Dropdown.svelte';
   import ReadAloud from '../components/ReadAloud.svelte';
   import FolderPicker from '../components/FolderPicker.svelte';
+  import WatchMenu from '../components/WatchMenu.svelte';
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import { navigate, route } from '../lib/router.svelte';
   import { tick } from 'svelte';
@@ -74,7 +75,7 @@
   // Atajos (§15): E edita, G H abre el historial. Ctrl+K busca y Ctrl+S guarda en el editor.
   $effect(() =>
     shortcuts({
-      e: () => page && canEdit(area) && navigate(`${base}/edit/${page.slug}`),
+      e: () => page && canWrite(area) && navigate(`${base}/edit/${page.slug}`),
       'g h': () => page && navigate(`${base}/history/${page.slug}`),
     }),
   );
@@ -228,12 +229,15 @@
     </aside>
 
     <div class="page-actions" role="group" aria-label={t('page.actions')}>
-      {#if canEdit(area)}
-        <a class="action action-primary" href={`${base}/edit/${page.slug}`} aria-label={t('page.edit_label')} aria-keyshortcuts="E" title={`${t('page.edit_label')} (E)`}>
+      <!-- Un lector solo llega aquí si el área le deja proponer (§19.5): el mismo botón, otro nombre. -->
+      {#if canWrite(area)}
+        {@const label = canEdit(area) ? t('page.edit_label') : t('page.propose')}
+        <a class="action action-primary" href={`${base}/edit/${page.slug}`} aria-label={label} aria-keyshortcuts="E" title={`${label} (E)`}>
           <Icon name="edit" />
         </a>
       {/if}
       <a class="action" href={`${base}/history/${page.slug}`} aria-label={t('page.history')} aria-keyshortcuts="G H" title={`${t('page.history')} (G H)`}><Icon name="history" /></a>
+      <WatchMenu {area} {page} />
       <button type="button" class="action" aria-label={t('page.source')} title={t('page.source')} onclick={() => (showSource = true)}>
         <Icon name="code" />
       </button>

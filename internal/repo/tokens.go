@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// AuthToken es un enlace de un solo uso; F2 solo usa invitaciones, el restablecimiento llega en F4.
+// AuthToken es un enlace de un solo uso: una invitación o un restablecimiento (SPEC §8.5).
 type AuthToken struct {
 	TokenHash string
 	CreatedBy string
@@ -35,23 +35,74 @@ func (r *Repo) CreateInvitedUser(ctx context.Context, u User, t AuthToken) error
 	return tx.Commit()
 }
 
-// ReplaceInvite deja a la persona con una sola invitación pendiente, la nueva: las anteriores sin
-// usar se borran en la misma transacción, así un enlace viejo no sirve (SPEC §8.5.3).
-func (r *Repo) ReplaceInvite(ctx context.Context, userID string, t AuthToken) error {
+// ReplaceToken deja a la persona con un solo enlace pendiente de ese tipo, el nuevo: los
+// anteriores sin usar se borran en la misma transacción, así un enlace viejo no sirve (§8.5).
+func (r *Repo) ReplaceToken(ctx context.Context, userID, kind string, t AuthToken) error {
 	tx, err := r.db.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_tokens WHERE user_id = ? AND kind = 'invite' AND used_at IS NULL`, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_tokens WHERE user_id = ? AND kind = ? AND used_at IS NULL`, userID, kind); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO auth_tokens (token_hash, user_id, kind, created_by, expires_at) VALUES (?, ?, 'invite', ?, ?)`,
-		t.TokenHash, userID, t.CreatedBy, t.ExpiresAt.UTC()); err != nil {
+		`INSERT INTO auth_tokens (token_hash, user_id, kind, created_by, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		t.TokenHash, userID, kind, nullable(t.CreatedBy), t.ExpiresAt.UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ResetTokenUser devuelve de quién es un enlace de restablecimiento vigente, sin usarlo: se
+// mira antes de consumirlo para rechazar la contraseña actual (§8.5.1). ErrNotFound si venció,
+// ya se usó o no existe.
+func (r *Repo) ResetTokenUser(ctx context.Context, tokenHash string, now time.Time) (string, error) {
+	var userID string
+	err := r.db.Read.QueryRowContext(ctx, `SELECT user_id FROM auth_tokens
+		WHERE token_hash = ? AND kind = 'password_reset' AND used_at IS NULL AND expires_at > ?`, tokenHash, now.UTC()).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return userID, err
+}
+
+// CompleteReset consume el enlace y fija la contraseña nueva en una transacción, y cierra todas
+// las sesiones y anula los demás enlaces sin usar de esa persona (§8.5.1): quien entró con la
+// contraseña vieja queda afuera. Devuelve el id de la persona.
+func (r *Repo) CompleteReset(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error) {
+	tx, err := r.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var userID string
+	var expires time.Time
+	err = tx.QueryRowContext(ctx,
+		`UPDATE auth_tokens SET used_at = ? WHERE token_hash = ? AND kind = 'password_reset' AND used_at IS NULL
+		 RETURNING user_id, expires_at`, now.UTC(), tokenHash).Scan(&userID, &expires)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !now.Before(expires)) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, passwordHash, userID); err != nil {
+		return "", err
+	}
+	for _, q := range []string{`DELETE FROM auth_tokens WHERE user_id = ? AND kind = 'password_reset' AND used_at IS NULL`, `DELETE FROM sessions WHERE user_id = ?`} {
+		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
+			return "", err
+		}
+	}
+	return userID, tx.Commit()
+}
+
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // AcceptInvite consume la invitación y fija la contraseña en una sola transacción: un token

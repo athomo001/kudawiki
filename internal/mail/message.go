@@ -27,7 +27,26 @@ var languages = []string{"es", "en"}
 // templates es la lista cerrada de correos (§12.1): cuántos párrafos tiene cada uno. Los textos
 // son email.<nombre>.subject, .title, .p1…pN y .action en los archivos de i18n.
 var templates = map[string]int{
-	"test": 2,
+	"test":                      2,
+	"invite":                    2, // §8.5.3
+	"password_reset":            3, // §8.5.1
+	"password_changed":          3, // §8.5.1, §8.5.2: aviso de seguridad, no desactivable
+	"superadmin_password_reset": 2, // §8.5.3: a los demás superadmins
+	// Avisos (§5.3, §12.1): nunca llevan contenido de la página, solo su título.
+	"proposal_pending":  2,
+	"proposal_reminder": 2,
+	"proposal_approved": 2,
+	"proposal_rejected": 2,
+	"proposal_rebase":   2,
+	"page_changed":      2,
+	"page_deleted":      2,
+	"digest":            1,
+}
+
+// lineTemplates son los renglones del resumen diario: email.line.<tipo>, uno por aviso.
+var lineTemplates = map[string]bool{
+	"proposal_pending": true, "proposal_reminder": true, "proposal_approved": true, "proposal_rejected": true,
+	"proposal_rebase": true, "page_changed": true, "page_deleted": true,
 }
 
 // content es la descripción de un correo: de ella salen el HTML y el texto plano, así nunca
@@ -35,7 +54,10 @@ var templates = map[string]int{
 type content struct {
 	Lang, Subject, Title string
 	Paragraphs           []string
+	Lines                []string // la lista del resumen diario
 	Action, URL          string
+	// Unsubscribe es la baja en un clic (RFC 8058): va en los encabezados y en el pie.
+	Unsubscribe, UnsubscribeText string
 }
 
 func (s *Service) text(lang, key string, vars map[string]string) string {
@@ -46,15 +68,29 @@ func (s *Service) text(lang, key string, vars map[string]string) string {
 	return t
 }
 
-func (s *Service) compose(name, lang string, vars map[string]string, url string) content {
-	c := content{Lang: lang, URL: url}
+func (s *Service) compose(m Message, lang string, vars map[string]string) content {
+	name := m.Template
+	c := content{Lang: lang, URL: m.URL, Unsubscribe: m.Unsubscribe}
 	c.Subject = s.text(lang, "email."+name+".subject", vars)
 	c.Title = s.text(lang, "email."+name+".title", vars)
 	for i := 1; i <= templates[name]; i++ {
 		c.Paragraphs = append(c.Paragraphs, s.text(lang, "email."+name+".p"+strconv.Itoa(i), vars))
 	}
-	if url != "" {
+	for _, l := range m.Lines {
+		lv := map[string]string{}
+		for k, v := range vars {
+			lv[k] = v
+		}
+		for k, v := range l.Vars {
+			lv[k] = v
+		}
+		c.Lines = append(c.Lines, s.text(lang, "email.line."+l.Template, lv))
+	}
+	if m.URL != "" {
 		c.Action = s.text(lang, "email."+name+".action", vars)
+	}
+	if m.Unsubscribe != "" {
+		c.UnsubscribeText = s.text(lang, "email.unsubscribe", vars)
 	}
 	return c
 }
@@ -70,12 +106,13 @@ var frame = template.Must(template.New("mail").Parse(`<!doctype html>
 <tr><td style="padding:32px;font:16px/1.5 Arial,Helvetica,sans-serif;color:#15171c">
 <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3">{{.Title}}</h1>
 {{range .Paragraphs}}<p style="margin:0 0 16px">{{.}}</p>
+{{end}}{{if .Lines}}<ul style="margin:0 0 16px;padding-left:20px">{{range .Lines}}<li style="margin:0 0 8px">{{.}}</li>{{end}}</ul>
 {{end}}{{if .URL}}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0"><tr><td style="background:{{.Button}};border-radius:4px">
 <a href="{{.URL}}" style="display:inline-block;padding:12px 24px;font:bold 16px Arial,Helvetica,sans-serif;color:{{.OnButton}};text-decoration:none">{{.Action}}</a>
 </td></tr></table>
 <p style="margin:0;font-size:13px;color:#5f6368">{{.LinkHint}}<br><a href="{{.URL}}" style="color:{{.Link}};word-break:break-all">{{.URL}}</a></p>
 {{end}}</td></tr>
-<tr><td style="padding:16px 32px;border-top:1px solid #dfe1e6;font:12px/1.5 Arial,Helvetica,sans-serif;color:#5f6368">{{.Footer}}</td></tr>
+<tr><td style="padding:16px 32px;border-top:1px solid #dfe1e6;font:12px/1.5 Arial,Helvetica,sans-serif;color:#5f6368">{{.Footer}}{{if .Unsubscribe}}<br><a href="{{.Unsubscribe}}" style="color:#5f6368">{{.UnsubscribeText}}</a>{{end}}</td></tr>
 </table></td></tr></table>
 </body></html>
 `))
@@ -88,7 +125,8 @@ type frameData struct {
 }
 
 // build arma el mensaje completo (encabezados y MIME) listo para entregar.
-func (s *Service) build(ctx context.Context, c config, to, lang, name string, vars map[string]string, url string) ([]byte, error) {
+func (s *Service) build(ctx context.Context, c config, m Message) ([]byte, error) {
+	lang := m.Lang
 	if !slices.Contains(languages, lang) {
 		lang = languages[0]
 	}
@@ -101,10 +139,10 @@ func (s *Service) build(ctx context.Context, c config, to, lang, name string, va
 		return nil, err
 	}
 	all := map[string]string{"site": site.Title, "url": s.baseURL}
-	for k, v := range vars {
+	for k, v := range m.Vars {
 		all[k] = v
 	}
-	body := s.compose(name, lang, all, url)
+	body := s.compose(m, lang, all)
 	footer := s.text(lang, "email.sent_by", all)
 	if site.Company != "" {
 		footer = site.Company + " · " + footer
@@ -124,7 +162,8 @@ func (s *Service) build(ctx context.Context, c config, to, lang, name string, va
 	if err := frame.Execute(&html, data); err != nil {
 		return nil, err
 	}
-	return mimeMessage(mail.Address{Name: site.Title, Address: c.From}, to, body.Subject, plainText(body, footer, data.LinkHint), html.Bytes(), logo, s.now().Format(timeLayout))
+	return mimeMessage(mail.Address{Name: site.Title, Address: c.From}, m.To, body.Subject, plainText(body, footer, data.LinkHint), html.Bytes(), logo,
+		s.now().Format(timeLayout), m.Unsubscribe)
 }
 
 const timeLayout = "Mon, 02 Jan 2006 15:04:05 -0700" // RFC 5322
@@ -136,18 +175,27 @@ func plainText(c content, footer, linkHint string) string {
 	for _, p := range c.Paragraphs {
 		b.WriteString(p + "\n\n")
 	}
+	for _, l := range c.Lines {
+		b.WriteString("- " + l + "\n")
+	}
+	if len(c.Lines) > 0 {
+		b.WriteString("\n")
+	}
 	if c.URL != "" {
 		b.WriteString(c.Action + ":\n" + c.URL + "\n\n")
 	}
 	b.WriteString("-- \n" + footer + "\n")
+	if c.Unsubscribe != "" {
+		b.WriteString(c.UnsubscribeText + ":\n" + c.Unsubscribe + "\n")
+	}
 	return b.String()
 }
 
 // mimeMessage arma multipart/related (alternative de texto y HTML, más el logo inline) o solo
-// alternative si no hay logo. Asunto y destinatario no pueden traer saltos de línea: serían
-// encabezados nuevos.
-func mimeMessage(from mail.Address, to, subject, text string, html, logo []byte, date string) ([]byte, error) {
-	if strings.ContainsAny(subject+to, "\r\n") {
+// alternative si no hay logo. Asunto, destinatario y enlace de baja no pueden traer saltos de
+// línea: serían encabezados nuevos.
+func mimeMessage(from mail.Address, to, subject, text string, html, logo []byte, date, unsubscribe string) ([]byte, error) {
+	if strings.ContainsAny(subject+to+unsubscribe, "\r\n") {
 		return nil, ErrInvalid
 	}
 	rcpt, err := mail.ParseAddress(to)
@@ -184,6 +232,11 @@ func mimeMessage(from mail.Address, to, subject, text string, html, logo []byte,
 	header("Message-ID", "<"+hex.EncodeToString(id)+"@"+domain+">")
 	header("MIME-Version", "1.0")
 	header("Auto-Submitted", "auto-generated") // RFC 3834: que nadie le responda con un fuera de oficina
+	if unsubscribe != "" {
+		// Baja en un clic (RFC 8058): el cliente de correo hace el POST, sin abrir la wiki.
+		header("List-Unsubscribe", "<"+unsubscribe+">")
+		header("List-Unsubscribe-Post", "List-Unsubscribe=One-Click")
+	}
 	if logo == nil {
 		header("Content-Type", `multipart/alternative; boundary="`+aw.Boundary()+`"`)
 		msg.WriteString("\r\n")

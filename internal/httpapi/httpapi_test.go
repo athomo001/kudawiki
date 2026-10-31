@@ -26,6 +26,9 @@ import (
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
+	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/presence"
+	"github.com/athomo001/kudawiki/internal/proposals"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -42,6 +45,8 @@ type fixture struct {
 	h       http.Handler
 	db      *database.DB
 	cookies map[string]*http.Cookie // por nombre: super, adminTI, editorTI, viewerTI, adminFin, outsider
+	users   map[string]string       // id de cada uno
+	notify  *notify.Service         // los tests de avisos corren el worker a mano (Pass)
 }
 
 // unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
@@ -67,7 +72,12 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: wiki.NewService(store, rec),
+	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
+	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
+	pages := wiki.NewService(store, rec)
+	props := proposals.NewService(store, pages, rec)
+	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
+	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
 		Media: media.NewService(store, rec, storage, 1<<20), Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
@@ -94,7 +104,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 	}
 
-	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}}
+	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes}
 	for name := range users {
 		w := f.do("", "POST", "/api/auth/login", `{"email":"`+name+`@empresa.cl","password":"`+password+`"}`)
 		if w.Code != http.StatusNoContent {
@@ -486,6 +496,31 @@ func TestSearchSectionsAndFacets(t *testing.T) {
 
 // §3.1 (pedido original, pre-spec §2.1): el admin del área edita su nombre y su descripción;
 // todos los miembros los ven, y el cambio queda en la auditoría sin el texto.
+// El superadmin cambia el nombre y la descripción de un área desde su panel, sin ser miembro
+// (pedido del dueño, 2026-10-30). La aprobación de cambios sigue siendo del admin del área.
+func TestAdminAreaRename(t *testing.T) {
+	f := newFixture(t)
+	id := f.wsID(t, "ti")
+	f.expect(t, "super", "PATCH", "/api/admin/workspaces/"+id, `{"name":"Tecnología","description":"Soporte y redes"}`, http.StatusNoContent)
+	if body := f.do("viewerTI", "GET", "/api/auth/me", "").Body.String(); !strings.Contains(body, `"name":"Tecnología"`) || !strings.Contains(body, "Soporte y redes") {
+		t.Errorf("members see the new name: %s", body)
+	}
+	var areas []map[string]string
+	json.Unmarshal([]byte(f.expect(t, "super", "GET", "/api/admin/workspaces", "", http.StatusOK)), &areas)
+	if areas[1]["name"] != "Tecnología" || areas[1]["description"] != "Soporte y redes" {
+		t.Errorf("panel list: %v", areas)
+	}
+	f.expect(t, "super", "PATCH", "/api/admin/workspaces/"+id, `{"name":"  "}`, http.StatusUnprocessableEntity)
+	f.expect(t, "super", "PATCH", "/api/admin/workspaces/"+id, `{"approval_mode":"required"}`, http.StatusBadRequest)
+	f.expect(t, "super", "PATCH", "/api/admin/workspaces/01J0000000000000000000000Z", `{"name":"x"}`, http.StatusNotFound)
+	// El admin del área no entra al panel: el mismo 404 de siempre.
+	f.expect(t, "adminTI", "PATCH", "/api/admin/workspaces/"+id, `{"name":"x"}`, http.StatusNotFound)
+	raw := f.expect(t, "adminTI", "GET", "/api/w/ti/audit?action=ws.update", "", http.StatusOK)
+	if strings.Count(raw, `"ws.update"`) != 1 || strings.Contains(raw, "Soporte") {
+		t.Errorf("audit (1 event, no text): %s", raw)
+	}
+}
+
 func TestAreaSettings(t *testing.T) {
 	f := newFixture(t)
 	if w := f.do("adminTI", "GET", "/api/w/ti/settings", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"TI"`) {

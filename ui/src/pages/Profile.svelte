@@ -3,6 +3,7 @@
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import Avatar from '../components/Avatar.svelte';
   import ReadingPrefsForm from '../components/ReadingPrefsForm.svelte';
+  import NotificationPrefsForm from '../components/NotificationPrefsForm.svelte';
 
   // Mi perfil (SPEC §8.5.2, §14.1): lo que la persona cambia de sí misma. El correo y los roles
   // los cambia quien administra; aquí solo se muestran.
@@ -177,6 +178,8 @@
     </fieldset>
     <ReadingPrefsForm prefs={me.reading_prefs} onchange={(p) => onprefs({ reading_prefs: p })} />
   </section>
+
+  <NotificationPrefsForm />
 
   <form class="stack" onsubmit={changePassword}>
     <h2>{t('profile.password')}</h2>

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnvOverridesFile(t *testing.T) {
@@ -131,5 +132,26 @@ func TestSMTP(t *testing.T) {
 	t.Setenv("KUDAWIKI_SMTP_PORT", "veinticinco")
 	if _, err := Load(path); err == nil {
 		t.Error("want error for a bad port")
+	}
+}
+
+// Recuperar la contraseña viene encendido con enlaces de 30 minutos e invitaciones de 7 días.
+func TestAuthLocal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("auth:\n  local:\n    reset_ttl: 15m\n"), 0o600)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Auth.Local.PasswordReset || c.ResetTTL() != 15*time.Minute || c.InviteTTL() != 7*24*time.Hour {
+		t.Errorf("auth.local = %+v", c.Auth.Local)
+	}
+	t.Setenv("KUDAWIKI_AUTH_LOCAL_PASSWORD_RESET", "false")
+	if c, _ := Load(path); c.Auth.Local.PasswordReset {
+		t.Error("the variable should turn it off")
+	}
+	t.Setenv("KUDAWIKI_AUTH_LOCAL_RESET_TTL", "72h")
+	if _, err := Load(path); err == nil {
+		t.Error("a reset link valid for days should be rejected")
 	}
 }

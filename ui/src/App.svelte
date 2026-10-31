@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, canEdit, codeOf, type Me, type ReadingPrefs } from './lib/api';
+  import { api, ApiError, canEdit, canWrite, codeOf, type Me, type ReadingPrefs } from './lib/api';
   import { setLocale, errorText } from './lib/i18n/index.svelte';
   import { applyPrefs } from './lib/prefs';
   import { navigate, route } from './lib/router.svelte';
@@ -16,6 +16,9 @@
   import SiteFooter from './components/SiteFooter.svelte';
   import Area from './pages/Area.svelte';
   import Invite from './pages/Invite.svelte';
+  import Forgot from './pages/Forgot.svelte';
+  import Reset from './pages/Reset.svelte';
+  import Unsubscribe from './pages/Unsubscribe.svelte';
   import NotFound from './pages/NotFound.svelte';
 
   let me = $state<Me | null>(null);
@@ -76,7 +79,12 @@
   const adminAreaId = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})$/)?.[1]);
   const area = $derived(me?.workspaces.find((w) => w.slug === areaPath?.[1]));
   // El editor tiene su propia cabecera (diseño aprobado, SPEC §15): mientras se edita no hay barra superior.
-  const editing = $derived(!!area && canEdit(area) && /^(new$|edit\/)/.test(areaPath?.[2] ?? ''));
+  // Igual que en Area.svelte: un lector abre el editor solo para proponer (§19.5).
+  const editing = $derived.by(() => {
+    const sub = areaPath?.[2] ?? '';
+    if (!area) return false;
+    return (sub === 'new' && canEdit(area)) || (sub.startsWith('edit/') && canWrite(area)) || /^proposals\/[^/]+\/edit$/.test(sub);
+  });
 
   // Al entrar se cae directo en la wiki (SPEC §15): en la última área abierta en este navegador,
   // si la persona sigue siendo miembro, o en la primera. Inicio queda solo para quien no tiene
@@ -108,6 +116,15 @@
 {#if route.path === '/invite'}
   <Invite />
   <SiteFooter />
+{:else if route.path === '/reset'}
+  <Reset />
+  <SiteFooter />
+{:else if route.path === '/unsubscribe'}
+  <Unsubscribe />
+  <SiteFooter />
+{:else if route.path === '/forgot'}
+  <Forgot />
+  <SiteFooter />
 {:else if ready}
   {#if me}
     {#if !editing}<TopBar {me} {area} {avatarRev} onprefs={savePrefs} onlogout={logout} />{/if}
@@ -121,7 +138,7 @@
         {:else if route.path === '/me/profile'}
           <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
         {:else if route.path === '/admin' && me.is_global_admin}
-          <Admin />
+          <Admin onchanged={loadMe} />
         {:else if route.path === '/admin/audit' && me.is_global_admin}
           <Audit endpoint="/admin/audit" global />
         {:else if route.path === '/admin/health' && me.is_global_admin}

@@ -84,6 +84,9 @@ func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags 
 	if len(clean) > maxTags {
 		return ErrInvalidTags
 	}
+	if err := s.direct(ctx, sc, slug); err != nil {
+		return err
+	}
 	p, err := s.store.PageBySlug(ctx, sc, slug)
 	if err != nil {
 		return err
@@ -100,6 +103,9 @@ func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags 
 func (s *Service) Move(ctx context.Context, sc repo.Scope, actorID, from, to string) error {
 	if !ValidSlug(to) || to == from || strings.HasPrefix(to, from+"/") {
 		return ErrInvalidMove
+	}
+	if err := s.direct(ctx, sc, from, to); err != nil {
+		return err
 	}
 	id, n, err := s.store.MovePages(ctx, sc, actorID, from, to, func(title, description, markdown, lang string, moves map[string]string) (string, []string, repo.IndexDoc) {
 		out := rewriteMoves(markdown, moves)
@@ -120,6 +126,9 @@ func (s *Service) SetLevel(ctx context.Context, sc repo.Scope, actorID, slug str
 	if level < 1 || level > 3 || level > sc.MaxRank {
 		return ErrInvalidLevel
 	}
+	if err := s.direct(ctx, sc, slug); err != nil {
+		return err
+	}
 	id, from, err := s.store.SetLevel(ctx, sc, actorID, slug, level)
 	if errors.Is(err, repo.ErrBelowParent) {
 		return ErrLevelBelowParent
@@ -137,6 +146,9 @@ const maxDescription = 200
 // como estaba. Son metadatos, como las etiquetas: no crean revisión. La descripción va también
 // al índice de búsqueda, con su raíz.
 func (s *Service) SetInfo(ctx context.Context, sc repo.Scope, slug string, description, icon *string) error {
+	if err := s.direct(ctx, sc, slug); err != nil {
+		return err
+	}
 	p, err := s.store.PageBySlug(ctx, sc, slug)
 	if err != nil {
 		return err

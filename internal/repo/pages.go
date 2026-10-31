@@ -42,6 +42,7 @@ type Revision struct {
 	Title     string
 	Markdown  string
 	Author    string
+	Approver  string // quien aprobó la propuesta de la que salió; vacío si se publicó directo (§5.2)
 	Summary   string
 	CreatedAt time.Time
 }
@@ -58,6 +59,15 @@ type PageWrite struct {
 	Links    []string // rutas de los [[enlaces]] del contenido (SPEC §4.7)
 	Lang     string
 	Index    IndexDoc // lo que se indexa para la búsqueda, en la misma transacción (SPEC §9.1)
+	// Merge va cuando la revisión sale de una propuesta aprobada: la propuesta queda aprobada en
+	// la misma transacción, o no se publica nada (§5.2).
+	Merge *ProposalMerge
+}
+
+// ProposalMerge es la aprobación que publica una propuesta. AuthorID de la PageWrite es el autor
+// de la propuesta; ReviewerID, quien la aprueba.
+type ProposalMerge struct {
+	ID, ReviewerID, Comment string
 }
 
 func (r *Repo) PageBySlug(ctx context.Context, s Scope, slug string) (Page, error) {
@@ -135,6 +145,12 @@ func (r *Repo) CreatePage(ctx context.Context, s Scope, w PageWrite) (string, er
 	if err := insertRevision(ctx, tx, s, id, 1, w); err != nil {
 		return "", err
 	}
+	if err := mergeProposal(ctx, tx, s, id, 1, w.Merge); err != nil {
+		return "", err
+	}
+	if err := emit(ctx, tx, s, EventPageSaved, w.AuthorID, id, mergeID(w.Merge)); err != nil {
+		return "", err
+	}
 	if err := attachMedia(ctx, tx, s, id, w.MediaIDs); err != nil {
 		return "", err
 	}
@@ -172,6 +188,12 @@ func (r *Repo) UpdatePage(ctx context.Context, s Scope, pageID string, base int,
 	if err := insertRevision(ctx, tx, s, pageID, base+1, w); err != nil {
 		return err
 	}
+	if err := mergeProposal(ctx, tx, s, pageID, base+1, w.Merge); err != nil {
+		return err
+	}
+	if err := emit(ctx, tx, s, EventPageSaved, w.AuthorID, pageID, mergeID(w.Merge)); err != nil {
+		return err
+	}
 	if err := attachMedia(ctx, tx, s, pageID, w.MediaIDs); err != nil {
 		return err
 	}
@@ -185,24 +207,29 @@ func (r *Repo) UpdatePage(ctx context.Context, s Scope, pageID string, base int,
 }
 
 func insertRevision(ctx context.Context, tx *sql.Tx, s Scope, pageID string, n int, w PageWrite) error {
+	var approver, proposal sql.NullString
+	if w.Merge != nil {
+		approver, proposal = sql.NullString{String: w.Merge.ReviewerID, Valid: true}, sql.NullString{String: w.Merge.ID, Valid: true}
+	}
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO page_revisions (id, page_id, workspace_id, revision_number, kind, title, content_markdown, created_by, change_summary)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
-		ulid.Make().String(), pageID, s.WsID, n, w.Kind, w.Title, w.Markdown, w.AuthorID, w.Summary)
+		`INSERT INTO page_revisions (id, page_id, workspace_id, revision_number, kind, title, content_markdown, created_by, change_summary, approved_by, proposal_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
+		ulid.Make().String(), pageID, s.WsID, n, w.Kind, w.Title, w.Markdown, w.AuthorID, w.Summary, approver, proposal)
 	return err
 }
 
-const revisionColumns = `r.revision_number, r.kind, r.title, r.content_markdown, u.full_name, COALESCE(r.change_summary, ''), r.created_at`
+const revisionColumns = `r.revision_number, r.kind, r.title, r.content_markdown, u.full_name, COALESCE(a.full_name, ''), COALESCE(r.change_summary, ''), r.created_at`
 
 // revisionScope une con pages para que el nivel de la página, y la papelera, también filtren su historial.
 const revisionScope = `FROM page_revisions r
 	JOIN pages p ON p.id = r.page_id
 	JOIN users u ON u.id = r.created_by
+	LEFT JOIN users a ON a.id = r.approved_by
 	WHERE r.page_id = ? AND r.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`
 
 func scanRevision(row scanner) (Revision, error) {
 	var v Revision
-	err := row.Scan(&v.Number, &v.Kind, &v.Title, &v.Markdown, &v.Author, &v.Summary, &v.CreatedAt)
+	err := row.Scan(&v.Number, &v.Kind, &v.Title, &v.Markdown, &v.Author, &v.Approver, &v.Summary, &v.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Revision{}, ErrNotFound
 	}

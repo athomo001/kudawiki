@@ -340,14 +340,14 @@ func TestStartTLS(t *testing.T) {
 // Un asunto o destinatario con saltos de línea no agrega encabezados.
 func TestHeaderInjection(t *testing.T) {
 	from := mail.Address{Name: "Wiki", Address: "wiki@acme.cl"}
-	if _, err := mimeMessage(from, "x@acme.cl\r\nBcc: y@evil.cl", "s", "t", nil, nil, "d"); !errors.Is(err, ErrInvalid) {
+	if _, err := mimeMessage(from, "x@acme.cl\r\nBcc: y@evil.cl", "s", "t", nil, nil, "d", ""); !errors.Is(err, ErrInvalid) {
 		t.Errorf("to: %v", err)
 	}
-	if _, err := mimeMessage(from, "x@acme.cl", "s\r\nBcc: y@evil.cl", "t", nil, nil, "d"); !errors.Is(err, ErrInvalid) {
+	if _, err := mimeMessage(from, "x@acme.cl", "s\r\nBcc: y@evil.cl", "t", nil, nil, "d", ""); !errors.Is(err, ErrInvalid) {
 		t.Errorf("subject: %v", err)
 	}
 	// Un título con comillas o acentos queda bien codificado en el remitente.
-	msg, err := mimeMessage(mail.Address{Name: `Wiki "Ñuñoa"`, Address: "wiki@acme.cl"}, "x@acme.cl", "Ñ", "t", []byte("<p>h</p>"), nil, "d")
+	msg, err := mimeMessage(mail.Address{Name: `Wiki "Ñuñoa"`, Address: "wiki@acme.cl"}, "x@acme.cl", "Ñ", "t", []byte("<p>h</p>"), nil, "d", "")
 	if err != nil {
 		t.Fatal(err)
 	}

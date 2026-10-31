@@ -76,6 +76,9 @@ func (r *Repo) DeletePages(ctx context.Context, s Scope, actorID, slug string) (
 			return "", 0, err
 		}
 	}
+	if err := emit(ctx, tx, s, EventPageDeleted, actorID, rootID, ""); err != nil {
+		return "", 0, err
+	}
 	return rootID, len(pages), tx.Commit()
 }
 
@@ -172,10 +175,17 @@ func sqlTime(t time.Time) string { return t.UTC().Format(time.DateTime) }
 // Lo que sigue lo usa el job diario de purga (SPEC §4.5): son operaciones del sistema sobre
 // todas las áreas, sin Scope, como RebuildIndex. No devuelven contenido.
 
-// TrashOrphanMedia manda a la papelera la media que nadie usó desde antes de cutoff (§4.4).
+// TrashOrphanMedia manda a la papelera la media que nadie usó desde antes de cutoff (§4.4). La
+// que usa una propuesta abierta no es huérfana: se asocia a la página cuando se aprueba (§5.2),
+// y una propuesta puede esperar más de una semana. Tampoco la de un borrador del autoguardado
+// (§4.11): la imagen pegada en una página que todavía no se publica.
 func (r *Repo) TrashOrphanMedia(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := r.db.Write.ExecContext(ctx,
-		`UPDATE media_assets SET deleted_at = CURRENT_TIMESTAMP WHERE page_id IS NULL AND deleted_at IS NULL AND created_at <= ?`,
+		`UPDATE media_assets SET deleted_at = CURRENT_TIMESTAMP WHERE page_id IS NULL AND deleted_at IS NULL AND created_at <= ?
+		   AND NOT EXISTS (SELECT 1 FROM proposals pr WHERE pr.workspace_id = media_assets.workspace_id
+		     AND pr.status IN ('pending','rejected') AND instr(pr.content_markdown, media_assets.id) > 0)
+		   AND NOT EXISTS (SELECT 1 FROM page_drafts d WHERE d.workspace_id = media_assets.workspace_id
+		     AND instr(d.content_markdown, media_assets.id) > 0)`,
 		sqlTime(cutoff))
 	if err != nil {
 		return 0, err
@@ -235,4 +245,37 @@ func (r *Repo) PurgeTrash(ctx context.Context, cutoff time.Time) ([]PurgedPage, 
 func (r *Repo) PurgeSearchMisses(ctx context.Context, cutoff time.Time) error {
 	_, err := r.db.Write.ExecContext(ctx, `DELETE FROM search_misses WHERE day < ?`, cutoff.UTC().Format(time.DateOnly))
 	return err
+}
+
+// PurgeRevisions aplica la retención del historial de cada área (§4.3): borra las revisiones que
+// quedan fuera de las últimas revisions_keep_last de su página o que tienen más de
+// revisions_keep_days días. Nunca la actual, ni la base de una propuesta abierta (pendiente o
+// rechazada, que se puede reenviar): sin ella no se puede mezclar a 3 vías (§5.2). Devuelve
+// cuántas borró en cada área.
+func (r *Repo) PurgeRevisions(ctx context.Context, now time.Time) (map[string]int, error) {
+	rows, err := r.db.Write.QueryContext(ctx,
+		`DELETE FROM page_revisions WHERE id IN (
+		   SELECT r.id FROM (
+		     SELECT id, page_id, workspace_id, revision_number, created_at,
+		       ROW_NUMBER() OVER (PARTITION BY page_id ORDER BY revision_number DESC) AS age
+		     FROM page_revisions) r
+		   JOIN workspaces w ON w.id = r.workspace_id
+		   JOIN pages p ON p.id = r.page_id
+		   WHERE (r.age > w.revisions_keep_last OR r.created_at < datetime(?, '-' || w.revisions_keep_days || ' days'))
+		     AND r.revision_number <> p.current_revision
+		     AND NOT EXISTS (SELECT 1 FROM proposals pr WHERE pr.page_id = r.page_id AND pr.base_revision = r.revision_number
+		       AND pr.status IN ('pending','rejected')))
+		 RETURNING workspace_id`, sqlTime(now))
+	if err != nil {
+		return nil, err
+	}
+	ids, err := collect(rows, func(row scanner) (string, error) {
+		var id string
+		return id, row.Scan(&id)
+	})
+	counts := map[string]int{}
+	for _, id := range ids {
+		counts[id]++
+	}
+	return counts, err
 }

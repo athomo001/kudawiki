@@ -73,6 +73,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID, sessionToken, curr
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthPasswordChange, TargetType: "user", TargetID: userID,
 		Meta: map[string]any{"other_sessions_closed": closed}})
+	s.notifyPasswordChanged(ctx, u)
 	return nil
 }
 

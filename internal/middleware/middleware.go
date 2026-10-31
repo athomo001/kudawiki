@@ -29,6 +29,10 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap deja que http.ResponseController llegue al writer de verdad: el aviso de edición
+// (§4.11) necesita Flush y correr el plazo de escritura, que este envoltorio no tiene.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // Log asigna el ID del request, recupera panics y deja una línea JSON por request.
 // Nunca registra el cuerpo ni la query: pueden llevar contraseñas o tokens (SPEC §13.5).
 func Log(logger *slog.Logger) func(http.Handler) http.Handler {

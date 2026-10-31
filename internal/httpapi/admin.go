@@ -8,6 +8,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/health"
 
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/workspace"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -26,8 +27,10 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Get("/users", a.listUsers)
 	r.Post("/users", a.inviteUser)
 	r.Post("/users/{id}/invite", a.resendInvite)
+	r.Post("/users/{id}/password-reset", a.adminPasswordReset)
 	r.Get("/workspaces", a.listWorkspaces)
 	r.Post("/workspaces", a.createWorkspace)
+	r.With(a.adminScope).Patch("/workspaces/{id}", a.renameWorkspace)
 	r.Get("/audit", a.audit)
 	r.Get("/health", a.globalHealth)
 	a.siteAdminRoutes(r)
@@ -53,8 +56,9 @@ func (a api) listUsers(w http.ResponseWriter, r *http.Request) {
 	a.json(w, http.StatusOK, out)
 }
 
-// inviteUser devuelve el enlace una sola vez; el token va en el fragmento (#), que el
-// navegador no envía al servidor ni queda en logs de acceso (SPEC §8.5).
+// inviteUser manda la invitación por correo o, sin correo, devuelve el enlace una sola vez; el
+// token va en el fragmento (#), que el navegador no envía al servidor ni queda en logs de acceso
+// (SPEC §8.5).
 func (a api) inviteUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email    string `json:"email"`
@@ -68,7 +72,7 @@ func (a api) inviteUser(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	a.json(w, http.StatusCreated, map[string]string{"invite_url": a.inviteURL(token)})
+	a.inviteSent(w, token)
 }
 
 // resendInvite es POST /admin/users/{id}/invite: un enlace nuevo para una invitación pendiente.
@@ -78,7 +82,16 @@ func (a api) resendInvite(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	a.json(w, http.StatusCreated, map[string]string{"invite_url": a.inviteURL(token)})
+	a.inviteSent(w, token)
+}
+
+// inviteSent: sin token, la invitación salió por correo.
+func (a api) inviteSent(w http.ResponseWriter, token string) {
+	if token == "" {
+		a.json(w, http.StatusCreated, map[string]string{"delivery": "email"})
+		return
+	}
+	a.json(w, http.StatusCreated, map[string]string{"delivery": "manual", "invite_url": a.inviteURL(token)})
 }
 
 // inviteURL lleva el token en el fragmento (#): el navegador no lo manda al servidor (SPEC §8.5).
@@ -94,9 +107,27 @@ func (a api) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]string, len(ws))
 	for i, x := range ws {
-		out[i] = map[string]string{"id": x.ID, "slug": x.Slug, "name": x.Name}
+		out[i] = map[string]string{"id": x.ID, "slug": x.Slug, "name": x.Name, "description": x.Description}
 	}
 	a.json(w, http.StatusOK, out)
+}
+
+// renameWorkspace cambia el nombre y la descripción de un área desde el panel, sin ser miembro.
+// Valida y audita igual que la Configuración del área (ws.update); la aprobación de cambios
+// queda para su admin.
+func (a api) renameWorkspace(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if err := a.Workspaces.Update(r.Context(), scopeOf(r), workspace.Settings{Name: in.Name, Description: in.Description}); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a api) createWorkspace(w http.ResponseWriter, r *http.Request) {

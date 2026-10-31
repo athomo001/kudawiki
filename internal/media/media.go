@@ -29,6 +29,8 @@ import (
 var (
 	ErrTooLarge        = errors.New("file_too_large")
 	ErrUnsupportedType = errors.New("unsupported_file_type")
+	// ErrInUse: una página que quien borra ve todavía usa el archivo (§4.4).
+	ErrInUse = errors.New("media_in_use")
 )
 
 // allowed es la lista blanca de tipos, detectados por el contenido y no por la extensión.
@@ -39,6 +41,7 @@ var allowed = map[string]bool{
 }
 
 const (
+	listLimit = 200        // archivos por pedido en el navegador; para más, se busca por nombre
 	thumbMax  = 320        // lado mayor de la miniatura, en px
 	maxPixels = 40_000_000 // más que esto no se decodifica: evita bombas de descompresión
 )
@@ -46,6 +49,9 @@ const (
 type store interface {
 	CreateMedia(ctx context.Context, s repo.Scope, m repo.Media) error
 	MediaByID(ctx context.Context, s repo.Scope, id string) (repo.Media, error)
+	MediaList(ctx context.Context, s repo.Scope, q string, limit int) ([]repo.MediaItem, error)
+	MediaUsedBy(ctx context.Context, s repo.Scope, id string) ([]repo.PageRef, error)
+	TrashMedia(ctx context.Context, s repo.Scope, id string) error
 }
 
 type Service struct {
@@ -165,6 +171,34 @@ func (s *Service) Open(ctx context.Context, sc repo.Scope, id string, thumb bool
 		m.MimeType = "image/png" // la miniatura es PNG salvo para fotos JPEG
 	}
 	return m, f, err
+}
+
+// List es el navegador de archivos del área (§4.4): lo que el Scope ve, lo más nuevo primero.
+func (s *Service) List(ctx context.Context, sc repo.Scope, q string) ([]repo.MediaItem, error) {
+	return s.store.MediaList(ctx, sc, strings.TrimSpace(q), listLimit)
+}
+
+// Delete manda el archivo a la papelera (§4.4, §4.5). Si una página que quien borra ve lo usa en
+// su versión actual, no lo borra y devuelve esas páginas con ErrInUse: primero se saca de ahí. Las
+// revisiones viejas que lo mostraban lo verán roto.
+func (s *Service) Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.PageRef, error) {
+	m, err := s.store.MediaByID(ctx, sc, id)
+	if err != nil {
+		return nil, err
+	}
+	pages, err := s.store.MediaUsedBy(ctx, sc, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) > 0 {
+		return pages, ErrInUse
+	}
+	if err := s.store.TrashMedia(ctx, sc, m.ID); err != nil {
+		return nil, err
+	}
+	s.audit.Record(ctx, audit.Event{Action: audit.MediaDelete, WsID: sc.WsID, TargetType: "media", TargetID: m.ID,
+		Meta: map[string]any{"mime": m.MimeType, "bytes": m.Size}})
+	return nil, nil
 }
 
 // Remove borra del disco el archivo y su miniatura. Lo llama solo la purga de la papelera

@@ -58,9 +58,12 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	areas := make([]map[string]string, len(ms))
+	areas := make([]map[string]any, len(ms))
 	for i, m := range ms {
-		areas[i] = map[string]string{"slug": m.Slug, "name": m.Name, "description": m.Description, "role": m.Role}
+		// viewers_can_propose: la interfaz le ofrece a un lector "Proponer un cambio" (§19.5).
+		// require_change_summary: el editor marca el resumen como obligatorio (§4.3).
+		areas[i] = map[string]any{"slug": m.Slug, "name": m.Name, "description": m.Description, "role": m.Role,
+			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary}
 	}
 	a.json(w, http.StatusOK, map[string]any{
 		"id": u.ID, "email": u.Email, "full_name": u.FullName,

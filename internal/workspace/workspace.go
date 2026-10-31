@@ -27,7 +27,7 @@ var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$`)
 type store interface {
 	CreateWorkspace(ctx context.Context, w repo.Workspace) error
 	WorkspaceByID(ctx context.Context, id string) (repo.Workspace, error)
-	UpdateWorkspace(ctx context.Context, s repo.Scope, name, description string) error
+	UpdateWorkspace(ctx context.Context, s repo.Scope, w repo.Workspace) error
 	UserByEmail(ctx context.Context, email string) (repo.User, error)
 	MemberRole(ctx context.Context, s repo.Scope, userID string) (string, error)
 	SetMember(ctx context.Context, s repo.Scope, userID, role string) error
@@ -67,27 +67,60 @@ func (s *Service) Create(ctx context.Context, slug, name string) (repo.Workspace
 // maxDescription: la descripción del área es un párrafo, no una página.
 const maxDescription = 500
 
-// Update cambia el nombre o la descripción del área; lo que viene en nil queda como estaba.
-// Solo su admin (la ruta lo exige, §3.1). La auditoría dice qué campos cambiaron, no el texto (§11.2).
-func (s *Service) Update(ctx context.Context, sc repo.Scope, name, description *string) error {
+// Settings es lo que el admin del área cambia en su configuración; lo que viene en nil queda
+// como estaba.
+type Settings struct {
+	Name, Description *string
+	ApprovalMode      *string // direct | required (§5.1)
+	ViewersCanPropose *bool   // §19.5
+	// Historial (§4.3). KeepLast y KeepDays: 0 = sin límite; no pueden ir los dos.
+	RequireChangeSummary *bool
+	KeepLast, KeepDays   *int
+}
+
+// validRetention: las últimas N revisiones (hasta 10 000) o las de los últimos N días (hasta
+// 100 años), o ninguna de las dos (todas); las dos a la vez no (§4.3).
+func validRetention(last, days int) bool {
+	return last >= 0 && last <= 10000 && days >= 0 && days <= 36500 && (last == 0 || days == 0)
+}
+
+// Update cambia la configuración del área. Solo su admin (la ruta lo exige, §3.1). La auditoría
+// dice qué campos cambiaron, no el texto (§11.2).
+func (s *Service) Update(ctx context.Context, sc repo.Scope, in Settings) error {
 	w, err := s.store.WorkspaceByID(ctx, sc.WsID)
 	if err != nil {
 		return err
 	}
 	var changed []string
-	if name != nil && strings.TrimSpace(*name) != w.Name {
-		w.Name, changed = strings.TrimSpace(*name), append(changed, "name")
+	if in.Name != nil && strings.TrimSpace(*in.Name) != w.Name {
+		w.Name, changed = strings.TrimSpace(*in.Name), append(changed, "name")
 	}
-	if description != nil && strings.TrimSpace(*description) != w.Description {
-		w.Description, changed = strings.TrimSpace(*description), append(changed, "description")
+	if in.Description != nil && strings.TrimSpace(*in.Description) != w.Description {
+		w.Description, changed = strings.TrimSpace(*in.Description), append(changed, "description")
 	}
-	if w.Name == "" || utf8.RuneCountInString(w.Description) > maxDescription {
+	if in.ApprovalMode != nil && *in.ApprovalMode != w.ApprovalMode {
+		w.ApprovalMode, changed = *in.ApprovalMode, append(changed, "approval_mode")
+	}
+	if in.ViewersCanPropose != nil && *in.ViewersCanPropose != w.ViewersCanPropose {
+		w.ViewersCanPropose, changed = *in.ViewersCanPropose, append(changed, "viewers_can_propose")
+	}
+	if in.RequireChangeSummary != nil && *in.RequireChangeSummary != w.RequireChangeSummary {
+		w.RequireChangeSummary, changed = *in.RequireChangeSummary, append(changed, "require_change_summary")
+	}
+	if in.KeepLast != nil && *in.KeepLast != w.KeepLast {
+		w.KeepLast, changed = *in.KeepLast, append(changed, "revisions_keep_last")
+	}
+	if in.KeepDays != nil && *in.KeepDays != w.KeepDays {
+		w.KeepDays, changed = *in.KeepDays, append(changed, "revisions_keep_days")
+	}
+	if w.Name == "" || utf8.RuneCountInString(w.Description) > maxDescription || (w.ApprovalMode != "direct" && w.ApprovalMode != "required") ||
+		!validRetention(w.KeepLast, w.KeepDays) {
 		return ErrInvalidArea
 	}
 	if len(changed) == 0 {
 		return nil
 	}
-	if err := s.store.UpdateWorkspace(ctx, sc, w.Name, w.Description); err != nil {
+	if err := s.store.UpdateWorkspace(ctx, sc, w); err != nil {
 		return err
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.WsUpdate, WsID: sc.WsID, TargetType: "workspace", TargetID: sc.WsID, Meta: map[string]any{"changed": changed}})

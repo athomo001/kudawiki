@@ -26,6 +26,19 @@
     help: 'M12 3a9 9 0 1 1 0 18a9 9 0 0 1 0-18M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17v.5',
     copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
     check: 'M5 12l5 5L20 7',
+    // Barra de formato del editor (diseño aprobado "Editor"): enlace, lista e imagen salen del mockup.
+    link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+    bullets: 'M9 6h11M9 12h11M9 18h11M4 6h.5M4 12h.5M4 18h.5',
+    numbers: 'M10 6h10M10 12h10M10 18h10M4 4.5h1.5v4M4 14.5h2.5L4 18h2.5',
+    image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4',
+    resize: 'M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7',
+    files: 'M9 3h6l4 4v10H9zM15 3v4h4M5 7v14h10',
+    quote: 'M5 17h4v-5H6l1-5M14 17h4v-5h-3l1-5',
+    keyboard: 'M3 7h18v10H3zM7 10.5h.01M11 10.5h.01M15 10.5h.01M8 14h8',
+    rule: 'M4 12h16',
+    lock: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3',
+    // Campana del diseño aprobado: notificaciones en la barra y "Seguir página" en las acciones.
+    bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0',
   };
   export type IconName = keyof typeof paths | 'more';
 

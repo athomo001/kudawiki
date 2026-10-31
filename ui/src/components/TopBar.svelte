@@ -7,9 +7,10 @@
   import Dropdown from './Dropdown.svelte';
   import SearchBox from './SearchBox.svelte';
   import ReadingPrefsForm from './ReadingPrefsForm.svelte';
+  import NotificationBell from './NotificationBell.svelte';
 
-  // Barra superior del diseño aprobado (SPEC §15): logo, área, búsqueda, idioma, lectura y usuario.
-  // La campana de notificaciones llega con F4.
+  // Barra superior del diseño aprobado (SPEC §15): logo, área, búsqueda, idioma, lectura,
+  // notificaciones (§12.1) y usuario.
   let {
     me,
     area,
@@ -63,6 +64,8 @@
         <p class="muted small">{t('prefs.note')}</p>
       </section>
     </Dropdown>
+
+    <NotificationBell />
 
     <Dropdown label={t('nav.user_menu')} class="topbar-btn">
       {#snippet trigger()}<Avatar {me} rev={avatarRev} />{/snippet}

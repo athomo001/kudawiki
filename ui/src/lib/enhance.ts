@@ -200,8 +200,69 @@ function tables(root: HTMLElement) {
   }
 }
 
+// Texto oculto [[secret:…]] (SPEC §4.10): se ve "[contenido censurado]" hasta un clic, y al
+// copiar se copia eso en vez del valor, aunque esté a la vista. El CSS lo esconde desde el
+// primer cuadro, antes de que llegue este botón. Ocultar en pantalla, no proteger: el valor
+// viene en la página.
+function secretLabel(button: HTMLButtonElement, shown: boolean) {
+  button.setAttribute('aria-expanded', String(shown));
+  button.setAttribute('aria-label', t(shown ? 'secret.hide' : 'secret.show'));
+  button.title = t(shown ? 'secret.hide' : 'secret.show');
+  const mask = button.querySelector('.secret-mask');
+  if (mask) mask.textContent = t('secret.censored');
+}
+
+function secrets(root: HTMLElement) {
+  for (const box of root.querySelectorAll<HTMLElement>('.secret:not([data-ready])')) {
+    box.dataset.ready = '';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'secret-toggle';
+    const mask = document.createElement('span');
+    mask.className = 'secret-mask';
+    button.append(iconSvg('lock'), mask);
+    button.addEventListener('click', () => secretLabel(button, box.toggleAttribute('data-shown')));
+    box.prepend(button);
+  }
+  for (const button of root.querySelectorAll<HTMLButtonElement>('.secret-toggle')) {
+    secretLabel(button, button.parentElement?.hasAttribute('data-shown') ?? false);
+  }
+  censorCopies();
+}
+
+let censoring = false;
+
+// Al copiar una selección que toca un texto oculto, cada uno sale como "[contenido censurado]".
+// Escucha en todo el documento: una selección que empieza fuera de la página (la barra, el
+// menú) dispara el evento afuera y aun así puede llevar el valor a la vista. El texto se arma
+// en el documento, fuera de la vista, para conservar los saltos de párrafo.
+function censorCopies() {
+  if (censoring) return;
+  censoring = true;
+  document.addEventListener('copy', (e) => {
+    const range = getSelection()?.rangeCount ? getSelection()?.getRangeAt(0) : undefined;
+    if (!range || !e.clipboardData) return;
+    const common = range.commonAncestorContainer;
+    const inside = (common instanceof Element ? common : common.parentElement)?.closest('.secret');
+    if (!inside && ![...document.querySelectorAll('.secret')].some((s) => range.intersectsNode(s))) return;
+    const box = document.createElement('div');
+    box.className = 'sr-only';
+    if (inside) box.textContent = t('secret.censored');
+    else {
+      box.append(range.cloneContents());
+      for (const s of box.querySelectorAll('.secret')) s.replaceWith(t('secret.censored'));
+    }
+    document.body.append(box);
+    e.clipboardData.setData('text/plain', box.innerText);
+    e.clipboardData.setData('text/html', box.innerHTML);
+    box.remove();
+    e.preventDefault();
+  });
+}
+
 export function enhance(root: HTMLElement | undefined) {
   if (!root) return;
+  secrets(root);
   callouts(root);
   anchors(root);
   tabs(root);

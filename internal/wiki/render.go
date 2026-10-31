@@ -40,6 +40,8 @@ var policy = func() *bluemonday.Policy {
 	safeToken := regexp.MustCompile(`^[a-zA-Z0-9:_ -]+$`)
 	p.AllowAttrs("class").Matching(safeToken).OnElements("span", "code", "pre", "div", "li", "ul", "ol", "input", "sup", "a", "section", "p")
 	p.AllowAttrs("id").Matching(safeToken).OnElements("h1", "h2", "h3", "h4", "h5", "h6", "li", "sup", "a")
+	// Posición de imagen (§4.4): solo las tres de Wiki.js.
+	p.AllowAttrs("class").Matching(regexp.MustCompile(`^align-(left|center|right)$`)).OnElements("img")
 	p.AllowAttrs("type").Matching(regexp.MustCompile(`^checkbox$`)).OnElements("input")
 	p.AllowAttrs("checked", "disabled").OnElements("input")
 	p.AllowElements("section", "details", "summary", "kbd")

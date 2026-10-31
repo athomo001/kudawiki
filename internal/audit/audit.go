@@ -51,6 +51,8 @@ var (
 	PageRead           = Action{"page.read"}             // solo páginas N3 (§11.1)
 	PathUnavailable    = Action{"page.path_unavailable"} // §19.35
 	MediaUpload        = Action{"media.upload"}
+	MediaDelete        = Action{"media.delete"}
+	RevisionPurge      = Action{"revision.purge"} // la retención del historial del área (§4.3)
 	// Anuncios del inicio del área (§4.17).
 	AnnouncementCreate = Action{"announcement.create"}
 	AnnouncementDelete = Action{"announcement.delete"}
@@ -66,6 +68,14 @@ var (
 	// Correo (§12).
 	SiteSMTPUpdate = Action{"site.smtp_update"}
 	SMTPTestSend   = Action{"smtp.test_send"}
+	// Recuperación de contraseña (§8.5).
+	AuthPasswordResetRequest  = Action{"auth.password_reset_request"}
+	AuthPasswordResetComplete = Action{"auth.password_reset_complete"}
+	// Propuestas (§5.2). Aprobar con cambios es proposal.approve con meta.modified.
+	ProposalSubmit   = Action{"proposal.submit"}
+	ProposalApprove  = Action{"proposal.approve"}
+	ProposalReject   = Action{"proposal.reject"}
+	ProposalWithdraw = Action{"proposal.withdraw"}
 )
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
@@ -73,9 +83,11 @@ var All = []Action{
 	AuthLogin, AuthLoginFailed, AuthLockout, AuthLogout, AuthPasswordChange, UserProfileUpdate, UserInvite, UserInviteAccept,
 	WsCreate, WsUpdate, BackupRun, WsMemberAdd, WsMemberRemove, WsMemberRole,
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
-	PageRead, PathUnavailable, MediaUpload, AnnouncementCreate, AnnouncementDelete,
+	PageRead, PathUnavailable, MediaUpload, MediaDelete, RevisionPurge, AnnouncementCreate, AnnouncementDelete,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
+	AuthPasswordResetRequest, AuthPasswordResetComplete,
+	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.

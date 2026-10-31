@@ -89,6 +89,61 @@ type extracted struct {
 }
 
 // extract recorre la página una vez: el texto de cada parte y dónde empieza cada sección.
+// checkSecrets busca los textos ocultos que quedarían a la vista. Se mira en el árbol del
+// parser: dentro de código no es texto oculto.
+//   - Un título de sección con un [[secret:…]], o dentro de un :::secret: el título se indexa y
+//     arma el ancla de la URL.
+//   - Un "[[secret:" que el parser no reconoció (sin "]]" en la misma línea, o cruzando
+//     párrafos) queda como texto común: se publicaría la contraseña tal cual.
+func checkSecrets(markdown string) error {
+	src := []byte(markdown)
+	pc := parser.NewContext()
+	pc.Set(optionsKey, &Options{})
+	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(pc))
+	var found error
+	inSecret := 0
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		switch n := n.(type) {
+		case *directive:
+			if n.name == "secret" && entering {
+				inSecret++
+			} else if n.name == "secret" {
+				inSecret--
+			}
+		case *ast.Heading:
+			if entering && inSecret > 0 {
+				found = ErrSecretInHeading
+			}
+		case *wikiToken:
+			if _, secret := n.secret(); entering && secret && n.Parent() != nil && n.Parent().Kind() == ast.KindHeading {
+				found = ErrSecretInHeading
+			}
+		case *ast.CodeSpan:
+			return ast.WalkSkipChildren, nil
+		}
+		if entering && found == nil && n.Type() == ast.TypeBlock && strings.Contains(inlineText(n, src), "[["+secretPrefix) {
+			found = ErrSecretUnclosed
+		}
+		if found != nil {
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
+}
+
+// inlineText es el texto común de los hijos directos de un bloque, seguido, sin el de código:
+// el parser parte "[[secret:" en varios nodos de texto al no reconocerlo.
+func inlineText(block ast.Node, src []byte) string {
+	var b strings.Builder
+	for c := block.FirstChild(); c != nil; c = c.NextSibling() {
+		if t, ok := c.(*ast.Text); ok {
+			b.Write(t.Segment.Value(src))
+		}
+	}
+	return b.String()
+}
+
 func extract(markdown string) extracted {
 	src := []byte(markdown)
 	pc := parser.NewContext()
@@ -126,8 +181,15 @@ func extract(markdown string) extracted {
 			return ast.WalkSkipChildren, nil
 		case *mermaid:
 			add(&code, n.source)
+		case *directive:
+			if n.name == "secret" {
+				return ast.WalkSkipChildren, nil
+			}
 		case *wikiToken:
-			add(&content, strings.ReplaceAll(n.raw, "|", " "))
+			// Un texto oculto no se busca ni aparece en los fragmentos de resultados (§4.10).
+			if _, secret := n.secret(); !secret {
+				add(&content, strings.ReplaceAll(n.raw, "|", " "))
+			}
 		case *ast.Text:
 			add(&content, string(n.Segment.Value(src)))
 		}

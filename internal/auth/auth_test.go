@@ -105,6 +105,18 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Errorf("idle: %v, want ErrNoSession", err)
 	}
 
+	// Check no cuenta como actividad: una sesión que solo se revisa vence igual (§4.11).
+	token, _ = s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	for range 3 {
+		c.t = c.t.Add(sessionIdle / 2)
+		if _, err := s.Check(ctx, token); err != nil {
+			break
+		}
+	}
+	if _, err := s.Check(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Errorf("checked only: %v, want ErrNoSession", err)
+	}
+
 	// Aunque haya actividad, a los 7 días vence igual.
 	token, _ = s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
 	for range 15 {

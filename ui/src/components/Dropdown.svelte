@@ -10,7 +10,8 @@
     children,
     class: cls = '',
     align = 'end',
-  }: { label: string; trigger: Snippet; children: Snippet; class?: string; align?: 'start' | 'end' } = $props();
+    onopen,
+  }: { label: string; trigger: Snippet; children: Snippet; class?: string; align?: 'start' | 'end'; onopen?: () => void } = $props();
 
   let open = $state(false);
   let root: HTMLElement;
@@ -40,7 +41,7 @@
 </script>
 
 <div class="dropdown" bind:this={root}>
-  <button bind:this={button} type="button" class={cls} aria-label={label} title={label} aria-expanded={open} onclick={() => (open = !open)}>
+  <button bind:this={button} type="button" class={cls} aria-label={label} title={label} aria-expanded={open} onclick={() => (open = !open) && onopen?.()}>
     {@render trigger()}
   </button>
   {#if open}
