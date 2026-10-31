@@ -40,7 +40,15 @@ import (
 )
 
 type authService interface {
-	Login(ctx context.Context, ip, email, password string) (string, error)
+	Login(ctx context.Context, ip, email, password string) (auth.LoginResult, error)
+	// Segundo factor (§8.1).
+	VerifyLogin(ctx context.Context, challenge, code string) (string, error)
+	NeedsMFASetup(ctx context.Context, u repo.User) (bool, error)
+	TOTPStatus(ctx context.Context, u repo.User) (auth.TOTPStatus, error)
+	BeginTOTP(ctx context.Context, u repo.User, issuer string) (auth.TOTPSetup, error)
+	ConfirmTOTP(ctx context.Context, u repo.User, sessionToken, code string, revokeOthers bool) ([]string, error)
+	DisableTOTP(ctx context.Context, u repo.User, password, code string) error
+	ResetTOTP(ctx context.Context, userID string) error
 	Authenticate(ctx context.Context, token string) (repo.User, error)
 	Check(ctx context.Context, token string) (repo.User, error)
 	Logout(ctx context.Context, token string) error
@@ -303,6 +311,7 @@ func New(d Deps) http.Handler {
 		})
 		r.Use(middleware.RateLimit(limit, time.Now))
 		r.Post("/auth/login", a.login)
+		r.Post("/auth/totp", a.verifyTOTP)
 		r.Post("/auth/invite/accept", a.acceptInvite)
 		r.Post("/auth/password-reset", a.requestPasswordReset)
 		r.Post("/auth/password-reset/complete", a.completePasswordReset)
@@ -312,6 +321,7 @@ func New(d Deps) http.Handler {
 			r.Get("/auth/me", a.me)
 			r.Patch("/me", a.setPreferences)
 			a.profileRoutes(r)
+			a.totpRoutes(r)
 			a.notificationRoutes(r)
 			a.homeRoutes(r)
 			r.Route("/admin", a.adminRoutes)
@@ -440,6 +450,11 @@ var domainErrors = map[error]int{
 	auth.ErrWrongPassword:        http.StatusUnprocessableEntity,
 	auth.ErrAvatarTooLarge:       http.StatusRequestEntityTooLarge,
 	auth.ErrAvatarType:           http.StatusUnsupportedMediaType,
+	auth.ErrTOTPEnabled:          http.StatusConflict,
+	auth.ErrTOTPNotStarted:       http.StatusConflict,
+	auth.ErrTOTPRequired:         http.StatusConflict,
+	auth.ErrInvalidCode:          http.StatusUnprocessableEntity,
+	auth.ErrMFAExpired:           http.StatusUnauthorized,
 	workspace.ErrInvalidArea:     http.StatusUnprocessableEntity,
 	workspace.ErrSlugTaken:       http.StatusConflict,
 	workspace.ErrInvalidRole:     http.StatusUnprocessableEntity,

@@ -73,6 +73,20 @@ func (s *Service) CreateEmergencySuperadmin(ctx context.Context, email, fullName
 	return nil
 }
 
+// Reset2FA borra el 2FA de quien perdió el celular y sus códigos (§13.6). Si se le exige, lo
+// configura de nuevo en su próximo login.
+func (s *Service) Reset2FA(ctx context.Context, email string) error {
+	u, err := s.store.UserByEmail(ctx, strings.TrimSpace(email))
+	if err != nil {
+		return err
+	}
+	if err := s.store.DisableTOTP(ctx, u.ID); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Event{Action: audit.CLIReset2FA, TargetType: "user", TargetID: u.ID, System: consoleSystem})
+	return nil
+}
+
 // RevokeSessions cierra las sesiones de una persona, o las de todos con email vacío. Devuelve
 // cuántas cerró.
 func (s *Service) RevokeSessions(ctx context.Context, email string) (int64, error) {

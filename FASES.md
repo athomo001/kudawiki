@@ -12,7 +12,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | ✅ |
 | [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ✅ |
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ✅ |
-| [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | ⚪ |
+| [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | 🟡 |
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ⚪ |
 | [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ⚪ |
 | [F9](#f9--después-de-v10) | Después de v1.0 | Comentarios, PDF, MCP… | ⚪ |
@@ -155,7 +155,9 @@ Orden acordado con el dueño el 2026-10-30: 1. plantillas → 2. vigencia → 3.
 
 ## F6 — Identidad, AD y 2FA (M5)
 
-- [ ] TOTP, passkeys, reauth, "mis sesiones".
+Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones, aviso de login nuevo y B16 (F6.1c) → 4. passkeys (F6.1d) → 5. baja de usuarios con B14 y B15 → 6. LDAP/AD.
+
+- [ ] TOTP, passkeys, reauth, "mis sesiones". *(TOTP hecho en F6.1a, 2026-10-31: obligatorio para los admins, segundo paso del login, códigos de recuperación, restablecer desde el panel y `kudawiki admin reset-2fa`; Chrome 30/30)*
 - [ ] LDAP/AD: login, JIT, mapeo de grupos, sincronización periódica, salvaguardas.
 - [ ] LDAP: configuración desde el panel, pruebas de conexión y de usuario, cualquier directorio (`ad`, `openldap`, `generic` con detección automática), solo grupos mapeados, vinculación de cuentas locales (§8.6).
 - [ ] Baja de usuarios (§8.4) con período de gracia.

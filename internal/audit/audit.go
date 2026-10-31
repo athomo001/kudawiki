@@ -96,6 +96,15 @@ var (
 	// Recuperación de contraseña (§8.5).
 	AuthPasswordResetRequest  = Action{"auth.password_reset_request"}
 	AuthPasswordResetComplete = Action{"auth.password_reset_complete"}
+	// Segundo factor (§8.1). El fallo se registra como el del login: el primero de cada ventana
+	// y el bloqueo, no cada intento.
+	AuthTOTPEnable       = Action{"auth.totp_enable"}
+	AuthTOTPDisable      = Action{"auth.totp_disable"}
+	AuthTOTPReset        = Action{"auth.totp_reset"}
+	AuthTOTPFailed       = Action{"auth.totp_failed"}
+	AuthTOTPLockout      = Action{"auth.totp_lockout"}
+	AuthTOTPRecoveryUsed = Action{"auth.totp_recovery_used"}
+	CLIReset2FA          = Action{"admin.cli_reset_2fa"}
 	// Propuestas (§5.2). Aprobar con cambios es proposal.approve con meta.modified.
 	ProposalSubmit   = Action{"proposal.submit"}
 	ProposalApprove  = Action{"proposal.approve"}
@@ -115,6 +124,7 @@ var All = []Action{
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,
+	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA,
 	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,
 }
 

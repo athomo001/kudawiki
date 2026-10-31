@@ -1,8 +1,9 @@
 <script lang="ts">
   import { api, codeOf } from '../lib/api';
   import { t, errorText } from '../lib/i18n/index.svelte';
+  import Dialog from '../components/Dialog.svelte';
 
-  type User = { id: string; email: string; full_name: string; is_global_admin: boolean; invited: boolean };
+  type User = { id: string; email: string; full_name: string; is_global_admin: boolean; invited: boolean; totp_enabled: boolean };
   type Area = { id: string; slug: string; name: string; description: string };
 
   // onchanged recarga la sesión: el nombre nuevo de un área sale también en el selector y el menú.
@@ -24,6 +25,9 @@
   // El área que se está renombrando desde la lista (pedido del dueño, 2026-10-30): nombre y
   // descripción, sin ser miembro. La dirección (/slug) no cambia aquí.
   let editing = $state<Area | null>(null);
+  // Restablecer el 2FA de quien perdió el celular (§14.2): se confirma en un diálogo.
+  let resetting = $state<User | null>(null);
+  let confirmingReset = $state(false);
 
   async function run(action?: () => Promise<void>) {
     busy = true;
@@ -84,6 +88,16 @@
     });
   }
 
+  function resetTotp(e: SubmitEvent) {
+    e.preventDefault();
+    const u = resetting;
+    if (!u) return;
+    run(async () => {
+      await api('PATCH', `/admin/users/${u.id}`, { reset_totp: true });
+      confirmingReset = false;
+    });
+  }
+
   async function copy() {
     if (!result?.url) return;
     await navigator.clipboard.writeText(result.url);
@@ -120,6 +134,7 @@
             <td>
               {u.invited ? t('admin.status_invited') : t('admin.status_active')}
               {#if u.is_global_admin}· {t('admin.superadmin')}{/if}
+              {#if u.totp_enabled}· {t('admin.totp_on')}{/if}
             </td>
             <td>
               {#if u.invited}
@@ -134,6 +149,16 @@
                   disabled={busy}
                   onclick={() => sendReset(u)}>{t('admin.reset')}</button
                 >
+                {#if u.totp_enabled}
+                  ·
+                  <button
+                    type="button"
+                    class="link"
+                    aria-label={t('admin.totp_reset_label', { name: u.full_name })}
+                    disabled={busy}
+                    onclick={() => ((resetting = u), (confirmingReset = true))}>{t('admin.totp_reset')}</button
+                  >
+                {/if}
               {/if}
             </td>
           </tr>
@@ -204,3 +229,11 @@
   </form>
   <small id="slug-hint" class="muted">{t('admin.slug_hint')}</small>
 </section>
+
+<Dialog title={t('admin.totp_reset')} bind:open={confirmingReset}>
+  <form class="stack" onsubmit={resetTotp}>
+    <p>{t('admin.totp_reset_confirm', { name: resetting?.full_name ?? '' })}</p>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    <button type="submit" class="primary danger-btn" disabled={busy}>{t('admin.totp_reset')}</button>
+  </form>
+</Dialog>

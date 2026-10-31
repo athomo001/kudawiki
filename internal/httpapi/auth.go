@@ -25,7 +25,7 @@ func (a api) login(w http.ResponseWriter, r *http.Request) {
 	if !a.decode(w, r, &in) {
 		return
 	}
-	token, err := a.Auth.Login(r.Context(), clientIP(r), in.Email, in.Password)
+	res, err := a.Auth.Login(r.Context(), clientIP(r), in.Email, in.Password)
 	if a.rateLimited(w, r, err) {
 		return
 	}
@@ -33,12 +33,22 @@ func (a api) login(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	if res.Challenge != "" { // falta el segundo paso (§8.1): todavía no hay sesión
+		http.SetCookie(w, &http.Cookie{Name: mfaCookie, Value: res.Challenge, Path: "/api/auth", MaxAge: 300,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+		a.json(w, http.StatusOK, map[string]bool{"totp_required": true})
+		return
+	}
+	setSessionCookie(w, res.Session)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: token, Path: "/",
 		MaxAge:   int((7 * 24 * time.Hour).Seconds()), // el servidor vence antes por inactividad (12 h)
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a api) logout(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +74,11 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	totp, err := a.Auth.TOTPStatus(r.Context(), u)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	areas := make([]map[string]any, len(ms))
 	for i, m := range ms {
 		// viewers_can_propose: la interfaz le ofrece a un lector "Proponer un cambio" (§19.5).
@@ -75,6 +90,8 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		"id": u.ID, "email": u.Email, "full_name": u.FullName,
 		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
 		"has_avatar": u.HasAvatar, "personal": map[string]string{"slug": own.Slug},
+		// mfa_setup_required: la interfaz muestra solo la configuración del 2FA (§8.1).
+		"totp": totp, "mfa_setup_required": totp.Required && !totp.Enabled,
 	})
 }
 
@@ -131,6 +148,14 @@ func (a api) requireSession(next http.Handler) http.Handler {
 		}
 		if err != nil {
 			a.fail(w, r, err)
+			return
+		}
+		// Sin el 2FA que se le exige, solo puede configurarlo (§8.1): la contraseña sola no basta.
+		if setup, err := a.Auth.NeedsMFASetup(r.Context(), u); err != nil {
+			a.fail(w, r, err)
+			return
+		} else if setup && !mfaSetupPaths[r.Method+" "+r.URL.Path] {
+			a.error(w, r, http.StatusForbidden, "mfa_setup_required", nil)
 			return
 		}
 		ctx := audit.WithActor(context.WithValue(r.Context(), userKey{}, u),

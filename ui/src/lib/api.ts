@@ -38,7 +38,14 @@ export type Me = {
   workspaces: Area[];
   has_avatar: boolean;
   personal: { slug: string };
+  totp: TOTPStatus;
+  // Se le exige el 2FA y no lo tiene: la interfaz muestra solo su configuración (SPEC §8.1).
+  mfa_setup_required: boolean;
 };
+
+export type TOTPStatus = { enabled: boolean; required: boolean; recovery_codes_left: number };
+// El alta del 2FA: qr son las filas del código QR, '1' es un módulo negro.
+export type TOTPSetup = { secret: string; uri: string; qr: string[] };
 
 export type Member = { user_id: string; email: string; full_name: string; role: Role };
 export type Level = 1 | 2 | 3;

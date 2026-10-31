@@ -354,8 +354,10 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// del superadmin se prueba en TestAuditViews. El aviso de edición es un flujo que no termina:
 	// tiene su propia matriz en TestPresence. Las plantillas globales son del superadmin:
 	// TestGlobalTemplates. El inicio personal cruza las áreas de quien pregunta: TestPersonalHome. Publicar,
-	// archivar, probar y empezar un cuestionario cambian datos: TestQuizzes.
+	// archivar, probar y empezar un cuestionario cambian datos: TestQuizzes. El 2FA es de cada
+	// persona, el segundo paso del login va sin sesión y el restablecimiento es del superadmin: TestTOTP.
 	elsewhere := []string{
+		"POST /api/auth/totp", "POST /api/me/totp", "POST /api/me/totp/confirm", "DELETE /api/me/totp", "PATCH /api/admin/users/{id}",
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",

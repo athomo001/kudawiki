@@ -57,7 +57,7 @@ func TestPasswordReset(t *testing.T) {
 	if err := s.CreateEmergencySuperadmin(ctx, "beto@empresa.cl", "Beto", goodPassword); err != nil {
 		t.Fatal(err)
 	}
-	session, err := s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	session, err := session(s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestChangePasswordNotice(t *testing.T) {
 	s, r, _, m := withMail(t)
 	ctx := context.Background()
 	ana, _ := r.UserByEmail(ctx, "ana@empresa.cl")
-	tok, _ := s.Login(ctx, "ip", "ana@empresa.cl", goodPassword)
+	tok, _ := session(s.Login(ctx, "ip", "ana@empresa.cl", goodPassword))
 	if err := s.ChangePassword(ctx, ana.ID, tok, goodPassword, "otra-clave-del-sur-77", true); err != nil {
 		t.Fatal(err)
 	}

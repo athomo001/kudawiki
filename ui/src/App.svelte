@@ -5,6 +5,7 @@
   import { navigate, route } from './lib/router.svelte';
   import TopBar from './components/TopBar.svelte';
   import Login from './Login.svelte';
+  import MfaSetup from './pages/MfaSetup.svelte';
   import Home from './pages/Home.svelte';
   import MyHome from './pages/MyHome.svelte';
   import Profile from './pages/Profile.svelte';
@@ -138,7 +139,10 @@
   <Forgot />
   <SiteFooter />
 {:else if ready}
-  {#if me}
+  {#if me?.mfa_setup_required}
+    <MfaSetup email={me.email} ondone={loadMe} onlogout={logout} />
+    <SiteFooter />
+  {:else if me}
     {#if !editing}<TopBar {me} {area} {avatarRev} onprefs={savePrefs} onlogout={logout} />{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if area}

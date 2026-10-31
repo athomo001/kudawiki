@@ -45,6 +45,7 @@ type User struct {
 	ReadingPrefs  ReadingPrefs
 	Invited       bool // creado por invitación y todavía sin contraseña (SPEC §8.5.3)
 	HasAvatar     bool // la foto se lee aparte (Avatar): no viaja en cada request
+	TOTPEnabled   bool // el secreto se lee aparte (TOTPOf), solo al verificar un código (§8.1)
 }
 
 // ReadingPrefs son las preferencias de lectura de SPEC §15. Los valores los valida auth.
@@ -70,7 +71,7 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 }
 
 const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
-	invited_at IS NOT NULL, avatar_png IS NOT NULL`
+	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -94,7 +95,7 @@ type scanner interface{ Scan(dest ...any) error }
 func scanUser(row scanner) (User, error) {
 	var u User
 	var prefs string
-	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar)
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

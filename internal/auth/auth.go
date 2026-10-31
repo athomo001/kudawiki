@@ -63,6 +63,15 @@ type store interface {
 	DeleteOtherSessions(ctx context.Context, userID, keepTokenHash string) (int64, error)
 	SetAvatar(ctx context.Context, userID string, png []byte) error
 	Avatar(ctx context.Context, userID string) ([]byte, error)
+	// Segundo factor (SPEC §8.1).
+	TOTPOf(ctx context.Context, userID string) (repo.TOTP, error)
+	SetPendingTOTP(ctx context.Context, userID string, secretEnc []byte, keyVersion int) error
+	EnableTOTP(ctx context.Context, userID string, step int64, codeHashes []string) error
+	UseTOTPStep(ctx context.Context, userID string, step int64) (bool, error)
+	UseRecoveryCode(ctx context.Context, userID, codeHash string) (bool, error)
+	RecoveryCodesLeft(ctx context.Context, userID string) (int, error)
+	DisableTOTP(ctx context.Context, userID string) error
+	IsAreaAdmin(ctx context.Context, userID string) (bool, error)
 }
 
 type Service struct {
@@ -75,9 +84,23 @@ type Service struct {
 	resetTTL  time.Duration
 	inviteTTL time.Duration
 	async     func(func()) // lo que corre fuera de la petición; los tests lo hacen sincrónico
+	mfa       SecondFactor
 
-	mu       sync.Mutex
-	attempts map[string]attempt
+	mu         sync.Mutex
+	attempts   map[string]attempt
+	challenges map[string]mfaChallenge // por hash del token: el segundo paso del login (§8.1)
+}
+
+type mfaChallenge struct {
+	userID  string
+	expires time.Time
+}
+
+// LoginResult es la sesión o, si la persona tiene 2FA, el desafío del segundo paso. Los dos son
+// tokens en claro que solo viajan en una cookie.
+type LoginResult struct {
+	Session   string
+	Challenge string
 }
 
 type attempt struct {
@@ -92,6 +115,7 @@ func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolic
 		return nil, err
 	}
 	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{},
+		challenges: map[string]mfaChallenge{}, mfa: SecondFactor{Enforce: MFAAdmins},
 		resetTTL: defaultResetTTL, inviteTTL: defaultInviteTTL, async: func(f func()) { go f() }}, nil
 }
 
@@ -110,9 +134,9 @@ func (s *Service) CreateSuperadmin(ctx context.Context, email, fullName, passwor
 	})
 }
 
-// Login devuelve el token en claro, que solo viaja en la cookie. Email inexistente, cuenta
-// desactivada o contraseña incorrecta dan el mismo error y tardan lo mismo.
-func (s *Service) Login(ctx context.Context, ip, email, password string) (string, error) {
+// Login devuelve la sesión, o el desafío del segundo paso si la persona tiene 2FA. Email
+// inexistente, cuenta desactivada o contraseña incorrecta dan el mismo error y tardan lo mismo.
+func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginResult, error) {
 	key := ip + "|" + strings.ToLower(strings.TrimSpace(email))
 	n, err := s.allow(key)
 	if errors.As(err, new(RateLimitedError)) {
@@ -120,19 +144,19 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (string
 		// deja la hora en la BD, y solo se consulta cuando hay bloqueo (SPEC §13.6).
 		at, uerr := s.store.LoginUnlockedAt(ctx, strings.TrimSpace(email))
 		if uerr != nil {
-			return "", uerr
+			return LoginResult{}, uerr
 		}
 		if s.lift(key, at) {
 			n, err = s.allow(key)
 		}
 	}
 	if err != nil {
-		return "", err
+		return LoginResult{}, err
 	}
 
 	u, err := s.store.UserByEmail(ctx, strings.TrimSpace(email))
 	if err != nil && !errors.Is(err, repo.ErrNotFound) {
-		return "", err
+		return LoginResult{}, err
 	}
 	hash := u.PasswordHash
 	if hash == "" {
@@ -140,17 +164,23 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (string
 	}
 	ok, err := VerifyPassword(hash, password)
 	if err != nil {
-		return "", err
+		return LoginResult{}, err
 	}
 	if !ok || u.ID == "" || u.PasswordHash == "" || !u.IsActive {
 		s.auditFailure(ctx, u, n)
-		return "", ErrInvalidCredentials
+		return LoginResult{}, ErrInvalidCredentials
 	}
 
-	s.mu.Lock()
-	delete(s.attempts, key)
-	s.mu.Unlock()
+	s.forget(key)
+	if u.TOTPEnabled {
+		return s.challenge(u.ID)
+	}
+	token, err := s.startSession(ctx, u, "")
+	return LoginResult{Session: token}, err
+}
 
+// startSession abre la sesión de quien ya probó quién es. factor es el segundo, si hubo.
+func (s *Service) startSession(ctx context.Context, u repo.User, factor string) (string, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", err
@@ -159,8 +189,19 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (string
 	if err := s.store.CreateSession(ctx, repo.Session{TokenHash: hashToken(token), UserID: u.ID, CreatedAt: now, LastSeenAt: now}); err != nil {
 		return "", err
 	}
-	s.audit.Record(ctx, audit.Event{Action: audit.AuthLogin, TargetType: "user", TargetID: u.ID, Actor: actorOf(u)})
+	e := audit.Event{Action: audit.AuthLogin, TargetType: "user", TargetID: u.ID, Actor: actorOf(u)}
+	if factor != "" {
+		e.Meta = map[string]any{"second_factor": factor}
+	}
+	s.audit.Record(ctx, e)
 	return token, nil
+}
+
+// forget olvida los intentos fallidos de una clave tras un acierto.
+func (s *Service) forget(key string) {
+	s.mu.Lock()
+	delete(s.attempts, key)
+	s.mu.Unlock()
 }
 
 // auditFailure no registra cada intento: el login es público y cualquiera podría llenar la

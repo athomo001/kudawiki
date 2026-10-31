@@ -4,6 +4,7 @@
   import Avatar from '../components/Avatar.svelte';
   import ReadingPrefsForm from '../components/ReadingPrefsForm.svelte';
   import NotificationPrefsForm from '../components/NotificationPrefsForm.svelte';
+  import TotpSetup from '../components/TotpSetup.svelte';
 
   // Mi perfil (SPEC §8.5.2, §14.1): lo que la persona cambia de sí misma. El correo y los roles
   // los cambia quien administra; aquí solo se muestran.
@@ -39,6 +40,12 @@
   let passwordBusy = $state(false);
   let passwordDone = $state(false);
   let passwordError = $state('');
+
+  // Desactivar el 2FA pide la contraseña y un código (§8.1): una sesión abierta no alcanza.
+  let offPassword = $state('');
+  let offCode = $state('');
+  let offBusy = $state(false);
+  let offError = $state('');
 
   async function saveName(e: SubmitEvent) {
     e.preventDefault();
@@ -84,6 +91,21 @@
       photoError = code === 'unsupported_file_type' ? t('profile.photo_unsupported') : errorText(code);
     } finally {
       photoBusy = false;
+    }
+  }
+
+  async function disableTotp(e: SubmitEvent) {
+    e.preventDefault();
+    offBusy = true;
+    offError = '';
+    try {
+      await api('DELETE', '/me/totp', { password: offPassword, code: offCode });
+      offPassword = offCode = '';
+      await onchanged();
+    } catch (err) {
+      offError = errorText(codeOf(err));
+    } finally {
+      offBusy = false;
     }
   }
 
@@ -206,4 +228,35 @@
     {#if passwordDone}<p role="status" class="muted">{t('profile.password_done')}</p>{/if}
     <button type="submit" class="primary" disabled={passwordBusy}>{passwordBusy ? t('common.saving') : t('profile.password_submit')}</button>
   </form>
+
+  <section class="stack" aria-labelledby="totp-title">
+    <h2 id="totp-title">{t('totp.title')}</h2>
+    {#if me.totp.enabled}
+      <p>
+        {t('totp.on')}
+        <span class="muted">· {t('totp.codes_left', { n: String(me.totp.recovery_codes_left) })}</span>
+      </p>
+      {#if me.totp.required}
+        <p class="muted small">{t('totp.required_note')}</p>
+      {:else}
+        <form class="stack" onsubmit={disableTotp}>
+          <h3>{t('totp.disable')}</h3>
+          <label class="field">
+            {t('profile.password_current')}
+            <input type="password" autocomplete="current-password" required bind:value={offPassword} />
+          </label>
+          <label class="field">
+            {t('totp.code')}
+            <input autocomplete="one-time-code" required aria-describedby="totp-off-hint" bind:value={offCode} />
+          </label>
+          <small id="totp-off-hint" class="muted">{t('totp.login_hint')}</small>
+          {#if offError}<p class="error" role="alert">{offError}</p>{/if}
+          <button type="submit" disabled={offBusy}>{offBusy ? t('common.saving') : t('totp.disable')}</button>
+        </form>
+      {/if}
+    {:else}
+      <p class="muted">{t('totp.off_hint')}</p>
+      <TotpSetup revokeOption ondone={onchanged} />
+    {/if}
+  </section>
 </div>

@@ -3,6 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base32"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -49,7 +53,10 @@ type fixture struct {
 	db      *database.DB
 	cookies map[string]*http.Cookie // por nombre: super, adminTI, editorTI, viewerTI, adminFin, outsider
 	users   map[string]string       // id de cada uno
-	notify  *notify.Service         // los tests de avisos corren el worker a mano (Pass)
+	// El 2FA de quienes lo tienen obligatorio (super, adminTI, adminFin, §8.1): el secreto y
+	// los códigos de recuperación, para los tests del segundo paso.
+	totp   map[string]enrolled
+	notify *notify.Service // los tests de avisos corren el worker a mano (Pass)
 }
 
 // unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
@@ -78,6 +85,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
+	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32)})
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
@@ -109,7 +117,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 	}
 
-	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes}
+	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}}
 	for name := range users {
 		w := f.do("", "POST", "/api/auth/login", `{"email":"`+name+`@empresa.cl","password":"`+password+`"}`)
 		if w.Code != http.StatusNoContent {
@@ -117,7 +125,50 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 		f.cookies[name] = w.Result().Cookies()[0]
 	}
+	// Al superadmin y a los admins de área se les exige el 2FA: hasta configurarlo, su sesión
+	// solo sirve para eso. Se hace por la API, como lo haría la persona.
+	for _, name := range []string{"super", "adminTI", "adminFin"} {
+		f.totp[name] = f.enrollTOTP(t, name)
+	}
 	return f
+}
+
+type enrolled struct {
+	secret []byte
+	codes  []string
+}
+
+// enrollTOTP configura el 2FA de una persona con un código calculado como lo haría su app.
+func (f fixture) enrollTOTP(t *testing.T, who string) enrolled {
+	t.Helper()
+	w := f.do(who, "POST", "/api/me/totp", "")
+	var setup struct{ Secret string }
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &setup) != nil {
+		t.Fatalf("begin totp %s: %d %s", who, w.Code, w.Body)
+	}
+	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(setup.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = f.do(who, "POST", "/api/me/totp/confirm", `{"code":"`+totpNow(secret)+`"}`)
+	var out struct {
+		RecoveryCodes []string `json:"recovery_codes"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.RecoveryCodes) != 10 {
+		t.Fatalf("confirm totp %s: %d %s", who, w.Code, w.Body)
+	}
+	return enrolled{secret: secret, codes: out.RecoveryCodes}
+}
+
+// totpNow es el código de la app en este momento (RFC 6238, como auth).
+func totpNow(secret []byte) string {
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], uint64(time.Now().Unix()/30))
+	m := hmac.New(sha1.New, secret)
+	m.Write(msg[:])
+	sum := m.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(sum[off:off+4])&0x7fffffff)%1_000_000)
 }
 
 // testLog lleva al test los errores que registra el servidor: un 500 dice por qué, en vez de
@@ -651,9 +702,10 @@ func TestPageInfo(t *testing.T) {
 
 // §14.5: la API entera tiene límite, no solo el login; pasado el límite, 429 con Retry-After.
 func TestAPIRateLimit(t *testing.T) {
-	// Seis fichas, que el fixture gasta en iniciar sesión con sus seis personas: la próxima
-	// petición, de cualquiera y a cualquier ruta de la API, ya no pasa.
-	f := newFixture(t, middleware.Limit{PerSecond: 0.001, Burst: 6})
+	// Doce fichas, que el fixture gasta en iniciar sesión con sus seis personas y en configurar
+	// el 2FA de los tres admins (dos pedidos cada uno): la próxima petición, de cualquiera y a
+	// cualquier ruta de la API, ya no pasa.
+	f := newFixture(t, middleware.Limit{PerSecond: 0.001, Burst: 12})
 	w := f.do("adminTI", "GET", "/api/w/ti/tree", "")
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
 		t.Errorf("over the limit: %d %q", w.Code, w.Header().Get("Retry-After"))

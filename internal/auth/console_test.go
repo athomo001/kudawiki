@@ -69,7 +69,7 @@ func TestConsoleUnlock(t *testing.T) {
 func TestConsoleSetPassword(t *testing.T) {
 	server, r, c := newService(t)
 	ctx := context.Background()
-	token, err := server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	token, err := session(server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestConsoleCreateSuperadmin(t *testing.T) {
 	if err := console.CreateEmergencySuperadmin(ctx, "emergencia@empresa.cl", "Emergencia", goodPassword); err != nil {
 		t.Fatal(err)
 	}
-	token, err := server.Login(ctx, "10.0.0.1", "emergencia@empresa.cl", goodPassword)
+	token, err := session(server.Login(ctx, "10.0.0.1", "emergencia@empresa.cl", goodPassword))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +135,8 @@ func TestConsoleRevokeSessions(t *testing.T) {
 	if err := server.CreateSuperadmin(ctx, "beto@empresa.cl", "Beto", goodPassword); err != nil {
 		t.Fatal(err)
 	}
-	ana, _ := server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
-	beto, _ := server.Login(ctx, "10.0.0.1", "beto@empresa.cl", goodPassword)
+	ana, _ := session(server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
+	beto, _ := session(server.Login(ctx, "10.0.0.1", "beto@empresa.cl", goodPassword))
 	console := consoleFor(t, r, c)
 
 	if n, err := console.RevokeSessions(ctx, "beto@empresa.cl"); err != nil || n != 1 {

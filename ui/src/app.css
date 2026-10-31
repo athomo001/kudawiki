@@ -188,6 +188,14 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 /* Aviso de uso de la empresa (§15.1.1): texto plano, respeta los saltos de línea. */
 .login-alt { margin-top: 1rem; font-size: 0.875rem; }
 .login-message { margin-top: 2rem; white-space: pre-line; color: var(--kw-text-muted); font-size: 0.875rem; }
+/* 2FA (§8.1): la pantalla obligatoria es más ancha que el login para el QR y los códigos. El QR
+   va siempre negro sobre blanco, también en modo oscuro: las apps lo leen así. */
+.login.mfa-setup { max-width: 28rem; }
+.totp-qr { display: block; width: 12.5rem; height: 12.5rem; }
+.totp-secret { overflow-wrap: anywhere; }
+.recovery-codes { columns: 2; column-gap: 2rem; padding-left: 1.75rem; font-size: 0.9375rem; }
+.recovery-codes li { break-inside: avoid; padding: 0.125rem 0; }
+@media (max-width: 30rem) { .recovery-codes { columns: 1; } }
 
 .inline { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
 .inline label { display: grid; gap: 0.25rem; font-weight: 600; font-size: 0.875rem; }

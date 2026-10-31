@@ -244,6 +244,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	svc.SetSecondFactor(auth.SecondFactor{Key: masterKey, Enforce: auth.MFAPolicy(cfg.Auth.TOTP.EnforceFor)})
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: cfg.BaseURL, PasswordReset: cfg.Auth.Local.PasswordReset,
 		ResetTTL: cfg.ResetTTL(), InviteTTL: cfg.InviteTTL(), Log: logger})
 
@@ -552,7 +553,7 @@ func runAdmin(ctx context.Context, cfg config.Config, args []string) error {
 	return nil
 }
 
-var errUsageAdmin = errors.New("usage: kudawiki admin unlock <email> | set-password <email> | create-superadmin <email> <name> | revoke-sessions --all | <email>")
+var errUsageAdmin = errors.New("usage: kudawiki admin unlock <email> | set-password <email> | create-superadmin <email> <name> | revoke-sessions --all | <email> | reset-2fa <email>")
 
 // adminCommand corre un subcomando de `kudawiki admin` y devuelve qué decirle a quien opera.
 func adminCommand(ctx context.Context, svc *auth.Service, args []string) (string, error) {
@@ -572,6 +573,8 @@ func adminCommand(ctx context.Context, svc *auth.Service, args []string) (string
 			return "", err
 		}
 		return "superadmin created: " + email, svc.CreateEmergencySuperadmin(ctx, email, strings.Join(args[2:], " "), password)
+	case cmd == "reset-2fa" && len(args) == 2:
+		return "2FA removed for " + email + "; if it is required for them, they will set it up at their next login", svc.Reset2FA(ctx, email)
 	case cmd == "revoke-sessions" && len(args) == 2:
 		if email == "--all" {
 			email = ""

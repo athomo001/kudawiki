@@ -67,7 +67,7 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F3 · Niveles, auditoría y respaldos | ✅ Hecha |
 | F4 · Propuestas y notificaciones | ✅ Hecha |
 | F5 · Espacio personal y vigencia | ✅ Hecha |
-| F6 · Identidad, AD y 2FA | ⚪ Pendiente |
+| F6 · Identidad, AD y 2FA | 🟡 En curso |
 | F7 · Documentos sellados | ⚪ Pendiente |
 | F8 · Endurecimiento y v1.0 | ⚪ Pendiente |
 

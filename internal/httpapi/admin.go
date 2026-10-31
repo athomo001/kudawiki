@@ -26,6 +26,7 @@ func (a api) adminRoutes(r chi.Router) {
 	})
 	r.Get("/users", a.listUsers)
 	r.Post("/users", a.inviteUser)
+	r.Patch("/users/{id}", a.patchUser)
 	r.Post("/users/{id}/invite", a.resendInvite)
 	r.Post("/users/{id}/password-reset", a.adminPasswordReset)
 	r.Get("/workspaces", a.listWorkspaces)
@@ -56,7 +57,7 @@ func (a api) listUsers(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, len(us))
 	for i, u := range us {
 		out[i] = map[string]any{"id": u.ID, "email": u.Email, "full_name": u.FullName,
-			"is_global_admin": u.IsGlobalAdmin, "invited": u.Invited}
+			"is_global_admin": u.IsGlobalAdmin, "invited": u.Invited, "totp_enabled": u.TOTPEnabled}
 	}
 	a.json(w, http.StatusOK, out)
 }

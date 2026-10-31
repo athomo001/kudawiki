@@ -32,6 +32,9 @@ func newService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	return s, r, c
 }
 
+// session deja usar Login donde solo importa la sesión (personas sin 2FA).
+func session(r LoginResult, err error) (string, error) { return r.Session, err }
+
 func TestCheckPolicy(t *testing.T) {
 	for pw, want := range map[string]error{
 		"corta":         ErrPasswordTooShort,
@@ -84,7 +87,7 @@ func TestSessionLifecycle(t *testing.T) {
 	s, _, c := newService(t)
 	ctx := context.Background()
 
-	token, err := s.Login(ctx, "10.0.0.1", "ANA@empresa.cl", goodPassword) // el email no distingue mayúsculas
+	token, err := session(s.Login(ctx, "10.0.0.1", "ANA@empresa.cl", goodPassword)) // el email no distingue mayúsculas
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,14 +102,14 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	// Inactividad de más de 12 h vence la sesión (SPEC §8.2).
-	token, _ = s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	token, _ = session(s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
 	c.t = c.t.Add(sessionIdle + time.Minute)
 	if _, err := s.Authenticate(ctx, token); !errors.Is(err, ErrNoSession) {
 		t.Errorf("idle: %v, want ErrNoSession", err)
 	}
 
 	// Check no cuenta como actividad: una sesión que solo se revisa vence igual (§4.11).
-	token, _ = s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	token, _ = session(s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
 	for range 3 {
 		c.t = c.t.Add(sessionIdle / 2)
 		if _, err := s.Check(ctx, token); err != nil {
@@ -118,7 +121,7 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	// Aunque haya actividad, a los 7 días vence igual.
-	token, _ = s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword)
+	token, _ = session(s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword))
 	for range 15 {
 		c.t = c.t.Add(sessionIdle - time.Minute)
 		if _, err := s.Authenticate(ctx, token); err != nil {
