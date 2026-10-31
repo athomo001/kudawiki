@@ -1,6 +1,6 @@
 // Package health es la salud del contenido (SPEC §13.7): chequeos que encuentran lo que está
 // roto para quien lee (error) o desordenado (warning). Solo lee; los arreglos los hace
-// `kudawiki doctor --fix`. Vigencia, sellados y propuestas se suman con su fase (F5, F7, F4).
+// `kudawiki doctor --fix`. Vigencia y sellados se suman con su fase (F5, F7).
 package health
 
 import (
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,6 +53,10 @@ type store interface {
 	MediaRows(ctx context.Context, s repo.Scope, unattachedBefore time.Time) ([]repo.MediaRow, error)
 	PagesWithoutIndex(ctx context.Context, s repo.Scope) ([]string, error)
 	OrphanIndexRows(ctx context.Context) (int, error)
+	Proposals(ctx context.Context, s repo.Scope, f repo.ProposalFilter) ([]repo.Proposal, error)
+	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
+	PageBySlug(ctx context.Context, s repo.Scope, slug string) (repo.Page, error)
+	RevisionByNumber(ctx context.Context, s repo.Scope, pageID string, n int) (repo.Revision, error)
 }
 
 type Options struct {
@@ -63,6 +68,9 @@ type Options struct {
 	// hace doctor y no la pantalla, que compara el tamaño.
 	Hash bool
 	Now  time.Time
+	// RemindAfter es approval.remind_after_days: el mismo plazo del recordatorio al aprobador y
+	// del "Esperando hace N días" de la bandeja (§5.3), para que la salud no tenga otro.
+	RemindAfter time.Duration
 }
 
 // Check corre todos los chequeos sobre las áreas dadas, con el rango de admin: la salud la
@@ -163,7 +171,60 @@ func area(ctx context.Context, st store, o Options, w repo.Workspace) ([]Problem
 	for _, slug := range missing {
 		add("search.page_not_indexed", Warning, slug, "")
 	}
+
+	if err := proposalChecks(ctx, st, o, sc, add); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// proposalChecks encuentra las pendientes que pasaron el plazo de revisión y las que chocan con la
+// versión actual de su página, que alguien tiene que rehacer (§5.2, §13.7). Detail es el id de
+// la propuesta: la pantalla enlaza a ella, no a la página, que puede no existir todavía.
+func proposalChecks(ctx context.Context, st store, o Options, sc repo.Scope, add func(check string, sev Severity, page, detail string)) error {
+	// Todas: un límite haría que la salud callara justo cuando hay muchas esperando.
+	pending, err := st.Proposals(ctx, sc, repo.ProposalFilter{Status: []string{"pending"}, Limit: math.MaxInt32})
+	if err != nil {
+		return err
+	}
+	for _, p := range pending {
+		if o.Now.Sub(p.CreatedAt) > o.RemindAfter {
+			add("proposals.waiting", Warning, p.Slug, p.ID)
+		}
+		// Solo choca si la página avanzó desde la base; el listado no trae el contenido.
+		if p.PageID == "" || p.Current <= p.Base {
+			continue
+		}
+		conflict, err := conflicts(ctx, st, sc, p.ID)
+		if err != nil {
+			return err
+		}
+		if conflict {
+			add("proposals.conflict", Warning, p.Slug, p.ID)
+		}
+	}
+	return nil
+}
+
+// conflicts mezcla la propuesta con la versión actual como lo hace la bandeja (wiki.MergePage).
+func conflicts(ctx context.Context, st store, sc repo.Scope, id string) (bool, error) {
+	p, err := st.ProposalByID(ctx, sc, id)
+	if err != nil {
+		return false, err
+	}
+	page, err := st.PageBySlug(ctx, sc, p.Slug)
+	if err != nil {
+		return false, err
+	}
+	base, err := st.RevisionByNumber(ctx, sc, page.ID, p.Base)
+	if err != nil {
+		return false, err
+	}
+	_, _, err = wiki.MergePage(base.Title, base.Markdown, page.Title, page.Markdown, p.Title, p.Markdown)
+	if errors.Is(err, wiki.ErrMergeConflict) {
+		return true, nil
+	}
+	return false, err
 }
 
 // media compara las filas con el disco: storage/ws_<área>/<id> y <id>.thumb (§4.4).

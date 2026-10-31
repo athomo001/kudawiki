@@ -311,6 +311,8 @@
   "health.media.unattached": "Adjunto sin página hace más de 8 días",
   "health.search.page_not_indexed": "La búsqueda no encuentra esta página",
   "health.search.orphan_index_rows": "Texto de páginas purgadas que sigue en el índice",
+  "health.proposals.waiting": "Propuesta que pasó el plazo de revisión",
+  "health.proposals.conflict": "Propuesta que choca con la versión actual: hay que rehacerla",
   "site.powered_by": "Con Kudawiki",
   "error.invalid_branding": "Revisa los textos (el título, hasta 40 caracteres; la empresa, hasta 80) y los colores (#RRGGBB).",
   "error.branding_locked": "Ese ajuste está definido en el archivo de configuración y no se cambia desde aquí.",

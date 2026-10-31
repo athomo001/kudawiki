@@ -37,16 +37,21 @@ func TestRequireChangeSummary(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d", c.name, w.Code, w.Body, c.want)
 		}
 	}
-	// La retención: una de las dos, dentro de los topes.
-	for body, want := range map[string]int{
-		`{"keep_last":5,"keep_days":10}`: 422,
-		`{"keep_last":-1}`:               422,
-		`{"keep_days":40000}`:            422,
-		`{"keep_last":20}`:               204,
-		`{"keep_last":0,"keep_days":90}`: 204,
+	// La retención: una de las dos, dentro de los topes. En orden (no un mapa): el PATCH deja lo
+	// que no se manda, así que "keep_last" solo, con días ya puestos, serían los dos topes.
+	for _, c := range []struct {
+		body string
+		want int
+	}{
+		{`{"keep_last":5,"keep_days":10}`, 422},
+		{`{"keep_last":-1}`, 422},
+		{`{"keep_days":40000}`, 422},
+		{`{"keep_last":20}`, 204},
+		{`{"keep_last":0,"keep_days":90}`, 204},
+		{`{"keep_last":20}`, 422},
 	} {
-		if w := f.do("adminTI", "PATCH", "/api/w/ti/settings", body); w.Code != want {
-			t.Errorf("retention %s: %d, want %d", body, w.Code, want)
+		if w := f.do("adminTI", "PATCH", "/api/w/ti/settings", c.body); w.Code != c.want {
+			t.Errorf("retention %s: %d, want %d", c.body, w.Code, c.want)
 		}
 	}
 	if body := f.do("adminTI", "GET", "/api/w/ti/settings", "").Body.String(); !strings.Contains(body, `"keep_days":90`) || !strings.Contains(body, `"keep_last":0`) {

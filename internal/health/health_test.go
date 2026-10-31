@@ -13,6 +13,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
+	"github.com/athomo001/kudawiki/internal/proposals"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -205,5 +206,54 @@ func TestOrphanPages(t *testing.T) {
 	}
 	if len(orphans) != 1 || orphans[0] != "carpeta/perdida" {
 		t.Errorf("orphans = %v, want only carpeta/perdida", orphans)
+	}
+}
+
+// Propuestas (§13.7): las que pasaron el plazo de revisión y las que chocan con la versión actual
+// de su página. Una que se mezcla sola, aunque la página haya avanzado, no es problema.
+func TestProposalChecks(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	rec := audit.NewRecorder(e.store, time.Now, slog.New(slog.DiscardHandler))
+	pages := wiki.NewService(e.store, rec)
+	props := proposals.NewService(e.store, pages, rec)
+	sc := repo.Scope{WsID: e.ti.ID, MaxRank: 3}
+	if err := pages.Save(ctx, sc, "u1", 0, repo.PageWrite{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres\n"}); err != nil {
+		t.Fatal(err)
+	}
+	propose := func(d proposals.Draft) string {
+		t.Helper()
+		id, err := props.Create(ctx, sc, "u1", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	merges := propose(proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "UNO\n\ndos\n\ntres\n", Base: 1})
+	clash := propose(proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres, propuesta\n", Base: 1})
+	waiting := propose(proposals.Draft{Slug: "nueva", Title: "Nueva", Markdown: "Página nueva."})
+	e.exec(t, `UPDATE proposals SET created_at = datetime('now', '-4 days') WHERE id = ?`, waiting)
+	// La página avanza en la última línea: choca con clash y no con merges.
+	if err := pages.Save(ctx, sc, "u1", 1, repo.PageWrite{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres, publicada\n"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, err := Check(ctx, e.store, Options{StorageDir: e.storage, Areas: []repo.Workspace{e.ti, e.fin}, Now: time.Now(), RemindAfter: 3 * 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := checks(ps)
+	for _, key := range []string{"proposals.waiting nueva " + waiting, "proposals.conflict guia " + clash} {
+		if p, ok := got[key]; !ok || p.Severity != Warning || p.Area != "ti" {
+			t.Errorf("missing %q (warning, ti) in %+v", key, ps)
+		}
+	}
+	for _, p := range ps {
+		if p.Detail == merges || (p.Check == "proposals.waiting" && p.Detail != waiting) {
+			t.Errorf("unexpected %+v", p)
+		}
+	}
+	if len(ps) != 2 {
+		t.Errorf("want 2 problems, got %+v", ps)
 	}
 }

@@ -486,7 +486,7 @@ func runDoctor(ctx context.Context, cfg config.Config, wsSlug string, fix bool) 
 			return fmt.Errorf("no area %q", wsSlug)
 		}
 	}
-	opts := health.Options{StorageDir: cfg.StorageDir(), Areas: areas, Global: wsSlug == "", Hash: true, Now: time.Now()}
+	opts := health.Options{StorageDir: cfg.StorageDir(), Areas: areas, Global: wsSlug == "", Hash: true, Now: time.Now(), RemindAfter: cfg.RemindAfter()}
 	problems, err := health.Check(ctx, store, opts)
 	if err != nil {
 		return err

@@ -174,7 +174,7 @@ func (a api) globalHealth(w http.ResponseWriter, r *http.Request) {
 // health responde los problemas. Sin el SHA-256 de cada archivo (puede tardar minutos con
 // muchos GB): eso lo hace `kudawiki doctor`, y la respuesta lo dice.
 func (a api) health(w http.ResponseWriter, r *http.Request, areas []repo.Workspace, global bool) {
-	problems, err := health.Check(r.Context(), a.Read, health.Options{StorageDir: a.StorageDir, Areas: areas, Global: global, Now: time.Now()})
+	problems, err := health.Check(r.Context(), a.Read, health.Options{StorageDir: a.StorageDir, Areas: areas, Global: global, Now: time.Now(), RemindAfter: a.RemindAfter})
 	if err != nil {
 		a.fail(w, r, err)
 		return

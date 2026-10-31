@@ -140,6 +140,8 @@ type reader interface {
 	MediaRows(ctx context.Context, s repo.Scope, unattachedBefore time.Time) ([]repo.MediaRow, error)
 	PagesWithoutIndex(ctx context.Context, s repo.Scope) ([]string, error)
 	OrphanIndexRows(ctx context.Context) (int, error)
+	Proposals(ctx context.Context, s repo.Scope, f repo.ProposalFilter) ([]repo.Proposal, error)
+	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
 }
 
 // brandingService es la marca de la empresa (SPEC §15.1).

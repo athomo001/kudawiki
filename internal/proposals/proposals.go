@@ -239,16 +239,11 @@ func (s *Service) merge(ctx context.Context, sc repo.Scope, p repo.Proposal, bas
 	if page.Revision == base {
 		return m, nil
 	}
-	if m.markdown, err = wiki.Merge3(rev.Markdown, page.Markdown, markdown); err != nil {
+	t, md, err := wiki.MergePage(rev.Title, rev.Markdown, page.Title, page.Markdown, title, markdown)
+	if err != nil {
 		return m, err
 	}
-	// El título es una sola línea: o lo cambió uno solo, o los dos al mismo texto.
-	switch {
-	case title == rev.Title:
-		m.title = page.Title
-	case page.Title != rev.Title && page.Title != title:
-		return m, wiki.ErrMergeConflict
-	}
+	m.title, m.markdown = t, md
 	return m, nil
 }
 

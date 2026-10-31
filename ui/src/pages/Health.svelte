@@ -62,7 +62,10 @@
             <td>{label(p.check)}{#if p.detail && !p.page}<br /><small class="muted">{p.detail}</small>{/if}</td>
             {#if global}<td>{p.area ?? '—'}</td>{/if}
             <td>
-              {#if p.page && p.area}
+              {#if p.check.startsWith('proposals.') && p.area}
+                <!-- Detail es el id: se corrige en la propuesta, y su página puede no existir todavía. -->
+                <a href={`/w/${p.area}/proposals/${p.detail}`}>{p.page}</a>
+              {:else if p.page && p.area}
                 <a href={`/w/${p.area}/p/${p.page}`}>{p.page}</a>
                 {#if p.detail}<small class="muted"> → {p.detail}</small>{/if}
               {:else}<span class="muted">—</span>{/if}

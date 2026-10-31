@@ -10,7 +10,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F1](#f1--esqueleto-m0) | Esqueleto (M0) | Binario que arranca y permite iniciar sesión | 🟡 |
 | [F2](#f2--wiki-con-aislamiento-m1) | Wiki con aislamiento (M1) | Wiki usable por áreas + tests de contención | ✅ |
 | [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | ✅ |
-| [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | 🟡 |
+| [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ✅ |
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ⚪ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | ⚪ |
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ⚪ |
@@ -129,9 +129,11 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [x] Resumen del cambio obligatorio por área y retención del historial (§4.3, B8).
 - [x] Navegador de archivos del área y borrar media (§4.4, B10).
 - [x] Autocompletado de `[[enlaces]]` en el editor (§15, B6). *(Las plantillas, con F5)*
-- [ ] Salud del contenido: chequeos de propuestas (pendientes hace más de N días, las que hay que rehacer), §13.7. *(Estaba en `docs/trazabilidad.md` como parte de F4 y faltaba en esta lista)*
+- [x] Salud del contenido: propuestas que pasaron el plazo de revisión y las que hay que rehacer (§13.7). *(Estaba en `docs/trazabilidad.md` como parte de F4 y faltaba en esta lista)*
 
 **Criterio de salida:** un área en modo `required` funciona de punta a punta con dos personas reales; un usuario local recupera su contraseña por correo.
+
+✅ Cumplido el 2026-10-30 con el binario final: propuestas en modo `required` con dos personas a la vez (Chrome 41/41) y recuperación de contraseña por correo (Chrome 17/17).
 
 ---
 

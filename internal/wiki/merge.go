@@ -19,6 +19,24 @@ type lineEdit struct {
 	side       int
 }
 
+// MergePage mezcla a 3 vías una propuesta escrita sobre base con la versión actual de la página
+// (§5.2). La usan la bandeja, al revisar y aprobar, y la salud del contenido, para contar las que
+// hay que rehacer (§13.7): las dos deben coincidir.
+func MergePage(baseTitle, baseMD, curTitle, curMD, title, md string) (string, string, error) {
+	merged, err := Merge3(baseMD, curMD, md)
+	if err != nil {
+		return "", "", err
+	}
+	// El título es una sola línea: o lo cambió uno solo, o los dos al mismo texto.
+	switch {
+	case title == baseTitle:
+		title = curTitle
+	case curTitle != baseTitle && curTitle != title:
+		return "", "", ErrMergeConflict
+	}
+	return title, merged, nil
+}
+
 // Merge3 mezcla por líneas lo que cambiaron ours y theirs desde base (§5.2). Es conservador
 // como git: dos cambios que se tocan, aunque sea en líneas contiguas, son conflicto, porque
 // juntarlos a ciegas puede dejar un párrafo o una tabla sin sentido. El aprobador o el autor

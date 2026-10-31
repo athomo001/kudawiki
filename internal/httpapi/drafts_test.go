@@ -159,11 +159,14 @@ func editors(br *bufio.Reader) ([]string, error) {
 func TestPresence(t *testing.T) {
 	f := newFixture(t)
 	s := seed(t, f)
-	srv := httptest.NewServer(f.h)
-	t.Cleanup(srv.Close) // la primera limpieza corre al final, con los flujos ya cerrados
+	// Antes de levantar el servidor, y se restaura en una limpieza registrada antes que Close: las
+	// limpiezas corren al revés, así que vuelve a su valor cuando Close ya esperó a los flujos que
+	// lo leen. Con defer se restauraba con un flujo todavía abierto (carrera en CI con -race).
 	old := presenceBeat
 	presenceBeat = 50 * time.Millisecond
-	defer func() { presenceBeat = old }()
+	t.Cleanup(func() { presenceBeat = old })
+	srv := httptest.NewServer(f.h)
+	t.Cleanup(srv.Close) // corre antes que la de arriba, con los flujos ya cerrados
 
 	uniform := f.do("adminTI", "GET", "/api/w/no-existe/tree", "").Body.String()
 	for _, c := range []struct{ who, path string }{

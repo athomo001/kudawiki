@@ -311,6 +311,8 @@
   "health.media.unattached": "Attachment without a page for over 8 days",
   "health.search.page_not_indexed": "Search cannot find this page",
   "health.search.orphan_index_rows": "Text of purged pages still in the index",
+  "health.proposals.waiting": "Proposal past its review deadline",
+  "health.proposals.conflict": "Proposal that clashes with the current version: it must be redone",
   "site.powered_by": "Powered by Kudawiki",
   "error.invalid_branding": "Check the texts (title up to 40 characters, company up to 80) and the colors (#RRGGBB).",
   "error.branding_locked": "That setting is defined in the configuration file and can't be changed here.",
