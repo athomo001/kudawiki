@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/audit"
+	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/proposals"
@@ -32,6 +33,7 @@ func (m *fakeMail) Enqueue(_ context.Context, msg mail.Message) error {
 
 type env struct {
 	ctx      context.Context
+	db       *database.DB
 	store    *repo.Repo
 	pages    *wiki.Service
 	props    *proposals.Service
@@ -48,7 +50,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 	t.Helper()
 	e := &env{ctx: context.Background(), mail: &fakeMail{enabled: true}, clock: start}
 	db := dbtest.Open(t)
-	e.store = repo.New(db)
+	e.db, e.store = db, repo.New(db)
 	rec := audit.NewRecorder(e.store, time.Now, slog.New(slog.DiscardHandler))
 	e.ana, e.ben = ulid.Make().String(), ulid.Make().String()
 	for id, name := range map[string]string{e.ana: "Ana", e.ben: "Ben"} {
@@ -270,5 +272,129 @@ func TestReminder(t *testing.T) {
 	e.pass(t)
 	if ns, _, _ := e.svc.List(e.ctx, e.ana); ns[0].Kind != "proposal_reminder" || ns[0].Read {
 		t.Fatalf("resubmitting did not re-arm the reminder: %+v", ns[0])
+	}
+}
+
+// TestReviewNotices: al vencer, el dueño recibe un aviso por página y, mientras siga vencida,
+// un recordatorio por semana; verificarla deja leídos sus avisos y no vuelve a avisar hasta el
+// próximo vencimiento. Un dueño que ya no puede leer la página no recibe nada (§4.8, §17).
+func TestReviewNotices(t *testing.T) {
+	e := newEnv(t, time.Now())
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := e.db.Write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick := func() { e.clock = e.clock.Add(time.Hour + time.Minute) }
+	exec(`UPDATE workspaces SET default_review_days = 30`)
+	exec(`UPDATE pages SET verified_at = datetime('now', '-31 days') WHERE slug = 'guia'`)
+	e.svc.Read(e.ctx, e.ana, nil)
+	tick()
+	e.pass(t)
+	ns, unread, _ := e.svc.List(e.ctx, e.ana)
+	if unread != 1 || ns[0].Kind != "review_due" || !strings.Contains(ns[0].Payload, `"days":1`) {
+		t.Fatalf("review_due: %d %+v", unread, ns)
+	}
+	if len(e.mail.sent) == 0 || e.mail.sent[len(e.mail.sent)-1].Template != "review_due" ||
+		!strings.HasSuffix(e.mail.sent[len(e.mail.sent)-1].URL, "/w/ti/p/guia") {
+		t.Fatalf("review_due email: %+v", e.mail.sent)
+	}
+	tick()
+	e.pass(t)
+	if _, unread, _ := e.svc.List(e.ctx, e.ana); unread != 1 {
+		t.Fatalf("noticed twice in the same week: %d", unread)
+	}
+	// Una semana después, sigue vencida: recordatorio, con su correo.
+	exec(`UPDATE pages SET review_notified_at = datetime('now', '-8 days') WHERE slug = 'guia'`)
+	e.svc.Read(e.ctx, e.ana, nil)
+	tick()
+	e.pass(t)
+	ns, unread, _ = e.svc.List(e.ctx, e.ana)
+	if unread != 1 || ns[0].Kind != "review_reminder" || ns[0].Count != 1 {
+		t.Fatalf("review_reminder: %d %+v", unread, ns)
+	}
+	if last := e.mail.sent[len(e.mail.sent)-1]; last.Template != "review_reminder" || !strings.HasSuffix(last.URL, "/w/ti/review") {
+		t.Fatalf("review_reminder email: %+v", last)
+	}
+	// Ben solo lee: no le llega nada de la vigencia.
+	if ns, _, _ := e.svc.List(e.ctx, e.ben); len(ns) != 0 {
+		t.Fatalf("a reader got review notices: %+v", ns)
+	}
+	// Verificarla deja leído el aviso que quedaba y no vuelve a avisar.
+	exec(`UPDATE pages SET review_notified_at = NULL, verified_at = datetime('now', '-31 days') WHERE slug = 'guia'`)
+	tick()
+	e.pass(t)
+	if err := e.pages.Verify(e.ctx, e.sc, e.ana, "guia"); err != nil {
+		t.Fatal(err)
+	}
+	if _, unread, _ := e.svc.List(e.ctx, e.ana); unread != 1 { // el recordatorio de antes, que no es de la página
+		t.Fatalf("verify left the review notice unread: %d", unread)
+	}
+	e.svc.Read(e.ctx, e.ana, nil)
+	tick()
+	e.pass(t)
+	if _, unread, _ := e.svc.List(e.ctx, e.ana); unread != 0 {
+		t.Fatalf("noticed after verifying: %d", unread)
+	}
+	// Si el dueño ya no puede leerla (la página subió a N3 y es de Ben, lector), no hay aviso.
+	exec(`UPDATE pages SET owner_id = ?, min_rank = 3, verified_at = datetime('now', '-31 days'), review_notified_at = NULL WHERE slug = 'guia'`, e.ben)
+	tick()
+	e.pass(t)
+	if ns, _, _ := e.svc.List(e.ctx, e.ben); len(ns) != 0 {
+		t.Fatalf("an owner who cannot read the page got: %+v", ns)
+	}
+}
+
+// TestReadNotices: una solicitud de lectura avisa una vez a quienes la reciben, y recuerda una
+// vez cuando faltan menos de 48 horas para el plazo; confirmar deja leído el aviso (§4.14).
+func TestReadNotices(t *testing.T) {
+	e := newEnv(t, time.Now())
+	tick := func(d time.Duration) { e.clock = e.clock.Add(d) }
+	p, err := e.store.PageBySlug(e.ctx, e.sc, "guia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := repo.ReadRequest{ID: ulid.Make().String(), PageID: p.ID, Revision: p.Revision, Audience: repo.Audience{All: true},
+		DueAt: e.clock.Add(5 * 24 * time.Hour), CreatedBy: e.ana}
+	if err := e.store.CreateReadRequest(e.ctx, e.sc, rr); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Read(e.ctx, e.ben, nil)
+	tick(time.Hour)
+	e.pass(t)
+	ns, unread, _ := e.svc.List(e.ctx, e.ben)
+	if unread != 1 || ns[0].Kind != "read_request" {
+		t.Fatalf("read_request: %d %+v", unread, ns)
+	}
+	if ns, _, _ := e.svc.List(e.ctx, e.ana); len(ns) != 0 && ns[0].Kind == "read_request" {
+		t.Fatalf("the requester was asked to read: %+v", ns)
+	}
+	tick(time.Hour)
+	e.pass(t)
+	if _, unread, _ := e.svc.List(e.ctx, e.ben); unread != 1 {
+		t.Fatalf("noticed twice: %d", unread)
+	}
+	if last := e.mail.sent[len(e.mail.sent)-1]; last.Template != "read_request" || !strings.HasSuffix(last.URL, "/w/ti/p/guia") {
+		t.Fatalf("read_request email: %+v", last)
+	}
+	// A un día del plazo: un recordatorio, y uno solo.
+	e.svc.Read(e.ctx, e.ben, nil)
+	tick(4*24*time.Hour - 2*time.Hour)
+	e.pass(t)
+	ns, unread, _ = e.svc.List(e.ctx, e.ben)
+	if unread != 1 || ns[0].Kind != "read_reminder" || !strings.Contains(ns[0].Payload, `"days":1`) {
+		t.Fatalf("read_reminder: %d %+v", unread, ns)
+	}
+	tick(time.Hour)
+	e.pass(t)
+	if _, unread, _ := e.svc.List(e.ctx, e.ben); unread != 1 {
+		t.Fatalf("reminded twice: %d", unread)
+	}
+	if err := e.store.Acknowledge(e.ctx, rr.ID, e.ben, p.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, unread, _ := e.svc.List(e.ctx, e.ben); unread != 0 {
+		t.Fatalf("the notice stayed unread after confirming: %d", unread)
 	}
 }

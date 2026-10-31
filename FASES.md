@@ -11,7 +11,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F2](#f2--wiki-con-aislamiento-m1) | Wiki con aislamiento (M1) | Wiki usable por áreas + tests de contención | ✅ |
 | [F3](#f3--niveles-auditoría-y-respaldos-m2) | Niveles, auditoría y respaldos (M2) | Lo necesario para usarla con datos reales | ✅ |
 | [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ✅ |
-| [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ⚪ |
+| [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ✅ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas | ⚪ |
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ⚪ |
 | [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ⚪ |
@@ -139,13 +139,17 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 
 ## F5 — Espacio personal y vigencia (M4)
 
-- [ ] Espacio personal y publicación a un área (directo o como propuesta).
-- [ ] Plantillas por área y globales.
-- [ ] Vigencia del contenido: dueño, intervalo de revisión, verificación, cola de revisión.
-- [ ] Acuse de lectura (§4.14): solicitudes de admins y de editores a lectores, aperturas, recordatorios, panel y CSV. *Adelantado desde F8.*
-- [ ] Cuestionarios (§4.16): editor de preguntas, versiones, intentos con orden revuelto y tiempo límite en servidor, historial, resultados por persona y por pregunta, intentos extra.
+Orden acordado con el dueño el 2026-10-30: 1. plantillas → 2. vigencia → 3. espacio personal → 4. acuse de lectura → 5. cuestionarios.
+
+- [x] Espacio personal y publicación a un área (directo o como propuesta). *(F5.3, con el modo auditoría del superadmin y el inicio personal `/me`, B5)*
+- [x] Plantillas por área y globales (§4.9). *(F5.1; el intervalo de revisión por defecto llega con la vigencia)*
+- [x] Vigencia del contenido: dueño, intervalo de revisión, verificación, cola de revisión. *(F5.2, con avisos, búsqueda `estado:vencida` y salud)*
+- [x] Acuse de lectura (§4.14): solicitudes de admins y de editores a lectores, aperturas, recordatorios, panel y CSV. *Adelantado desde F8.* *(F5.4)*
+- [x] Cuestionarios (§4.16): editor de preguntas, versiones, intentos con orden revuelto y tiempo límite en servidor, historial, resultados por persona y por pregunta, intentos extra. *(F5.5; el traspaso en la baja va con F6 y la retención y el traslado entre áreas con F8)*
 
 **Criterio de salida:** un borrador personal llega a un área con su historial; una página vencida avisa a su dueño; un editor asigna un procedimiento con cuestionario a los lectores y ve quién lo abrió, quién aprobó y qué pregunta se falla más.
+
+✅ Cumplido el 2026-10-30 con el binario final: el borrador personal publicado en un área con su historial y su media (Chrome 30/30); la página vencida con su aviso y *Marcar como vigente* (Chrome 26/26; el aviso del worker en `TestReviewNotices`); el editor asigna el procedimiento con cuestionario a dos lectores y ve que Lucía la abrió y aprobó, que Pedro reprobó sin intentos y que la pregunta más fallada es la primera, con la alternativa equivocada (Chrome 28/28; acuse 22/22). `go test -race ./...` sin carreras.
 
 ---
 

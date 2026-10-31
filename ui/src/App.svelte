@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { api, ApiError, canEdit, canWrite, codeOf, type Me, type ReadingPrefs } from './lib/api';
-  import { setLocale, errorText } from './lib/i18n/index.svelte';
+  import { api, ApiError, canEdit, canWrite, codeOf, isPersonalSlug, type Area as AreaT, type Me, type ReadingPrefs } from './lib/api';
+  import { setLocale, errorText, t } from './lib/i18n/index.svelte';
   import { applyPrefs } from './lib/prefs';
   import { navigate, route } from './lib/router.svelte';
   import TopBar from './components/TopBar.svelte';
   import Login from './Login.svelte';
   import Home from './pages/Home.svelte';
+  import MyHome from './pages/MyHome.svelte';
   import Profile from './pages/Profile.svelte';
   import Admin from './pages/Admin.svelte';
+  import Templates from './pages/Templates.svelte';
   import Members from './pages/Members.svelte';
   import Audit from './pages/Audit.svelte';
   import Health from './pages/Health.svelte';
@@ -75,9 +77,19 @@
   }
 
   // Lo que no calza o no corresponde muestra el mismo "no encontrado" (SPEC §3.3).
-  const areaPath = $derived(route.path.match(/^\/w\/([a-z0-9-]+)(?:\/(.*))?$/));
+  const areaPath = $derived(route.path.match(/^\/w\/(~?[a-z0-9-]+)(?:\/(.*))?$/));
   const adminAreaId = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})$/)?.[1]);
-  const area = $derived(me?.workspaces.find((w) => w.slug === areaPath?.[1]));
+  // El espacio personal (§7) no viene entre las áreas: el propio se arma con el rol de su dueño
+  // (admin) y uno ajeno, solo para el superadmin, como lector y en modo auditoría. Si no existe,
+  // el servidor responde el 404 de siempre.
+  const area = $derived.by((): AreaT | undefined => {
+    const slug = areaPath?.[1];
+    if (!me || !slug) return undefined;
+    const space = { slug, description: '', viewers_can_propose: false, require_change_summary: false, personal: true };
+    if (slug === me.personal.slug) return { ...space, name: t('personal.title'), role: 'admin' };
+    if (isPersonalSlug(slug) && me.is_global_admin) return { ...space, name: t('personal.audit_title'), role: 'viewer', audit: true };
+    return me.workspaces.find((w) => w.slug === slug);
+  });
   // El editor tiene su propia cabecera (diseño aprobado, SPEC §15): mientras se edita no hay barra superior.
   // Igual que en Area.svelte: un lector abre el editor solo para proponer (§19.5).
   const editing = $derived.by(() => {
@@ -135,6 +147,8 @@
       <main class="view">
         {#if route.path === '/'}
           {#if !me.workspaces.length}<Home {me} />{/if}
+        {:else if route.path === '/me'}
+          <MyHome {me} />
         {:else if route.path === '/me/profile'}
           <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
         {:else if route.path === '/admin' && me.is_global_admin}
@@ -145,6 +159,8 @@
           <Health endpoint="/admin/health" global />
         {:else if route.path === '/admin/appearance' && me.is_global_admin}
           <Appearance />
+        {:else if route.path === '/admin/templates' && me.is_global_admin}
+          <Templates endpoint="/admin/templates" global />
         {:else if route.path === '/admin/email' && me.is_global_admin}
           <Email email={me.email} />
         {:else if adminAreaId && me.is_global_admin}

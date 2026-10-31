@@ -35,6 +35,11 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Get("/health", a.globalHealth)
 	a.siteAdminRoutes(r)
 	a.smtpAdminRoutes(r)
+	r.Group(func(r chi.Router) {
+		r.Use(a.globalTemplates)
+		r.Get("/templates", a.listTemplates)
+		a.templateAdminRoutes(r)
+	})
 	// El superadmin administra miembros sin ser miembro: el Scope sale del ID del área.
 	r.Route("/workspaces/{id}/members", func(r chi.Router) {
 		r.Use(a.adminScope)
@@ -100,7 +105,7 @@ func (a api) inviteURL(token string) string {
 }
 
 func (a api) listWorkspaces(w http.ResponseWriter, r *http.Request) {
-	ws, err := a.Read.ListWorkspaces(r.Context())
+	ws, err := a.areas(r)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -110,6 +115,22 @@ func (a api) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		out[i] = map[string]string{"id": x.ID, "slug": x.Slug, "name": x.Name, "description": x.Description}
 	}
 	a.json(w, http.StatusOK, out)
+}
+
+// areas son las áreas del panel, sin los espacios personales: el superadmin los abre solo en modo
+// auditoría, con traza (§7), y ni su salud ni sus miembros pasan por el panel.
+func (a api) areas(r *http.Request) ([]repo.Workspace, error) {
+	all, err := a.Read.ListWorkspaces(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, w := range all {
+		if w.Kind == "area" {
+			out = append(out, w)
+		}
+	}
+	return out, nil
 }
 
 // renameWorkspace cambia el nombre y la descripción de un área desde el panel, sin ser miembro.
@@ -149,6 +170,9 @@ func (a api) createWorkspace(w http.ResponseWriter, r *http.Request) {
 func (a api) adminScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := a.Read.WorkspaceByID(r.Context(), chi.URLParam(r, "id"))
+		if err == nil && ws.Kind != "area" {
+			err = repo.ErrNotFound
+		}
 		if errors.Is(err, repo.ErrNotFound) {
 			a.notFound(w, r)
 			return
@@ -163,7 +187,7 @@ func (a api) adminScope(next http.Handler) http.Handler {
 
 // globalHealth es la salud de todas las áreas y del índice para el superadmin (SPEC §13.7).
 func (a api) globalHealth(w http.ResponseWriter, r *http.Request) {
-	areas, err := a.Read.ListWorkspaces(r.Context())
+	areas, err := a.areas(r)
 	if err != nil {
 		a.fail(w, r, err)
 		return

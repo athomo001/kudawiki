@@ -123,10 +123,11 @@ func (r *Repo) AutoWatch(ctx context.Context, pageID, userID string) error {
 }
 
 // NewNotification es un aviso para una persona. Con GroupKey, si ya tiene uno sin leer del
-// mismo grupo, se suma a ese (§12.1).
+// mismo grupo, se suma a ese (§12.1). Count es de cuántas cosas habla un aviso que ya viene
+// agrupado (el recordatorio de vigencia: "N páginas por revisar"); 0 cuenta como 1.
 type NewNotification struct {
 	UserID, Kind, Category, PageID, ProposalID, GroupKey, Payload string
-	MinRank                                                       int
+	MinRank, Count                                                int
 }
 
 // ApplyEvent guarda los avisos de un evento y lo borra, en una transacción: un evento se
@@ -151,15 +152,15 @@ func (r *Repo) ApplyEvent(ctx context.Context, e NotificationEvent, ns []NewNoti
 func insertNotifications(ctx context.Context, tx *sql.Tx, wsID string, ns []NewNotification) error {
 	for _, n := range ns {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO notifications (id, user_id, workspace_id, kind, category, page_id, proposal_id, min_rank, payload_json, group_key)
-			 VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''))
+			`INSERT INTO notifications (id, user_id, workspace_id, kind, category, page_id, proposal_id, min_rank, payload_json, group_key, count)
+			 VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
 			 ON CONFLICT (user_id, group_key) WHERE read_at IS NULL AND group_key IS NOT NULL DO UPDATE SET
 			   count = CASE WHEN kind = excluded.kind THEN count + 1 ELSE 1 END,
 			   emailed_at = CASE WHEN kind = excluded.kind THEN emailed_at END,
 			   created_at = CASE WHEN kind = excluded.kind THEN created_at ELSE CURRENT_TIMESTAMP END,
 			   kind = excluded.kind, category = excluded.category, page_id = excluded.page_id, proposal_id = excluded.proposal_id,
 			   min_rank = excluded.min_rank, payload_json = excluded.payload_json, updated_at = CURRENT_TIMESTAMP`,
-			ulid.Make().String(), n.UserID, wsID, n.Kind, n.Category, n.PageID, n.ProposalID, max(1, n.MinRank), n.Payload, n.GroupKey); err != nil {
+			ulid.Make().String(), n.UserID, wsID, n.Kind, n.Category, n.PageID, n.ProposalID, max(1, n.MinRank), n.Payload, n.GroupKey, max(1, n.Count)); err != nil {
 			return err
 		}
 	}
@@ -324,8 +325,11 @@ func (r *Repo) MarkEmailed(ctx context.Context, ids []string, at time.Time) erro
 	return err
 }
 
-// NotificationCategories son las categorías de esta fase; las demás de §12.1 llegan con su función.
-var NotificationCategories = []string{"proposals", "my_proposals", "watched"}
+// NotificationCategories son las categorías hasta F5; las demás de §12.1 llegan con su función.
+// review: vigencia vencida (§4.8); reading: solicitud de lectura o cuestionario asignado y su
+// recordatorio (§4.14, §4.16); quiz_extra: intentos extra recibidos; quiz_failed: alguien agotó
+// los intentos sin aprobar, a quien asignó.
+var NotificationCategories = []string{"proposals", "my_proposals", "watched", "review", "reading", "quiz_extra", "quiz_failed"}
 
 // NotificationPrefs: si sigue lo que crea o edita, y el correo de cada categoría.
 type NotificationPrefs struct {

@@ -22,7 +22,7 @@ func (a api) areaHomeRoutes(r chi.Router) {
 	r.Get("/stats", a.areaStats)
 	r.Post("/views/*", a.recordView)
 	r.Group(func(r chi.Router) {
-		r.Use(a.requireRank(repo.RoleRank("editor")))
+		r.Use(a.areaOnly, a.requireRank(repo.RoleRank("editor")))
 		r.Post("/announcements", a.createAnnouncement)
 		r.Delete("/announcements/{id}", a.deleteAnnouncement)
 	})

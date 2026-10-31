@@ -27,8 +27,11 @@ import (
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/personal"
 	"github.com/athomo001/kudawiki/internal/presence"
 	"github.com/athomo001/kudawiki/internal/proposals"
+	"github.com/athomo001/kudawiki/internal/quiz"
+	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -58,6 +61,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	db := dbtest.Open(t)
 	store := repo.New(db)
 	rec := audit.NewRecorder(store, time.Now, slog.New(slog.DiscardHandler))
+	quizzes := quiz.NewService(store, rec, time.Now)
 	svc, err := auth.NewService(store, rec, time.Now, false)
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +81,9 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
+	files := media.NewService(store, rec, storage, 1<<20)
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
-		Media: media.NewService(store, rec, storage, 1<<20), Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
+		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 

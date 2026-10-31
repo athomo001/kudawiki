@@ -15,20 +15,21 @@ import (
 // proposalRoutes son las propuestas (SPEC §5, §14.3). Quién ve y quién cambia cada una lo decide
 // proposals.Service: aquí solo el rol mínimo de cada ruta.
 func (a api) proposalRoutes(r chi.Router) {
-	r.Get("/proposals", a.listProposals)
-	r.Get("/proposals/{id}", a.getProposal)
-	r.With(a.requireRank(repo.RoleRank("admin"))).Post("/proposals/seen", a.proposalsSeen)
-	r.Patch("/proposals/{id}", a.updateProposal)
-	r.Post("/proposals/{id}/submit", a.resubmitProposal)
-	r.Post("/proposals/{id}/withdraw", a.withdrawProposal)
+	r.With(a.requireAuthor).Get("/approval/*", a.approval)
+	r.With(a.requireAuthor).Post("/render", a.preview)
+	// En el espacio personal no hay a quién proponerle nada (§7): todo se publica directo.
 	r.Group(func(r chi.Router) {
-		r.Use(a.requireAuthor)
-		r.Post("/proposals", a.createProposal)
-		r.Get("/approval/*", a.approval)
-		r.Post("/render", a.preview)
+		r.Use(a.areaOnly)
+		r.Get("/proposals", a.listProposals)
+		r.Get("/proposals/{id}", a.getProposal)
+		r.With(a.requireRank(repo.RoleRank("admin"))).Post("/proposals/seen", a.proposalsSeen)
+		r.Patch("/proposals/{id}", a.updateProposal)
+		r.Post("/proposals/{id}/submit", a.resubmitProposal)
+		r.Post("/proposals/{id}/withdraw", a.withdrawProposal)
+		r.With(a.requireAuthor).Post("/proposals", a.createProposal)
 	})
 	r.Group(func(r chi.Router) {
-		r.Use(a.requireRank(repo.RoleRank("admin")))
+		r.Use(a.areaOnly, a.requireRank(repo.RoleRank("admin")))
 		r.Post("/proposals/{id}/approve", a.approveProposal)
 		r.Post("/proposals/{id}/reject", a.rejectProposal)
 		r.Get("/approval-overrides", a.approvalOverrides)

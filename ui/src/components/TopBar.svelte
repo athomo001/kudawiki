@@ -72,6 +72,8 @@
       <div class="menu">
         <p class="menu-who"><strong>{me.full_name}</strong><span class="muted">{me.email}</span></p>
         <ul>
+          <li><a href="/me">{t('me.title')}</a></li>
+          <li><a href={`/w/${me.personal.slug}`}>{t('personal.title')}</a></li>
           <li><a href="/me/profile">{t('nav.profile')}</a></li>
         </ul>
         {#if me.is_global_admin}
@@ -81,6 +83,7 @@
             <li><a href="/admin/health">{t('health.short')}</a></li>
             <li><a href="/admin/appearance">{t('appearance.title')}</a></li>
             <li><a href="/admin/email">{t('smtp.title')}</a></li>
+            <li><a href="/admin/templates">{t('templates.global_title')}</a></li>
           </ul>
         {/if}
         <button type="button" class="menu-item" onclick={onlogout}>{t('auth.logout')}</button>

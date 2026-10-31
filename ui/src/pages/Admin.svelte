@@ -125,6 +125,8 @@
               {#if u.invited}
                 <button type="button" class="link" disabled={busy} onclick={() => resend(u)}>{t('admin.invite_resend')}</button>
               {:else}
+                <!-- Modo auditoría (§7): solo lectura, y cada pedido queda en la auditoría. -->
+                <a href={`/w/~${u.id.toLowerCase()}`} aria-label={t('personal.audit_label', { name: u.full_name })}>{t('personal.audit_link')}</a> ·
                 <button
                   type="button"
                   class="link"

@@ -28,7 +28,9 @@ type snippetPart struct {
 // split convierte el fragmento con marcas en partes de texto: la interfaz las pinta como texto
 // y resalta las coincidencias sin {@html}.
 func split(snippet string) []snippetPart {
-	var parts []snippetPart
+	// Nunca null: una búsqueda solo con filtros (tag:, estado:) no tiene fragmento, y la interfaz
+	// pregunta por su largo.
+	parts := []snippetPart{}
 	for snippet != "" {
 		before, rest, found := strings.Cut(snippet, repo.HitStart)
 		if before != "" {
@@ -117,9 +119,13 @@ func (a api) facets(r *http.Request, q repo.SearchQuery, cands []repo.SearchHit)
 	if err != nil {
 		return search.Facets{}, err
 	}
+	overdue, err := a.Read.OverduePages(r.Context(), scopeOf(r), ids)
+	if err != nil {
+		return search.Facets{}, err
+	}
 	list := make([]search.Candidate, len(cands))
 	for i, c := range cands {
-		list[i] = search.Candidate{Slug: c.Slug, UpdatedAt: c.UpdatedAt, Tags: tags[c.ID], Authors: authors[c.ID]}
+		list[i] = search.Candidate{Slug: c.Slug, UpdatedAt: c.UpdatedAt, Tags: tags[c.ID], Authors: authors[c.ID], Overdue: overdue[c.ID]}
 	}
 	return search.CountFacets(list, q.Path, time.Now()), nil
 }

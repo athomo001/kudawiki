@@ -12,6 +12,7 @@
     type Conflict,
     type Draft,
     type DraftRef,
+    type Template,
     type MediaFile,
     type Level,
     type Page,
@@ -28,6 +29,7 @@
   import Icon from '../components/Icon.svelte';
   import DiffView from '../components/DiffView.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import LevelBadge from '../components/LevelBadge.svelte';
   import FolderPicker from '../components/FolderPicker.svelte';
   import MarkdownGuide from '../components/MarkdownGuide.svelte';
   import EditorToolbar from '../components/EditorToolbar.svelte';
@@ -291,7 +293,9 @@
     await saving;
     try {
       if (draft || proposing) return await sendProposal();
-      await api('PUT', `/w/${area.slug}/pages/${target}`, { title, markdown, lang, base_revision: base, change_summary: summary });
+      await api('PUT', `/w/${area.slug}/pages/${target}`, {
+        title, markdown, lang, base_revision: base, change_summary: summary, review_interval_days: base ? 0 : reviewDays,
+      });
       // Las etiquetas son metadatos, no contenido: no crean revisión (SPEC §4.6).
       const list = tags.split(',').map((s) => s.trim()).filter(Boolean);
       const meta = { tags: list, description, icon: icon.trim() };
@@ -370,6 +374,30 @@
     input.value = '';
   }
 
+  // Plantillas (§4.9): una página nueva puede empezar desde una. El servidor llena {{fecha}} con
+  // el día de quien la usa, {{autor}} y {{titulo}} (el título escrito, o el de la plantilla).
+  let templates = $state<Template[]>([]);
+  let choosing = $state(false);
+  // El intervalo de revisión de la plantilla (§4.8): la página nace con él.
+  let reviewDays = $state(0);
+  async function useTemplate(tpl: Template) {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      const u = await api<Template>('GET', `/w/${area.slug}/templates/${tpl.id}/use?title=${encodeURIComponent(title)}&today=${today}`);
+      choosing = false;
+      title = u.title;
+      view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: u.markdown ?? '' } });
+      if (levels.includes(u.level)) level = u.level;
+      tags = u.tags.join(', ');
+      reviewDays = u.review_interval_days;
+      await tick();
+      view?.focus();
+    } catch (e) {
+      error = errorText(codeOf(e));
+    }
+  }
+
   // "Archivos del área": un archivo ya subido se usa otra vez sin volver a subirlo (§4.4).
   let browsing = $state(false);
   async function pickFile(f: MediaFile) {
@@ -427,6 +455,9 @@
       lastKey = draftKey();
       api<DraftRef[]>('GET', `/w/${area.slug}/drafts`)
         .then((list) => (pending = list))
+        .catch(() => {});
+      api<Template[]>('GET', `/w/${area.slug}/templates`)
+        .then((list) => (templates = list))
         .catch(() => {});
     } else {
       api<Page>('GET', `/w/${area.slug}/pages/${slug}`)
@@ -498,6 +529,9 @@
         {/if}
       </div>
     </div>
+    {#if templates.length}
+      <button type="button" class="editor-btn" onclick={() => (choosing = true)}><Icon name="template" size={16} /> {t('templates.use')}</button>
+    {/if}
     <button type="button" class="editor-btn" onclick={() => (guide = true)}><Icon name="help" size={16} /> {t('mdguide.open')}</button>
     <button type="button" class="editor-btn" onclick={discard}>{t('editor.discard')}</button>
     <button type="submit" class="editor-btn editor-save" disabled={busy}>
@@ -639,6 +673,18 @@
   <FolderPicker {refs} rootLabel={area.name} bind:path {title} exclude={slug} />
   <p class="picker-result">{t('picker.result')} <code>{area.slug}/{path}</code></p>
   <button type="button" class="primary" onclick={() => (picking = false)}>{t('picker.done')}</button>
+</Dialog>
+<Dialog title={t('templates.choose')} bind:open={choosing}>
+  {#if markdown.trim()}<p class="muted small">{t('templates.replace_note')}</p>{/if}
+  <ul class="template-list template-pick">
+    {#each templates as tpl (tpl.id)}
+      <li>
+        <button type="button" class="link" onclick={() => useTemplate(tpl)}>{tpl.name}</button>
+        <LevelBadge level={tpl.level} />
+        {#if tpl.description}<span class="muted small">{tpl.description}</span>{/if}
+      </li>
+    {/each}
+  </ul>
 </Dialog>
 <Dialog title={t('files.title')} bind:open={browsing} wide>
   <FileBrowser {area} onpick={pickFile} />

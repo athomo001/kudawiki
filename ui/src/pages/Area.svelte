@@ -10,6 +10,11 @@
   import SearchResults from './SearchResults.svelte';
   import Trash from './Trash.svelte';
   import Files from './Files.svelte';
+  import Templates from './Templates.svelte';
+  import Review from './Review.svelte';
+  import ReadRequests from './ReadRequests.svelte';
+  import QuizTake from './QuizTake.svelte';
+  import QuizEditor from './QuizEditor.svelte';
   import Audit from './Audit.svelte';
   import Icon from '../components/Icon.svelte';
   import Settings from './Settings.svelte';
@@ -26,7 +31,7 @@
   let misses = $state<{ query: string; count: number }[]>([]);
   let error = $state('');
   const base = $derived(`/w/${area.slug}`);
-  const view = $derived(sub.match(/^(p|edit|history|tags)\/(.+)$/));
+  const view = $derived(sub.match(/^(p|edit|history|tags|reads|quiz|quizzes)\/(.+)$/));
   const kind = $derived(view?.[1]);
   const pageSlug = $derived(view?.[2] ?? '');
   // Bandeja de propuestas: proposals, proposals/{id} y proposals/{id}/edit (SPEC §5.2).
@@ -47,6 +52,11 @@
   const viewKeys: Record<string, Key | undefined> = {
     trash: 'trash.title',
     files: 'files.title',
+    templates: 'templates.title',
+    review: 'review.nav',
+    reads: 'reading.title',
+    quiz: 'quiz.title',
+    quizzes: 'quiz.title',
     audit: 'audit.title',
     members: 'admin.members_link',
     settings: 'settings.title',
@@ -74,7 +84,7 @@
 
   // El número junto a "Propuestas" es lo que espera al admin (diseño aprobado).
   async function loadPending() {
-    if (area.role !== 'admin') return;
+    if (area.role !== 'admin' || area.personal) return;
     try {
       pending = (await api<Proposal[]>('GET', `${base}/proposals?view=pending`)).length;
     } catch {
@@ -112,8 +122,8 @@
         <a class="sidebar-icon" href={`${base}/new`} aria-label={t('page.new')} title={t('page.new')}><Icon name="plus" size={16} /></a>
       {/if}
     </div>
-    <a class="nav-item" href={base} aria-current={sub === '' ? 'page' : undefined}><Icon name="home" size={16} /> {t('nav.area_home')}</a>
-    {#if canWrite(area)}
+    <a class="nav-item" href={base} aria-current={sub === '' ? 'page' : undefined}><Icon name="home" size={16} /> {t(area.personal ? 'nav.home' : 'nav.area_home')}</a>
+    {#if canWrite(area) && !area.personal}
       <a class="nav-item" href={`${base}/proposals`} aria-current={proposalView ? 'page' : undefined}>
         <Icon name="list" size={16} /> {t('proposals.title')}{#if pending}<span class="nav-count">{pending}</span>{/if}
       </a>
@@ -124,9 +134,17 @@
       <hr />
       <a class="nav-item" href={`${base}/files`} aria-current={sub === 'files' ? 'page' : undefined}><Icon name="files" size={16} /> {t('files.title')}</a>
       <a class="nav-item" href={`${base}/trash`} aria-current={sub === 'trash' ? 'page' : undefined}><Icon name="trash" size={16} /> {t('trash.title')}</a>
+      <!-- En el espacio personal nada vence, y no hay miembros ni configuración que tocar (§7). -->
+      {#if !area.personal}
+        <a class="nav-item" href={`${base}/review`} aria-current={sub === 'review' ? 'page' : undefined}><Icon name="check" size={16} /> {t('review.nav')}</a>
+        <a class="nav-item" href={`${base}/reads`} aria-current={sub === 'reads' || kind === 'reads' ? 'page' : undefined}><Icon name="list" size={16} /> {t('reading.title')}</a>
+      {/if}
       {#if area.role === 'admin'}
-        <a class="nav-item" href={`${base}/members`} aria-current={sub === 'members' ? 'page' : undefined}><Icon name="people" size={16} /> {t('admin.members_link')}</a>
-        <a class="nav-item" href={`${base}/settings`} aria-current={sub === 'settings' ? 'page' : undefined}><Icon name="settings" size={16} /> {t('settings.title')}</a>
+        <a class="nav-item" href={`${base}/templates`} aria-current={sub === 'templates' ? 'page' : undefined}><Icon name="template" size={16} /> {t('templates.title')}</a>
+        {#if !area.personal}
+          <a class="nav-item" href={`${base}/members`} aria-current={sub === 'members' ? 'page' : undefined}><Icon name="people" size={16} /> {t('admin.members_link')}</a>
+          <a class="nav-item" href={`${base}/settings`} aria-current={sub === 'settings' ? 'page' : undefined}><Icon name="settings" size={16} /> {t('settings.title')}</a>
+        {/if}
         <a class="nav-item" href={`${base}/health`} aria-current={sub === 'health' ? 'page' : undefined}><Icon name="pulse" size={16} /> {t('health.short')}</a>
         <a class="nav-item" href={`${base}/audit`} aria-current={sub === 'audit' ? 'page' : undefined}><Icon name="list" size={16} /> {t('audit.title')}</a>
       {/if}
@@ -149,10 +167,11 @@
         </ol>
       </nav>
     {/if}
+    {#if area.audit}<p class="audit-banner" role="note">{t('personal.audit_banner')}</p>{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
       <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
-    {:else if proposalView && canWrite(area)}
+    {:else if proposalView && canWrite(area) && !area.personal}
       <Proposals {area} id={proposalView[1] ?? ''} {selfId} onchanged={changed} />
     {:else}
       <div class="view">
@@ -164,17 +183,27 @@
           <TagPages {area} tag={decodeURIComponent(pageSlug)} />
         {:else if kind === 'history'}
           <History {area} slug={pageSlug} onreverted={loadTree} />
+        {:else if sub === 'templates' && area.role === 'admin'}
+          <Templates endpoint={`${base}/templates`} />
         {:else if sub === 'files' && canEdit(area)}
           <Files {area} />
+        {:else if kind === 'quiz' && !area.personal}
+          <QuizTake {area} id={pageSlug} />
+        {:else if kind === 'quizzes' && canEdit(area) && !area.personal}
+          <QuizEditor {area} id={pageSlug} />
+        {:else if (sub === 'reads' || kind === 'reads') && canEdit(area) && !area.personal}
+          <ReadRequests {area} id={kind === 'reads' ? pageSlug : ''} />
+        {:else if sub === 'review' && canEdit(area) && !area.personal}
+          <Review {area} />
         {:else if sub === 'trash' && canEdit(area)}
           <Trash {area} onrestored={loadTree} />
         {:else if sub === 'audit' && area.role === 'admin'}
           <Audit endpoint={`${base}/audit`} {base} />
         {:else if sub === 'health' && area.role === 'admin'}
           <Health endpoint={`${base}/health`} />
-        {:else if sub === 'settings' && area.role === 'admin'}
+        {:else if sub === 'settings' && area.role === 'admin' && !area.personal}
           <Settings {area} onchanged={onareachanged} />
-        {:else if sub === 'members' && area.role === 'admin'}
+        {:else if sub === 'members' && area.role === 'admin' && !area.personal}
           <Members endpoint={`${base}/members`} areaName={area.name} canGrantAdmin={false} {selfId} />
         {:else}
           <NotFound />

@@ -26,6 +26,30 @@ type Page struct {
 	// Metadatos (§4.1): como las etiquetas, cambiarlos no crea revisión.
 	Description string
 	Icon        string
+	// Vigencia (§4.8). ReviewDays es el intervalo de la página (0 = el del área) y AreaReviewDays
+	// el del área (0 = no vence).
+	OwnerID, Owner string
+	ReviewDays     int
+	AreaReviewDays int
+	VerifiedAt     time.Time
+	VerifiedBy     string
+	// Personal: la página está en un espacio personal (§7), donde nada vence.
+	Personal bool
+}
+
+// ReviewDue es cuándo vence la revisión de la página; false si no vence.
+func (p Page) ReviewDue() (time.Time, bool) {
+	days := p.ReviewDays
+	if p.Personal {
+		return time.Time{}, false
+	}
+	if days == 0 {
+		days = p.AreaReviewDays
+	}
+	if days == 0 {
+		return time.Time{}, false
+	}
+	return p.VerifiedAt.AddDate(0, 0, days), true
 }
 
 type PageRef struct {
@@ -59,6 +83,9 @@ type PageWrite struct {
 	Links    []string // rutas de los [[enlaces]] del contenido (SPEC §4.7)
 	Lang     string
 	Index    IndexDoc // lo que se indexa para la búsqueda, en la misma transacción (SPEC §9.1)
+	// ReviewDays es el intervalo de revisión de una página nueva (§4.8), el de su plantilla; 0 =
+	// el del área. Al guardar una que existe no se usa.
+	ReviewDays int
 	// Merge va cuando la revisión sale de una propuesta aprobada: la propuesta queda aprobada en
 	// la misma transacción, o no se publica nada (§5.2).
 	Merge *ProposalMerge
@@ -72,14 +99,20 @@ type ProposalMerge struct {
 
 func (r *Repo) PageBySlug(ctx context.Context, s Scope, slug string) (Page, error) {
 	var p Page
+	var verified sql.NullTime // la migración y CreatePage siempre la llenan; NULL solo en filas puestas a mano
 	err := r.db.Read.QueryRowContext(ctx,
-		`SELECT p.id, p.slug, p.min_rank, p.title, p.content_markdown, p.lang, p.current_revision, u.full_name, p.updated_at, p.description, p.icon
-		 FROM pages p JOIN users u ON u.id = p.updated_by
+		`SELECT p.id, p.slug, p.min_rank, p.title, p.content_markdown, p.lang, p.current_revision, u.full_name, p.updated_at, p.description, p.icon,
+		 COALESCE(p.owner_id, ''), COALESCE(o.full_name, ''), COALESCE(p.review_interval_days, 0), COALESCE(w.default_review_days, 0),
+		 p.verified_at, COALESCE(v.full_name, ''), w.kind = 'personal'
+		 FROM pages p JOIN users u ON u.id = p.updated_by JOIN workspaces w ON w.id = p.workspace_id
+		 LEFT JOIN users o ON o.id = p.owner_id LEFT JOIN users v ON v.id = p.verified_by
 		 WHERE p.workspace_id = ? AND p.slug = ? AND p.deleted_at IS NULL AND p.min_rank <= ?`, s.WsID, slug, s.MaxRank).
-		Scan(&p.ID, &p.Slug, &p.MinRank, &p.Title, &p.Markdown, &p.Lang, &p.Revision, &p.UpdatedBy, &p.UpdatedAt, &p.Description, &p.Icon)
+		Scan(&p.ID, &p.Slug, &p.MinRank, &p.Title, &p.Markdown, &p.Lang, &p.Revision, &p.UpdatedBy, &p.UpdatedAt, &p.Description, &p.Icon,
+			&p.OwnerID, &p.Owner, &p.ReviewDays, &p.AreaReviewDays, &verified, &p.VerifiedBy, &p.Personal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Page{}, ErrNotFound
 	}
+	p.VerifiedAt = verified.Time
 	return p, err
 }
 
@@ -138,8 +171,10 @@ func (r *Repo) CreatePage(ctx context.Context, s Scope, w PageWrite) (string, er
 	}
 	id := ulid.Make().String()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO pages (id, workspace_id, slug, min_rank, title, content_markdown, lang, created_by, updated_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, s.WsID, w.Slug, max(1, anc), w.Title, w.Markdown, w.Lang, w.AuthorID, w.AuthorID); err != nil {
+		`INSERT INTO pages (id, workspace_id, slug, min_rank, title, content_markdown, lang, created_by, updated_by,
+		 owner_id, review_interval_days, verified_at, verified_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), CURRENT_TIMESTAMP, ?)`,
+		id, s.WsID, w.Slug, max(1, anc), w.Title, w.Markdown, w.Lang, w.AuthorID, w.AuthorID, w.AuthorID, w.ReviewDays, w.AuthorID); err != nil {
 		return "", conflict(err)
 	}
 	if err := insertRevision(ctx, tx, s, id, 1, w); err != nil {
@@ -184,6 +219,10 @@ func (r *Repo) UpdatePage(ctx context.Context, s Scope, pageID string, base int,
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrConflict
+	}
+	// Una edición también cuenta como verificación (§4.8).
+	if err := verify(ctx, tx, pageID, w.AuthorID); err != nil {
+		return err
 	}
 	if err := insertRevision(ctx, tx, s, pageID, base+1, w); err != nil {
 		return err

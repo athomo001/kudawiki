@@ -58,6 +58,12 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// El espacio personal nace la primera vez que la persona entra (§7).
+	own, err := a.Personal.Of(r.Context(), u.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	areas := make([]map[string]any, len(ms))
 	for i, m := range ms {
 		// viewers_can_propose: la interfaz le ofrece a un lector "Proponer un cambio" (§19.5).
@@ -68,7 +74,7 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 	a.json(w, http.StatusOK, map[string]any{
 		"id": u.ID, "email": u.Email, "full_name": u.FullName,
 		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
-		"has_avatar": u.HasAvatar,
+		"has_avatar": u.HasAvatar, "personal": map[string]string{"slug": own.Slug},
 	})
 }
 

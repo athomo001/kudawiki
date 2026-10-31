@@ -1,6 +1,6 @@
 // Package health es la salud del contenido (SPEC §13.7): chequeos que encuentran lo que está
 // roto para quien lee (error) o desordenado (warning). Solo lee; los arreglos los hace
-// `kudawiki doctor --fix`. Vigencia y sellados se suman con su fase (F5, F7).
+// `kudawiki doctor --fix`. Los sellados se suman con su fase (F7).
 package health
 
 import (
@@ -57,6 +57,7 @@ type store interface {
 	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
 	PageBySlug(ctx context.Context, s repo.Scope, slug string) (repo.Page, error)
 	RevisionByNumber(ctx context.Context, s repo.Scope, pageID string, n int) (repo.Revision, error)
+	ReviewProblems(ctx context.Context, s repo.Scope, now time.Time) ([]repo.ReviewProblem, error)
 }
 
 type Options struct {
@@ -175,7 +176,31 @@ func area(ctx context.Context, st store, o Options, w repo.Workspace) ([]Problem
 	if err := proposalChecks(ctx, st, o, sc, add); err != nil {
 		return nil, err
 	}
+	if err := reviewChecks(ctx, st, o, sc, add); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// reviewChecks es la vigencia (§4.8): páginas vencidas, y páginas sin dueño (o con uno que ya
+// no puede editarlas en el área) o con el dueño desactivado. Esas no avisan a nadie al vencer.
+func reviewChecks(ctx context.Context, st store, o Options, sc repo.Scope, add func(check string, sev Severity, page, detail string)) error {
+	problems, err := st.ReviewProblems(ctx, sc, o.Now)
+	if err != nil {
+		return err
+	}
+	for _, p := range problems {
+		if p.Overdue {
+			add("review.overdue", Warning, p.Slug, "")
+		}
+		switch p.Owner {
+		case "none":
+			add("review.no_owner", Warning, p.Slug, "")
+		case "inactive":
+			add("review.owner_inactive", Warning, p.Slug, "")
+		}
+	}
+	return nil
 }
 
 // proposalChecks encuentra las pendientes que pasaron el plazo de revisión y las que chocan con la

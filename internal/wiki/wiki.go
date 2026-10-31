@@ -42,7 +42,7 @@ var slugRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0
 
 // mediaRefs encuentra la media que usa el contenido (![x](/api/w/ti/media/ID)). La de otra
 // área se descarta al asociar: repo solo toca media del Scope.
-var mediaRe = regexp.MustCompile(`/api/w/[a-z0-9-]+/media/([0-9A-HJKMNP-TV-Z]{26})`)
+var mediaRe = regexp.MustCompile(`/api/w/[a-z0-9~-]+/media/([0-9A-HJKMNP-TV-Z]{26})`)
 
 func mediaRefs(markdown string) []string {
 	var ids []string
@@ -100,11 +100,15 @@ type store interface {
 	RevisionByNumber(ctx context.Context, s repo.Scope, pageID string, n int) (repo.Revision, error)
 	SetTags(ctx context.Context, s repo.Scope, pageID string, tags []string) error
 	SetPageInfo(ctx context.Context, s repo.Scope, pageID, description, descriptionStem, icon string) error
+	VerifyPage(ctx context.Context, s repo.Scope, pageID, userID string) error
+	SetPageReview(ctx context.Context, s repo.Scope, pageID, ownerID string, days int) error
+	OwnerRank(ctx context.Context, s repo.Scope, userID string) (int, error)
 	MovePages(ctx context.Context, s repo.Scope, actorID, from, to string, rewrite repo.Rewrite) (string, int, error)
 	SetLevel(ctx context.Context, s repo.Scope, actorID, slug string, level int) (string, int, error)
 	DeletePages(ctx context.Context, s repo.Scope, actorID, slug string) (string, int, error)
 	RestorePages(ctx context.Context, s repo.Scope, actorID, id string) (int, error)
 	announcementStore
+	templateStore
 	approvalStore
 }
 
@@ -166,6 +170,9 @@ func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base 
 	w.MediaIDs, w.Links = mediaRefs(w.Markdown), Links(w.Markdown)
 	if err := CheckPage(w.Slug, w.Title, w.Markdown, w.Lang); err != nil {
 		return "", 0, err
+	}
+	if !validReviewDays(w.ReviewDays) {
+		return "", 0, ErrInvalidPage
 	}
 	if base == 0 {
 		if w.Lang == "" {

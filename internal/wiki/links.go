@@ -65,8 +65,9 @@ func rewriteMoves(markdown string, moves map[string]string) string {
 	})
 }
 
-// SetTags reemplaza las etiquetas de la página (SPEC §4.6).
-func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags []string) error {
+// CleanTags quita vacías y repetidas (sin contar mayúsculas) y valida las que quedan (SPEC §4.6).
+// La usan las páginas y las plantillas, que traen etiquetas por defecto (§4.9).
+func CleanTags(tags []string) ([]string, error) {
 	clean := make([]string, 0, len(tags))
 	seen := map[string]bool{}
 	for _, t := range tags {
@@ -76,13 +77,22 @@ func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags 
 			continue
 		}
 		if !tagRe.MatchString(t) || utf8.RuneCountInString(t) > 30 {
-			return ErrInvalidTags
+			return nil, ErrInvalidTags
 		}
 		seen[key] = true
 		clean = append(clean, t)
 	}
 	if len(clean) > maxTags {
-		return ErrInvalidTags
+		return nil, ErrInvalidTags
+	}
+	return clean, nil
+}
+
+// SetTags reemplaza las etiquetas de la página (SPEC §4.6).
+func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags []string) error {
+	clean, err := CleanTags(tags)
+	if err != nil {
+		return err
 	}
 	if err := s.direct(ctx, sc, slug); err != nil {
 		return err

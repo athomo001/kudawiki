@@ -52,9 +52,13 @@ func NewService(s store, pages publisher, rec *audit.Recorder) *Service {
 }
 
 // Draft es lo que se propone. Base es la revisión sobre la que se escribió; 0, una página nueva.
+// Source es la página del espacio personal de la que sale una página nueva (§7) y Media, las
+// copias de su media en el área.
 type Draft struct {
 	Slug, Title, Markdown, Lang, Summary string
 	Base                                 int
+	Source                               string
+	Media                                []repo.Media
 }
 
 func (d *Draft) clean() error {
@@ -91,6 +95,9 @@ func (s *Service) Create(ctx context.Context, sc repo.Scope, authorID string, d 
 		return "", err
 	}
 	p := repo.Proposal{ID: ulid.Make().String(), Slug: d.Slug, Title: d.Title, Markdown: d.Markdown, Lang: d.Lang, Summary: d.Summary, AuthorID: authorID}
+	if d.Base == 0 {
+		p.SourcePageID, p.Media = d.Source, d.Media
+	}
 	if d.Base > 0 {
 		page, err := s.store.PageBySlug(ctx, sc, d.Slug)
 		if err != nil {

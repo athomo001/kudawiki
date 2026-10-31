@@ -203,6 +203,43 @@ func (s *Service) Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.
 
 // Remove borra del disco el archivo y su miniatura. Lo llama solo la purga de la papelera
 // (SPEC §4.5), con la media que ya borró de la BD; un archivo que ya no está no es un error.
+// Copy copia el archivo (y su miniatura, si tiene) de un área a otra con un id nuevo: publicar
+// desde el espacio personal copia la media al área (§7), así cada área tiene sus archivos en su
+// carpeta y borrar en una no rompe la otra. Si falla, no deja nada a medias.
+func (s *Service) Copy(fromWs, toWs string, m repo.Media) (repo.Media, error) {
+	cp := m
+	cp.ID = ulid.Make().String()
+	if err := os.MkdirAll(filepath.Dir(s.path(toWs, cp.ID, false)), 0o700); err != nil {
+		return repo.Media{}, err
+	}
+	for _, thumb := range []bool{false, true} {
+		if thumb && !m.HasThumbnail {
+			continue
+		}
+		if err := copyFile(s.path(fromWs, m.ID, thumb), s.path(toWs, cp.ID, thumb)); err != nil {
+			return repo.Media{}, errors.Join(err, s.Remove(toWs, cp.ID))
+		}
+	}
+	return cp, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 func (s *Service) Remove(wsID, id string) error {
 	var errs error
 	for _, thumb := range []bool{false, true} {

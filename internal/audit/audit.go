@@ -56,6 +56,31 @@ var (
 	// Anuncios del inicio del área (§4.17).
 	AnnouncementCreate = Action{"announcement.create"}
 	AnnouncementDelete = Action{"announcement.delete"}
+	// Plantillas (§4.9): del área o globales (sin área).
+	TemplateCreate = Action{"template.create"}
+	TemplateUpdate = Action{"template.update"}
+	TemplateDelete = Action{"template.delete"}
+	// Vigencia (§4.8): marcar como vigente, y cambiar el dueño o el intervalo.
+	PageVerify       = Action{"page.verify"}
+	PageReviewUpdate = Action{"page.review_update"}
+	// Espacio personal (§7): publicar una página en un área, y el superadmin abriendo uno ajeno.
+	PagePublish       = Action{"page.publish"}
+	PersonalAuditOpen = Action{"personal.audit_open"}
+	// Acuse de lectura (§4.14).
+	ReadRequestCreate = Action{"read_request.create"}
+	ReadRequestClose  = Action{"read_request.close"}
+	ReadAck           = Action{"read.ack"}
+	// Cuestionarios (§4.16).
+	QuizCreate             = Action{"quiz.create"}
+	QuizUpdate             = Action{"quiz.update"}
+	QuizPublish            = Action{"quiz.publish"}
+	QuizArchive            = Action{"quiz.archive"}
+	QuizDelete             = Action{"quiz.delete"}
+	QuizAttemptStart       = Action{"quiz.attempt_start"}
+	QuizAttemptSubmit      = Action{"quiz.attempt_submit"}
+	QuizAttemptTimeout     = Action{"quiz.attempt_timeout"}
+	QuizExtraAttemptsGrant = Action{"quiz.extra_attempts_grant"}
+	QuizResultsExport      = Action{"quiz.results_export"}
 	// Recuperación por consola (§13.6): las corre quien tiene shell en el servidor.
 	CLIUnlock           = Action{"admin.cli_unlock"}
 	CLISetPassword      = Action{"admin.cli_set_password"}
@@ -84,6 +109,9 @@ var All = []Action{
 	WsCreate, WsUpdate, BackupRun, WsMemberAdd, WsMemberRemove, WsMemberRole,
 	PageCreate, PageUpdate, PageRevert, PageMove, PageLevelChange, PageDelete, PageRestore, PagePurge,
 	PageRead, PathUnavailable, MediaUpload, MediaDelete, RevisionPurge, AnnouncementCreate, AnnouncementDelete,
+	TemplateCreate, TemplateUpdate, TemplateDelete, PageVerify, PageReviewUpdate, PagePublish, PersonalAuditOpen, ReadRequestCreate, ReadRequestClose, ReadAck,
+	QuizCreate, QuizUpdate, QuizPublish, QuizArchive, QuizDelete, QuizAttemptStart, QuizAttemptSubmit, QuizAttemptTimeout,
+	QuizExtraAttemptsGrant, QuizResultsExport,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,

@@ -12,7 +12,18 @@ export class ApiError extends Error {
 export type Role = 'viewer' | 'editor' | 'admin';
 // viewers_can_propose: el área deja a sus lectores proponer cambios (SPEC §19.5).
 // require_change_summary: el área exige resumen al cambiar una página que existe (§4.3).
-export type Area = { slug: string; name: string; description: string; role: Role; viewers_can_propose: boolean; require_change_summary: boolean };
+// personal: el espacio personal de quien entra (§7); audit: el de otra persona, que el superadmin
+// lee en modo auditoría. Los arma la interfaz: /auth/me no los lista entre las áreas.
+export type Area = {
+  slug: string;
+  name: string;
+  description: string;
+  role: Role;
+  viewers_can_propose: boolean;
+  require_change_summary: boolean;
+  personal?: boolean;
+  audit?: boolean;
+};
 
 // Preferencias de lectura de SPEC §15; se aplican en todas las áreas.
 export type ReadingPrefs = { font: 'default' | 'dyslexic' | 'legible'; wide: boolean };
@@ -26,6 +37,7 @@ export type Me = {
   is_global_admin: boolean;
   workspaces: Area[];
   has_avatar: boolean;
+  personal: { slug: string };
 };
 
 export type Member = { user_id: string; email: string; full_name: string; role: Role };
@@ -50,7 +62,183 @@ export type Page = {
   // sigue con sus subpáginas, si lo hay.
   watch: WatchMode;
   watch_via: string;
+  review: Review;
+  // Solo en el espacio personal (§7): lo que se mandó desde esta página a un área y en qué quedó.
+  sent?: Sent[];
+  // Las solicitudes de lectura abiertas que quien lee tiene sobre la página (§4.14).
+  reading: MyRead[];
 };
+
+export type MyRead = {
+  id: string;
+  statement: string;
+  requested_by: string;
+  revision: number;
+  due_at: string | null;
+  confirmed_at: string | null;
+  confirmed_revision: number;
+  // La solicitud se cumple aprobando este cuestionario (§4.16); vacío, basta con confirmar.
+  quiz_id: string;
+};
+
+// Solicitud de lectura (§4.14). audience: todo el área, unos roles o unas personas.
+export type Audience = { all?: boolean; roles?: Role[]; users?: string[] };
+export type ReadRequest = {
+  id: string;
+  page: { slug: string; title: string; level: Level };
+  revision: number;
+  statement: string;
+  audience: Audience;
+  due_at: string | null;
+  created_by: string;
+  created_at: string;
+  closed_at: string | null;
+  quiz_id: string;
+  // Solo en el listado.
+  recipients?: number;
+  opened?: number;
+  confirmed?: number;
+};
+export type ReadStatus = 'unopened' | 'opened' | 'confirmed' | 'overdue' | 'in_progress' | 'passed' | 'failed_out';
+export type ReadPerson = {
+  user_id: string;
+  name: string;
+  email: string;
+  role: Role;
+  status: ReadStatus;
+  first_opened_at: string | null;
+  last_opened_at: string | null;
+  opens: number;
+  confirmed_at: string | null;
+  confirmed_revision: number;
+  // Con cuestionario: intentos usados, extra que le dieron y su mejor puntaje.
+  attempts: number;
+  extra_attempts: number;
+  best_percent: number;
+};
+export type ReadRequestDetail = ReadRequest & { people: ReadPerson[] };
+
+// Cuestionarios (§4.16). El borrador (QuizDraft) lleva las respuestas correctas y solo llega a
+// quien lo administra; quien responde ve QuizSummary y AttemptView.
+export type QuizKind = 'single' | 'multiple' | 'true_false';
+export type QuizOption = { id: string; text: string; correct: boolean };
+export type QuizQuestion = { id: string; kind: QuizKind; prompt_md: string; points: number; explanation_md: string; anchor: string; options: QuizOption[] };
+export type QuizSettings = {
+  max_attempts: number; // 0 = ilimitados
+  pass_percent: number;
+  score_policy: 'best' | 'last' | 'first';
+  cooldown_min: number;
+  time_limit_s: number; // 0 = sin límite
+  estimated_min: number; // 0 = automático
+  shuffle_questions: boolean;
+  shuffle_options: boolean;
+  pick: number; // 0 = todas
+  feedback: 'score' | 'wrong' | 'all';
+  reveal: 'never' | 'after_final' | 'always';
+  multiple_scoring: 'all_or_nothing' | 'partial';
+};
+export type QuizDraft = { settings: QuizSettings; questions: QuizQuestion[] };
+export type QuizSummary = {
+  questions: number;
+  estimated_min: number;
+  max_attempts: number;
+  pass_percent: number;
+  time_limit_s: number;
+  remaining: number; // -1 = sin límite
+  next_at: string | null;
+  due_at: string | null;
+  request_id: string;
+  passed: boolean;
+  in_progress: string;
+};
+export type QuizStatus = 'draft' | 'published' | 'archived';
+export type QuizListed = { id: string; title: string; status: QuizStatus; manage: boolean; summary: QuizSummary | null };
+export type Quiz = {
+  id: string;
+  title: string;
+  status: QuizStatus;
+  open_to_readers: boolean;
+  page: { slug: string; title: string; level: Level };
+  created_by: string;
+  manage: boolean;
+  results: boolean;
+  summary: QuizSummary | null;
+  // Solo para quien lo administra.
+  draft?: QuizDraft;
+  dirty?: boolean;
+  page_changed?: boolean;
+  published_version?: number;
+};
+export type QuestionView = {
+  id: string;
+  kind: QuizKind;
+  prompt_html: string;
+  points: number;
+  options: { id: string; text: string }[];
+  // Solo al corregir, según lo que el cuestionario deja ver.
+  correct?: boolean;
+  earned?: number;
+  anchor?: string;
+  correct_options?: string[];
+  explanation_html?: string;
+};
+export type AttemptResult = {
+  score: number;
+  max: number;
+  percent: number;
+  passed: boolean;
+  timed_out: boolean;
+  feedback: QuizSettings['feedback'];
+  revealed: boolean;
+  submitted_at: string;
+  duration_s: number;
+};
+export type AttemptView = {
+  id: string;
+  quiz_id: string;
+  number: number;
+  preview: boolean;
+  status: 'in_progress' | 'submitted' | 'timed_out';
+  started_at: string;
+  deadline_at: string | null;
+  pass_percent: number;
+  questions: QuestionView[];
+  answers: Record<string, string[]>;
+  result?: AttemptResult;
+};
+export type QuizResults = {
+  people: {
+    user_id: string;
+    name: string;
+    email: string;
+    attempts: number;
+    percent: number;
+    passed: boolean;
+    in_progress: boolean;
+    last_attempt_at: string | null;
+    last_duration_s: number;
+  }[];
+  questions: { id: string; prompt: string; kind: QuizKind; answered: number; correct: number; top_wrong: string; top_wrong_count: number }[];
+};
+
+export type Sent = { id: string; area: { slug: string; name: string }; slug: string; status: ProposalStatus; comment: string; created_at: string };
+
+// Vigencia de una página (§4.8). interval_days es el suyo (0 = el del área) y area_interval_days
+// el del área (0 = no vence); due_at es null si no vence. can_review: quien lee es su dueño o un admin.
+export type Review = {
+  owner_id: string;
+  owner: string;
+  interval_days: number;
+  area_interval_days: number;
+  verified_at: string;
+  verified_by: string;
+  due_at: string | null;
+  overdue: boolean;
+  can_review: boolean;
+};
+
+// Una página de la cola de revisión (§4.8).
+export type ReviewItem = { slug: string; title: string; level: Level; owner: string; verified_at: string; due_at: string };
 
 export type WatchMode = '' | 'page' | 'subtree';
 
@@ -62,7 +250,15 @@ export type NotificationKind =
   | 'proposal_reminder'
   | 'proposal_approved'
   | 'proposal_rejected'
-  | 'proposal_rebase';
+  | 'proposal_rebase'
+  | 'review_due'
+  | 'review_reminder'
+  | 'read_request'
+  | 'read_reminder'
+  | 'quiz_assigned'
+  | 'quiz_reminder'
+  | 'quiz_extra_attempts'
+  | 'quiz_failed_out';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -78,7 +274,7 @@ export type Notification = {
 };
 
 export type EmailPref = 'immediate' | 'daily' | 'off';
-export const notificationCategories = ['proposals', 'my_proposals', 'watched'] as const;
+export const notificationCategories = ['proposals', 'my_proposals', 'watched', 'review', 'reading', 'quiz_extra', 'quiz_failed'] as const;
 export type NotificationCategory = (typeof notificationCategories)[number];
 export type NotificationPrefs = {
   auto_watch: boolean;
@@ -91,6 +287,8 @@ export function notificationHref(n: Notification): string {
   const area = `/w/${n.area.slug}`;
   if (n.kind === 'proposal_pending' || n.kind === 'proposal_reminder') return `${area}/proposals`;
   if (n.kind.startsWith('proposal_')) return `${area}/proposals/${n.proposal}`;
+  if (n.kind === 'review_reminder') return `${area}/review`;
+  if (n.kind === 'quiz_failed_out') return `${area}/reads`;
   return n.page ? `${area}/p/${n.page}` : area;
 }
 export type RevisionMeta = {
@@ -133,6 +331,8 @@ export type Conflict = { revision: number; updated_by: string; updated_at: strin
 // página nueva en la lista que se ofrece al abrir el editor, sin el contenido.
 export type Draft = { slug: string; title: string; markdown: string; base_revision: number; new_page: boolean; updated_at: string };
 export type DraftRef = { slug: string; title: string; updated_at: string };
+// Plantilla (SPEC §4.9): la lista no trae markdown; al usarla, viene llena con las variables.
+export type Template = { id: string; name: string; description: string; title: string; markdown?: string; level: Level; tags: string[]; review_interval_days: number };
 export type PresenceEditor = { id: string; name: string };
 // Propuesta de cambio (SPEC §5.2). base_revision 0 = página nueva.
 export type ProposalStatus = 'pending' | 'merged' | 'rejected' | 'withdrawn';
@@ -198,7 +398,7 @@ export type SearchHit = {
 };
 export type Facet = { value: string; count: number };
 // Filtros de la página de resultados con sus conteos; solo cuentan lo que quien busca ve.
-export type Facets = { tags: Facet[]; folders: Facet[]; authors: Facet[]; dates: { days: number; count: number }[] };
+export type Facets = { tags: Facet[]; folders: Facet[]; authors: Facet[]; dates: { days: number; count: number }[]; overdue: number };
 export type SearchResult = { results: SearchHit[]; more?: boolean; suggestion?: string; facets?: Facets };
 
 // Mismo origen: el navegador manda la cookie de sesión y Sec-Fetch-Site (CSRF, SPEC §8.2).
@@ -236,8 +436,13 @@ export function codeOf(e: unknown): string {
 }
 
 export const canEdit = (a: Area) => a.role !== 'viewer';
+// isPersonalSlug: la ruta de un espacio personal empieza con "~" (§7); un área no puede.
+export const isPersonalSlug = (slug: string) => slug.startsWith('~');
 // canWrite: puede abrir el editor, para publicar o para proponer (un lector, si el área lo deja).
 export const canWrite = (a: Area) => canEdit(a) || a.viewers_can_propose;
+
+// Puntaje de un cuestionario: 66,7 en español, 66.7 en inglés (llega redondeado a un decimal).
+export const formatPercent = (n: number, locale: string) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(n);
 
 export function formatDate(iso: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));

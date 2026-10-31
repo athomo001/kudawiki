@@ -38,6 +38,12 @@ func setup(t *testing.T) env {
 	ws := workspace.NewService(store, rec)
 	ti, _ := ws.Create(ctx, "ti", "TI")
 	fin, _ := ws.Create(ctx, "finanzas", "Finanzas")
+	// u1 es admin de las dos: dueño de lo que crea, como en un área real (§4.8).
+	for _, w := range []repo.Workspace{ti, fin} {
+		if err := store.SetMember(ctx, repo.Scope{WsID: w.ID}, "u1", "admin"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	svc := wiki.NewService(store, rec)
 	save := func(w repo.Workspace, slug, md string) {
 		if err := svc.Save(ctx, repo.Scope{WsID: w.ID, MaxRank: 3}, "u1", 0, repo.PageWrite{Slug: slug, Title: slug, Markdown: md}); err != nil {
@@ -255,5 +261,52 @@ func TestProposalChecks(t *testing.T) {
 	}
 	if len(ps) != 2 {
 		t.Errorf("want 2 problems, got %+v", ps)
+	}
+}
+
+func TestReviewChecks(t *testing.T) {
+	ctx := context.Background()
+	e := setup(t)
+	if err := e.store.CreateUser(ctx, repo.User{ID: "u2", Email: "b@x.cl", FullName: "B", IsActive: true, Locale: "es"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateUser(ctx, repo.User{ID: "u3", Email: "c@x.cl", FullName: "C", IsActive: true, Locale: "es"}); err != nil {
+		t.Fatal(err)
+	}
+	e.store.SetMember(ctx, repo.Scope{WsID: e.ti.ID}, "u2", "viewer")
+	e.store.SetMember(ctx, repo.Scope{WsID: e.ti.ID}, "u3", "editor")
+	// red: vencida (el área revisa cada 30 días y se verificó hace 40); red/vpn: su dueño es un
+	// lector, que no puede editarla; guia: el dueño está desactivado. En finanzas, sin intervalo,
+	// una página de hace años no vence (§19.11).
+	e.exec(t, `UPDATE workspaces SET default_review_days = 30 WHERE id = ?`, e.ti.ID)
+	e.exec(t, `UPDATE pages SET verified_at = datetime('now', '-40 days') WHERE slug = 'red'`)
+	e.exec(t, `UPDATE pages SET owner_id = 'u2' WHERE slug = 'red/vpn'`)
+	pages := wiki.NewService(e.store, audit.NewRecorder(e.store, time.Now, slog.New(slog.DiscardHandler)))
+	if err := pages.Save(ctx, repo.Scope{WsID: e.ti.ID, MaxRank: 3}, "u3", 0, repo.PageWrite{Slug: "guia", Title: "Guía", Markdown: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	e.exec(t, `UPDATE users SET is_active = 0 WHERE id = 'u3'`)
+	e.exec(t, `UPDATE pages SET verified_at = datetime('now', '-9 years') WHERE slug = 'plan'`)
+
+	ps, err := Check(ctx, e.store, Options{StorageDir: e.storage, Areas: []repo.Workspace{e.ti, e.fin}, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := checks(ps)
+	for _, key := range []string{"review.overdue red ", "review.no_owner red/vpn ", "review.owner_inactive guia "} {
+		if p, ok := got[key]; !ok || p.Severity != Warning || p.Area != "ti" {
+			t.Errorf("missing %q (warning, ti) in %+v", key, ps)
+		}
+	}
+	if len(ps) != 3 {
+		t.Errorf("want 3 problems, got %+v", ps)
+	}
+	// Verificarla la saca de la salud.
+	if err := pages.Verify(ctx, repo.Scope{WsID: e.ti.ID, MaxRank: 3}, "u1", "red"); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ = Check(ctx, e.store, Options{StorageDir: e.storage, Areas: []repo.Workspace{e.ti}, Now: time.Now()})
+	if _, ok := checks(ps)["review.overdue red "]; ok {
+		t.Errorf("verified page still overdue: %+v", ps)
 	}
 }

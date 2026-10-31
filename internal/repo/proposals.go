@@ -34,6 +34,10 @@ type Proposal struct {
 	// CreatedAt es cuándo se envió (o reenvió); ReviewedAt, cuándo se resolvió (cero si no).
 	CreatedAt  time.Time
 	ReviewedAt time.Time
+	// SourcePageID: la página del espacio personal de la que salió (§7), y Media, las copias de
+	// su media en el área, que se guardan sin página en la misma transacción. Solo al crearla.
+	SourcePageID string
+	Media        []Media
 }
 
 // ProposalFilter elige qué propuestas listar. AuthorID vacío: las de todos.
@@ -110,10 +114,19 @@ func (r *Repo) CreateProposal(ctx context.Context, s Scope, p Proposal) error {
 		pageID, base = p.PageID, p.Base
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO proposals (id, workspace_id, page_id, target_slug, base_revision, min_rank, title, content_markdown, lang, change_summary, status, author_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 'pending', ?)`,
-		p.ID, s.WsID, pageID, p.Slug, base, rank, p.Title, p.Markdown, p.Lang, p.Summary, p.AuthorID); err != nil {
+		`INSERT INTO proposals (id, workspace_id, page_id, target_slug, base_revision, min_rank, title, content_markdown, lang, change_summary, status, author_id,
+		   source_personal_page_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 'pending', ?, NULLIF(?, ''))`,
+		p.ID, s.WsID, pageID, p.Slug, base, rank, p.Title, p.Markdown, p.Lang, p.Summary, p.AuthorID, p.SourcePageID); err != nil {
 		return err
+	}
+	for _, m := range p.Media {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO media_assets (id, workspace_id, original_filename, mime_type, file_size_bytes, sha256, has_thumbnail, uploaded_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			m.ID, s.WsID, m.Filename, m.MimeType, m.Size, m.SHA256, m.HasThumbnail, m.UploadedBy); err != nil {
+			return err
+		}
 	}
 	if err := emit(ctx, tx, s, EventProposalSubmitted, p.AuthorID, p.PageID, p.ID); err != nil {
 		return err

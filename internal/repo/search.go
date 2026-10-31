@@ -17,6 +17,7 @@ type SearchQuery struct {
 	Path    string
 	Author  string
 	Since   time.Time
+	Overdue bool // estado:vencida (§4.8)
 	ByDate  bool // ordenar por última modificación en vez de por relevancia (§9.4)
 }
 
@@ -160,6 +161,34 @@ func (r *Repo) SearchMeta(ctx context.Context, s Scope, pageIDs []string) (tags,
 	return tags, authors, nil
 }
 
+// OverduePages dice cuáles de las páginas dadas tienen la revisión vencida, para contar el filtro
+// de vigencia (§9.4). Como SearchMeta, vuelve a filtrar por el Scope.
+func (r *Repo) OverduePages(ctx context.Context, s Scope, pageIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(pageIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(pageIDs)+2)
+	for _, id := range pageIDs {
+		args = append(args, id)
+	}
+	rows, err := r.db.Read.QueryContext(ctx, `WITH c(id) AS (VALUES (?)`+strings.Repeat(",(?)", len(pageIDs)-1)+`)
+		SELECT p.id FROM c CROSS JOIN pages p ON p.id = c.id
+		WHERE p.workspace_id = ? AND p.deleted_at IS NULL AND p.min_rank <= ? AND `+reviewDueSQL+` <= CURRENT_TIMESTAMP`,
+		append(args, s.WsID, s.MaxRank)...)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := collect(rows, func(row scanner) (string, error) {
+		var id string
+		return id, row.Scan(&id)
+	})
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, err
+}
+
 // searchMetaSQL arma las dos consultas de SearchMeta. Empiezan por la lista de candidatos con
 // CROSS JOIN, que en SQLite fija el orden: si no, el planificador prefiere recorrer todas las
 // páginas del área por pages_ws_rank y, con 50 000, cada consulta tardaba ~150 ms en caliente y
@@ -214,6 +243,9 @@ func searchSQL(s Scope, q SearchQuery, limit int) (string, []any) {
 	if !q.Since.IsZero() {
 		b.WriteString(` AND p.updated_at >= ?`)
 		args = append(args, q.Since.Format("2006-01-02"))
+	}
+	if q.Overdue {
+		b.WriteString(` AND ` + reviewDueSQL + ` <= CURRENT_TIMESTAMP`)
 	}
 	if q.Match != "" && !q.ByDate {
 		// Pesos bm25 de §9.1, en el orden de las columnas de pages_fts.

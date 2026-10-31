@@ -31,11 +31,12 @@
     };
   });
 
-  // Varios guardados de una página, o varias propuestas nuevas, son un solo aviso con su cuenta.
+  // Varios guardados de una página, o varias propuestas nuevas, son un solo aviso con su cuenta; el
+  // recordatorio de vigencia cuenta las páginas por revisar (§4.8).
   function text(n: Notification): string {
-    const many = n.count > 1 && (n.kind === 'page_changed' || n.kind === 'proposal_pending');
+    const many = n.count > 1 && (n.kind === 'page_changed' || n.kind === 'proposal_pending' || n.kind === 'review_reminder');
     const key = `notif.kind.${n.kind}${many ? '_many' : ''}` as Key;
-    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? '') });
+    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? ''), area: n.area.name || t('personal.title') });
   }
 
   async function read(ids: string[]) {
@@ -68,7 +69,7 @@
           <li class:unread={!n.read}>
             <a href={notificationHref(n)} onclick={() => open(n)}>
               <span class="notif-text">{text(n)}</span>
-              <span class="notif-meta">{n.area.name} · {timeAgo(n.updated_at, locale())}</span>
+              <span class="notif-meta">{n.area.name || t('personal.title')} · {timeAgo(n.updated_at, locale())}</span>
             </a>
           </li>
         {/each}

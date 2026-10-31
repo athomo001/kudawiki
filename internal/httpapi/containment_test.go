@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -28,6 +29,9 @@ type seeded struct {
 	slug       map[int]string // nivel → ruta; 0 = ruta inexistente
 	media      map[int]string // nivel → URL de su media
 	proposal   map[int]string // nivel → id de una propuesta pendiente sobre esa página (§5)
+	template   map[int]string // nivel → id de una plantilla de ese nivel (§4.9)
+	reading    map[int]string // nivel → id de una solicitud de lectura de adminTI sobre esa página (§4.14)
+	quiz       map[int]string // nivel → id de un cuestionario publicado y abierto sobre esa página (§4.16)
 	newPage    string         // propuesta de una página nueva bajo la N3: nace N3
 	trashID    string         // la unidad de la papelera, borrada por editorTI
 	trashMedia string         // URL de la media de la página borrada
@@ -47,7 +51,8 @@ func setLevel(t *testing.T, f fixture, slug string, rank int) {
 func seed(t *testing.T, f fixture) seeded {
 	t.Helper()
 	s := seeded{slug: map[int]string{0: "nivel/no-existe"}, media: map[int]string{0: "/api/w/ti/media/01ARZ3NDEKTSV4RRFFQ69G5FAV"},
-		proposal: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}}
+		proposal: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, template: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		reading: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, quiz: map[int]string{0: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}}
 	for lvl := 1; lvl <= 3; lvl++ {
 		mark, slug := leaks[lvl], []string{"", "nivel/uno", "nivel/dos", "nivel/tres"}[lvl]
 		w := f.upload("adminTI", "ti", mark+".png", pngBytes(t))
@@ -73,6 +78,49 @@ func seed(t *testing.T, f fixture) seeded {
 		s.proposal[lvl] = propose(t, f, `{"slug":"`+s.slug[lvl]+`","title":"Propuesta `+leaks[lvl]+`","markdown":"Cambio `+leaks[lvl]+`","base_revision":1}`)
 	}
 	s.newPage = propose(t, f, `{"slug":"nivel/tres/nueva","title":"Nueva `+leaks[3]+`","markdown":"Nueva `+leaks[3]+`","base_revision":0}`)
+	// Una plantilla por nivel, con la marca en el nombre y en el contenido: solo la ve quien
+	// alcanza su nivel (§4.9).
+	for lvl := 1; lvl <= 3; lvl++ {
+		body := fmt.Sprintf(`{"name":"Plantilla %s","title":"Acta %s","markdown":"Texto %s","level":%d,"tags":["%s"]}`, leaks[lvl], leaks[lvl], leaks[lvl], lvl, leaks[lvl])
+		w := f.do("adminTI", "POST", "/api/w/ti/templates", body)
+		var out struct{ ID string }
+		if json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusCreated {
+			t.Fatalf("seed template: %d %s", w.Code, w.Body)
+		}
+		s.template[lvl] = out.ID
+	}
+	// Una solicitud de lectura por nivel, de adminTI a todo el área, con la marca en el texto. Va
+	// directo a la base: la de N3 no tendría destinatarios (adminTI es el único admin) y el
+	// servicio no la dejaría crear, pero su panel igual tiene que ser solo de los admins.
+	var wsID string
+	f.db.Read.QueryRow(`SELECT id FROM workspaces WHERE slug = 'ti'`).Scan(&wsID)
+	for lvl := 1; lvl <= 3; lvl++ {
+		s.reading[lvl] = fmt.Sprintf("01READREQ%017d", lvl)
+		if _, err := f.db.Write.Exec(`INSERT INTO read_requests (id, workspace_id, page_id, revision_number, statement, audience_json, created_by)
+			SELECT ?, ?, id, current_revision, ?, '{"all":true}', ? FROM pages WHERE workspace_id = ? AND slug = ?`,
+			s.reading[lvl], wsID, "Leí "+leaks[lvl], f.users["adminTI"], wsID, s.slug[lvl]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Un cuestionario por nivel, publicado y abierto a quien lea la página, con la marca en el
+	// título y en la pregunta.
+	for lvl := 1; lvl <= 3; lvl++ {
+		w := f.do("adminTI", "POST", "/api/w/ti/quizzes", `{"page":"`+s.slug[lvl]+`","title":"Cuestionario `+leaks[lvl]+`"}`)
+		var out struct{ ID string }
+		if json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusCreated {
+			t.Fatalf("seed quiz: %d %s", w.Code, w.Body)
+		}
+		q := "/api/w/ti/quizzes/" + out.ID
+		draft := `{"open_to_readers":true,"draft":{"settings":{"max_attempts":2,"pass_percent":70,"score_policy":"best","shuffle_questions":true,
+			"shuffle_options":true,"feedback":"wrong","reveal":"after_final","multiple_scoring":"all_or_nothing"},
+			"questions":[{"id":"q1","kind":"true_false","prompt_md":"¿` + leaks[lvl] + `?","options":[{"id":"true","correct":true}]}]}}`
+		for _, c := range []struct{ method, path, body string }{{"PATCH", q, draft}, {"POST", q + "/publish", ""}} {
+			if w := f.do("adminTI", c.method, c.path, c.body); w.Code >= 300 {
+				t.Fatalf("seed quiz %s: %d %s", c.path, w.Code, w.Body)
+			}
+		}
+		s.quiz[lvl] = out.ID
+	}
 	return s
 }
 
@@ -123,6 +171,8 @@ type probe struct {
 
 func probes(s seeded, lvl int) []probe {
 	p, m, prop := s.slug[lvl], s.media[lvl], "/api/w/ti/proposals/"+s.proposal[lvl]
+	tpl := "/api/w/ti/templates/" + s.template[lvl]
+	qz := "/api/w/ti/quizzes/" + s.quiz[lvl]
 	return []probe{
 		{"/api/w/{ws}/pages/*", "GET", "/api/w/ti/pages/" + p, "", 1, true, 200},
 		{"/api/w/{ws}/history/*", "GET", "/api/w/ti/history/" + p, "", 1, true, 200},
@@ -192,12 +242,49 @@ func probes(s seeded, lvl int) []probe {
 		// para que la matriz termine sin cambios.
 		{"/api/w/{ws}/watch/*", "PUT", "/api/w/ti/watch/" + p, `{"subtree":true}`, 1, true, 204},
 		{"/api/w/{ws}/watch/*", "DELETE", "/api/w/ti/watch/" + p, "", 1, true, 204},
+		// Vigencia (§4.8): todas las páginas son de adminTI, así que solo él la verifica (verificar
+		// solo cambia la fecha). La cola la pide cualquiera: cada uno ve las suyas, el admin todas;
+		// el dueño que no alcanza el nivel de su página, en TestPageReview.
+		{"/api/w/{ws}/verify/*", "POST", "/api/w/ti/verify/" + p, "", 3, true, 204},
+		{"/api/w/{ws}/review-queue", "GET", "/api/w/ti/review-queue", "", 1, false, 200},
+		// Acuse de lectura (§4.14): pedirlo es de editores y admins sobre una página que ven (el plazo
+		// vencido da 422 justo después de buscar la página); el panel de una solicitud de adminTI, solo
+		// de los admins. Confirmar y cerrar dependen de quién es destinatario o la pidió: TestReadRequests.
+		{"/api/w/{ws}/read-requests", "GET", "/api/w/ti/read-requests", "", 2, false, 200},
+		{"/api/w/{ws}/read-requests/candidates", "GET", "/api/w/ti/read-requests/candidates?page=" + p, "", 2, true, 200},
+		{"/api/w/{ws}/read-requests", "POST", "/api/w/ti/read-requests", `{"page":"` + p + `","audience":{"all":true},"due_at":"2001-01-01T00:00:00Z"}`, 2, true, 422},
+		{"/api/w/{ws}/read-requests/{id}", "GET", "/api/w/ti/read-requests/" + s.reading[lvl], "", 3, true, 200},
+		// Cuestionarios (§4.16): cada uno existe para quien lee su página (están abiertos a los
+		// lectores); el borrador, los resultados y los intentos extra son de quien lo administra
+		// (adminTI lo creó y es admin). Lo que cambia datos (publicar, archivar, probar, empezar),
+		// en TestQuizzes. Guardar o enviar un intento que no existe: 404 para todos.
+		{"/api/w/{ws}/quizzes", "GET", "/api/w/ti/quizzes?page=" + p, "", 1, true, 200},
+		{"/api/w/{ws}/quizzes", "POST", "/api/w/ti/quizzes", `{"page":"` + p + `","title":""}`, 2, true, 422},
+		{"/api/w/{ws}/quizzes/{id}", "GET", qz, "", 1, true, 200},
+		{"/api/w/{ws}/quizzes/{id}", "PATCH", qz, `{"title":""}`, 3, true, 422},
+		{"/api/w/{ws}/quizzes/{id}", "DELETE", qz, "", 3, true, 409},
+		{"/api/w/{ws}/quizzes/{id}/my-attempts", "GET", qz + "/my-attempts", "", 1, true, 200},
+		{"/api/w/{ws}/quizzes/{id}/results", "GET", qz + "/results", "", 3, true, 200},
+		{"/api/w/{ws}/quizzes/{id}/extra-attempts", "POST", qz + "/extra-attempts", `{"user_id":"x","extra":0,"reason":""}`, 3, true, 422},
+		{"/api/w/{ws}/attempts/{id}", "PUT", "/api/w/ti/attempts/no-existe", `{"answers":{}}`, 4, false, 0},
+		{"/api/w/{ws}/attempts/{id}/submit", "POST", "/api/w/ti/attempts/no-existe/submit", `{"answers":{}}`, 4, false, 0},
+		// Publicar es del espacio personal (§7): en un área no existe para nadie (TestPersonalSpace).
+		{"/api/w/{ws}/publish/*", "POST", "/api/w/ti/publish/" + p, `{"area":"ti","to":"x"}`, 4, false, 0},
+		{"/api/w/{ws}/meta/*", "PATCH", "/api/w/ti/meta/" + p, `{"review_interval_days":-1}`, 2, false, 422},
 		// Autoguardado (§4.11): cada borrador es de quien lo escribe, y en la matriz nadie tiene
 		// uno; guardar va con datos que se rechazan. Quién ve qué borrador, en TestDrafts.
 		{"/api/w/{ws}/drafts", "GET", "/api/w/ti/drafts", "", 2, false, 200},
 		{"/api/w/{ws}/drafts/*", "GET", "/api/w/ti/drafts/" + p, "", 2, false, 404},
 		{"/api/w/{ws}/drafts/*", "PUT", "/api/w/ti/drafts/" + p, `{"title":"x","markdown":"y","base_revision":-1}`, 2, false, 422},
 		{"/api/w/{ws}/drafts/*", "DELETE", "/api/w/ti/drafts/" + p, "", 2, false, 204},
+		// Plantillas (§4.9): las usa quien crea páginas y las administra el admin; cada una, solo
+		// para quien alcanza su nivel ("page" en la matriz). Guardar va con datos que se rechazan.
+		{"/api/w/{ws}/templates", "GET", "/api/w/ti/templates", "", 2, false, 200},
+		{"/api/w/{ws}/templates/{id}/use", "GET", tpl + "/use?title=x&today=2026-10-30", "", 2, true, 200},
+		{"/api/w/{ws}/templates/{id}", "GET", tpl, "", 3, true, 200},
+		{"/api/w/{ws}/templates", "POST", "/api/w/ti/templates", `{"name":"","level":1}`, 3, false, 422},
+		{"/api/w/{ws}/templates/{id}", "PUT", tpl, `{"name":"","level":1}`, 3, true, 422},
+		{"/api/w/{ws}/templates/{id}", "DELETE", "/api/w/ti/templates/no-existe", "", 3, false, 404},
 	}
 }
 
@@ -255,7 +342,7 @@ func TestContainmentMatrix(t *testing.T) {
 func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	f := newFixture(t)
 	covered := map[string]bool{}
-	for _, p := range probes(seeded{slug: map[int]string{1: "x"}, media: map[int]string{1: "x"}, proposal: map[int]string{1: "x"}}, 1) {
+	for _, p := range probes(seeded{slug: map[int]string{1: "x"}, media: map[int]string{1: "x"}, proposal: map[int]string{1: "x"}, template: map[int]string{1: "x"}, quiz: map[int]string{1: "x"}}, 1) {
 		covered[p.method+" "+p.route] = true
 	}
 	// Rutas fuera de un área: sin sesión, solo de superadmin o de la persona misma. Se prueban
@@ -265,7 +352,9 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// sin sesión: TestNotifications, TestNotificationLevels y TestUnsubscribeRoute. Borrar
 	// cambia los datos de verdad: tiene su propia matriz en TestDeleteContainment. La auditoría
 	// del superadmin se prueba en TestAuditViews. El aviso de edición es un flujo que no termina:
-	// tiene su propia matriz en TestPresence.
+	// tiene su propia matriz en TestPresence. Las plantillas globales son del superadmin:
+	// TestGlobalTemplates. El inicio personal cruza las áreas de quien pregunta: TestPersonalHome. Publicar,
+	// archivar, probar y empezar un cuestionario cambian datos: TestQuizzes.
 	elsewhere := []string{
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
@@ -280,6 +369,11 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		"POST /api/auth/password-reset", "POST /api/auth/password-reset/complete", "POST /api/admin/users/{id}/password-reset",
 		"GET /api/me/notifications", "POST /api/me/notifications/read", "GET /api/me/notification-prefs", "PUT /api/me/notification-prefs",
 		"GET /unsubscribe", "POST /unsubscribe", "GET /api/w/{ws}/presence/*",
+		"GET /api/me/watching", "GET /api/me/review-queue", "GET /api/me/read-requests",
+		"POST /api/w/{ws}/read-requests/{id}/close", "POST /api/w/{ws}/read-requests/{id}/ack",
+		"GET /api/me/quizzes", "POST /api/w/{ws}/quizzes/{id}/publish", "POST /api/w/{ws}/quizzes/{id}/archive",
+		"POST /api/w/{ws}/quizzes/{id}/preview", "POST /api/w/{ws}/quizzes/{id}/attempts",
+		"GET /api/admin/templates", "POST /api/admin/templates", "GET /api/admin/templates/{id}", "PUT /api/admin/templates/{id}", "DELETE /api/admin/templates/{id}",
 	}
 	err := chi.Walk(f.h.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		key := method + " " + route

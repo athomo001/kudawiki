@@ -46,7 +46,7 @@ const (
 
 // Parse traduce la caja de búsqueda (§9.3) a una consulta para repo. Palabras: en cualquier
 // campo, con prefijo, y por su raíz en español o inglés. "Frase" exacta, -palabra excluye,
-// OR une, y los filtros tag:, path:, autor:/author:, desde:/since: acotan.
+// OR une, y los filtros tag:, path:, autor:/author:, desde:/since: y estado:/status: acotan.
 func Parse(input string) (repo.SearchQuery, error) {
 	var q repo.SearchQuery
 	var pos, neg []string
@@ -87,7 +87,7 @@ func Parse(input string) (repo.SearchQuery, error) {
 	if len(pos) == 0 {
 		// Solo filtros (tag:vpn) es una búsqueda válida. Sin términos positivos FTS5 no puede
 		// excluir, así que las exclusiones solas no buscan nada.
-		if len(q.Tags) == 0 && q.Path == "" && q.Author == "" && q.Since.IsZero() {
+		if len(q.Tags) == 0 && q.Path == "" && q.Author == "" && q.Since.IsZero() && !q.Overdue {
 			return repo.SearchQuery{}, ErrEmptyQuery
 		}
 		return q, nil
@@ -171,8 +171,14 @@ func applyFilter(q *repo.SearchQuery, key, val string) bool {
 			return false
 		}
 		q.Since = t
+	case "estado", "status":
+		// Por ahora el único estado es la vigencia vencida (§4.8).
+		if v := strings.ToLower(val); v != "vencida" && v != "overdue" {
+			return false
+		}
+		q.Overdue = true
 	default:
-		return false // estado:/status: llega con la vigencia (F5)
+		return false
 	}
 	return true
 }

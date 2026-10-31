@@ -16,6 +16,11 @@
   let keep = $state<'all' | 'last' | 'days'>('all');
   let keepLast = $state(50);
   let keepDays = $state(365);
+  // Vigencia (§4.8): apagada por defecto (§19.11); al encenderla se propone un año.
+  let review = $state(false);
+  let reviewDays = $state(365);
+  // Cuestionarios (§4.16.7): encendidos por defecto.
+  let quizzes = $state(true);
   let overrides = $state<ApprovalOverride[]>([]);
   let prefix = $state('');
   let prefixMode = $state<Mode>('required');
@@ -36,6 +41,8 @@
       require_change_summary: boolean;
       keep_last: number;
       keep_days: number;
+      review_days: number;
+      quizzes_enabled: boolean;
     };
     api<Settings>('GET', `${base}/settings`)
       .then((s) => {
@@ -46,6 +53,9 @@
         keep = s.keep_last ? 'last' : s.keep_days ? 'days' : 'all';
         keepLast = s.keep_last || keepLast;
         keepDays = s.keep_days || keepDays;
+        review = s.review_days > 0;
+        reviewDays = s.review_days || reviewDays;
+        quizzes = s.quizzes_enabled;
       })
       .catch((e) => (error = errorText(codeOf(e))));
     loadOverrides().catch((e) => (overrideError = errorText(codeOf(e))));
@@ -65,6 +75,8 @@
         require_change_summary: requireSummary,
         keep_last: keep === 'last' ? keepLast : 0,
         keep_days: keep === 'days' ? keepDays : 0,
+        review_days: review ? reviewDays : 0,
+        quizzes_enabled: quizzes,
       });
       saved = true;
       onchanged();
@@ -134,6 +146,26 @@
       {t('settings.keep_days_after')}
     </label>
     <small class="muted">{t('settings.keep_hint')}</small>
+  </fieldset>
+
+  <fieldset class="stack">
+    <legend>{t('settings.review')}</legend>
+    <label class="keep-row">
+      <input type="checkbox" bind:checked={review} />
+      {t('settings.review_before')}
+      <input type="number" min="1" max="3650" required={review} disabled={!review} aria-label={t('settings.review_n')} bind:value={reviewDays} />
+      {t('settings.review_after')}
+    </label>
+    <small class="muted">{t('settings.review_hint')}</small>
+  </fieldset>
+
+  <fieldset class="stack">
+    <legend>{t('settings.quizzes')}</legend>
+    <label class="check">
+      <input type="checkbox" bind:checked={quizzes} />
+      {t('settings.quizzes_on')}
+    </label>
+    <small class="muted">{t('settings.quizzes_hint')}</small>
   </fieldset>
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}

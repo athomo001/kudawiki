@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
@@ -21,12 +22,16 @@ func (a api) pageRoutes(r chi.Router) {
 	r.Get("/diff/*", a.diff)
 	r.Get("/media/{id}", a.getMedia)
 	r.Get("/backlinks/*", a.backlinks)
-	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/access/*", a.access)
+	r.With(a.areaOnly, a.requireRank(repo.RoleRank("admin"))).Get("/access/*", a.access)
 	r.Get("/tags", a.tags)
 	r.Get("/tags/{tag}", a.taggedPages)
 	// Seguir una página: lo puede hacer cualquiera que la lea (§12.1).
 	r.Put("/watch/*", a.watch)
 	r.Delete("/watch/*", a.unwatch)
+	// Vigencia (§4.8): la verifica su dueño o un admin, aunque el dueño ya no pueda editar en el
+	// área (para cualquier otro es el 404 uniforme). La cola: las propias, o todas para un admin.
+	r.Post("/verify/*", a.verify)
+	r.Get("/review-queue", a.reviewQueue)
 	r.Get("/search", a.search)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/search-misses", a.searchMisses)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/audit", a.areaAudit)
@@ -113,15 +118,69 @@ func (a api) getPage(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	sent, err := a.sentJSON(r, p)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	reads, err := a.Reading.Opened(r.Context(), scopeOf(r), currentUser(r).ID, p)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	// Abrirla marca como leídos sus avisos de cambios (§12.1). Si falla, la página se lee igual.
 	if err := a.Notify.PageOpened(r.Context(), currentUser(r).ID, p.ID); err != nil {
 		a.Log.Error("mark notifications read", "err", err)
 	}
-	a.json(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"slug": p.Slug, "title": p.Title, "markdown": p.Markdown, "html": html, "toc": toc, "tags": tags, "lang": p.Lang, "level": p.MinRank,
 		"revision": p.Revision, "updated_by": p.UpdatedBy, "updated_at": p.UpdatedAt, "description": p.Description, "icon": p.Icon,
-		"watch": watch.Mode, "watch_via": watch.Via,
-	})
+		"watch": watch.Mode, "watch_via": watch.Via, "review": reviewJSON(r, p), "reading": myReadsJSON(reads),
+	}
+	if sent != nil {
+		out["sent"] = sent
+	}
+	a.json(w, http.StatusOK, out)
+}
+
+// reviewJSON es la vigencia de la página (§4.8): su dueño, el intervalo (el suyo y el del área),
+// la última verificación y, si vence, cuándo. can_review: quien pregunta es el dueño o un admin.
+func reviewJSON(r *http.Request, p repo.Page) map[string]any {
+	out := map[string]any{"owner_id": p.OwnerID, "owner": p.Owner, "interval_days": p.ReviewDays, "area_interval_days": p.AreaReviewDays,
+		"verified_at": p.VerifiedAt, "verified_by": p.VerifiedBy, "due_at": nil, "overdue": false,
+		"can_review": p.OwnerID == currentUser(r).ID || scopeOf(r).MaxRank >= 3}
+	if due, ok := p.ReviewDue(); ok {
+		out["due_at"], out["overdue"] = due, !time.Now().Before(due)
+	}
+	return out
+}
+
+func (a api) verify(w http.ResponseWriter, r *http.Request) {
+	if err := a.Wiki.Verify(r.Context(), scopeOf(r), currentUser(r).ID, chi.URLParam(r, "*")); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// reviewQueue son las páginas vencidas: todas las del área para su admin, las propias para los
+// demás ("Mis páginas por revisar", §4.8).
+func (a api) reviewQueue(w http.ResponseWriter, r *http.Request) {
+	owner := currentUser(r).ID
+	if scopeOf(r).MaxRank >= 3 {
+		owner = ""
+	}
+	items, err := a.Read.ReviewQueue(r.Context(), scopeOf(r), owner, time.Now())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	out := make([]map[string]any, len(items))
+	for i, it := range items {
+		out[i] = map[string]any{"slug": it.Slug, "title": it.Title, "level": it.MinRank, "owner": it.Owner,
+			"verified_at": it.VerifiedAt, "due_at": it.DueAt}
+	}
+	a.json(w, http.StatusOK, out)
 }
 
 func (a api) backlinks(w http.ResponseWriter, r *http.Request) {
@@ -164,14 +223,16 @@ func (a api) refs(w http.ResponseWriter, r *http.Request, refs []repo.PageRef, e
 	a.json(w, http.StatusOK, out)
 }
 
-// setMeta cambia los metadatos que vienen en el cuerpo: etiquetas, nivel, descripción e ícono
-// (§4.6, §3.2, §4.1).
+// setMeta cambia los metadatos que vienen en el cuerpo: etiquetas, nivel, descripción, ícono,
+// dueño e intervalo de revisión (§4.6, §3.2, §4.1, §4.8). El intervalo 0 es "el del área".
 func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Tags        *[]string `json:"tags"`
 		Level       *int      `json:"level"`
 		Description *string   `json:"description"`
 		Icon        *string   `json:"icon"`
+		OwnerID     *string   `json:"owner_id"`
+		ReviewDays  *int      `json:"review_interval_days"`
 	}
 	if !a.decode(w, r, &in) {
 		return
@@ -191,6 +252,12 @@ func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Description != nil || in.Icon != nil {
 		if err := a.Wiki.SetInfo(r.Context(), scopeOf(r), slug, in.Description, in.Icon); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	if in.OwnerID != nil || in.ReviewDays != nil {
+		if err := a.Wiki.SetReview(r.Context(), scopeOf(r), currentUser(r).ID, slug, in.OwnerID, in.ReviewDays); err != nil {
 			a.fail(w, r, err)
 			return
 		}
@@ -273,12 +340,13 @@ func (a api) savePage(w http.ResponseWriter, r *http.Request) {
 		Lang          string `json:"lang"`
 		BaseRevision  int    `json:"base_revision"` // 0 = crear
 		ChangeSummary string `json:"change_summary"`
+		ReviewDays    int    `json:"review_interval_days"` // solo al crear: el de la plantilla (§4.8)
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
 	err := a.Wiki.Save(r.Context(), scopeOf(r), currentUser(r).ID, in.BaseRevision, repo.PageWrite{
-		Slug: chi.URLParam(r, "*"), Title: in.Title, Markdown: in.Markdown, Lang: in.Lang, Summary: in.ChangeSummary,
+		Slug: chi.URLParam(r, "*"), Title: in.Title, Markdown: in.Markdown, Lang: in.Lang, Summary: in.ChangeSummary, ReviewDays: in.ReviewDays,
 	})
 	if errors.Is(err, wiki.ErrConflict) {
 		a.conflict(w, r, in.Markdown)

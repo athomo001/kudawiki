@@ -388,6 +388,34 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .article-badges { margin: 0 0 0.625rem; font-size: 0.8125rem; color: var(--kw-text-muted); }
 .article-badges.level-2 { color: var(--kw-level-n2); font-weight: 600; }
 .article-badges.level-3 { color: var(--kw-level-n3); font-weight: 600; }
+/* Vigencia (§4.8): sello junto al nivel, y el aviso de vencida, fuerte para el dueño y discreto para los demás. */
+.review-badge { margin-left: 0.75rem; color: var(--kw-state-success); font-weight: 400; }
+.review-badge.overdue { color: var(--kw-state-warning); font-weight: 600; }
+.review-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0 0 1.25rem; padding-left: 0.75rem; border-left: 3px solid var(--kw-line); color: var(--kw-text-muted); font-size: 0.875rem; }
+.review-notice p { margin: 0; }
+.review-notice.strong { border-left-color: var(--kw-state-warning); color: var(--kw-text); font-size: 0.9375rem; }
+/* Espacio personal (§7): en qué quedó lo enviado desde el borrador, y el aviso del modo auditoría. */
+.sent-list { list-style: none; display: grid; gap: 0.5rem; margin: 0 0 1.25rem; padding: 0 0 0 0.75rem; border-left: 3px solid var(--kw-state-info); font-size: 0.9375rem; }
+.sent-list .sent-merged { color: var(--kw-state-success); }
+.sent-list .sent-rejected { color: var(--kw-state-warning); }
+/* Acuse de lectura (§4.14): el aviso arriba, la confirmación al final de la página y el diálogo. */
+.read-notice { margin: 0 0 1.25rem; padding-left: 0.75rem; border-left: 3px solid var(--kw-state-info); font-size: 0.9375rem; }
+.read-notice p { margin: 0; }
+.read-confirm { display: grid; gap: 0.75rem; justify-items: start; margin: 2rem 0 0; padding: 1rem 0 0; border-top: 1px solid var(--kw-line); }
+.read-confirm p { margin: 0; }
+.audience { display: grid; gap: 0.375rem; margin: 0; padding: 0; border: 0; }
+.audience legend { padding: 0; margin-bottom: 0.25rem; font-weight: 600; font-size: 0.875rem; }
+.audience label { display: flex; gap: 0.5rem; align-items: baseline; }
+.audience .indent { display: grid; gap: 0.25rem; padding-left: 1.5rem; }
+.audience .pick-list { max-height: 12rem; overflow-y: auto; }
+.actions-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 1rem; }
+.actions-row a.secondary { display: inline-flex; align-items: center; text-decoration: none; }
+.read-status-confirmed { color: var(--kw-state-success); }
+.read-status-overdue { color: var(--kw-state-warning); font-weight: 600; }
+/* Inicio personal (§15, B5): listas de una línea con su área y cuándo. */
+.me-list { list-style: none; display: grid; gap: 0.625rem; margin: 0; padding: 0; }
+.me-list small { display: block; }
+.audit-banner { margin: 0; padding: 0.625rem 2rem; border-bottom: 1px solid var(--kw-line); color: var(--kw-state-warning); font-weight: 600; }
 .page-info { flex: 1 0 15rem; max-width: 17.5rem; padding: 2.25rem 1.5rem 2rem 0.5rem; font-size: 0.875rem; }
 .page-info > * + * { margin-top: 1.75rem; }
 .page-info ul { list-style: none; display: grid; gap: 0.4375rem; margin: 0; padding: 0; }
@@ -628,6 +656,25 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 .file-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
 .file-actions .secondary, .file-actions .danger-btn { margin: 0; padding: 0.25rem 0.75rem; font-size: 0.8125rem; }
 .keep-row input[type='number'] { width: 6rem; margin: 0 0.25rem; }
+/* Plantillas (§4.9): la lista como las excepciones por carpeta, y el contenido con CodeMirror. */
+.template-form { max-width: 56rem; }
+.template-form label, .label-text { display: grid; gap: 0.25rem; font-weight: 600; font-size: 0.875rem; }
+.template-form input, .template-form select { font-weight: 400; }
+.template-list { margin: 0.75rem 0 0; padding: 0; list-style: none; }
+.template-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1rem; padding: 0.625rem 0; border-bottom: 1px solid var(--kw-line); }
+.template-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; flex: 1; min-width: 12rem; }
+.template-pick li { gap: 0.25rem 0.75rem; }
+.template-pick .link { font-weight: 600; }
+.template-row { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+.template-tags { flex: 1; min-width: 14rem; }
+.template-content { display: grid; gap: 0.375rem; }
+.template-content p { margin: 0; }
+.template-editor { border: 1px solid var(--kw-border); border-radius: 6px; overflow: hidden; }
+.template-editor .cm-editor { min-height: 16rem; max-height: 60vh; font-size: 0.84375rem; }
+.template-editor .cm-editor.cm-focused { outline: 2px solid var(--kw-focus-ring); }
+.template-editor .cm-scroller { min-height: 16rem; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.form-actions .primary { margin-top: 0; }
 @media (prefers-color-scheme: dark) {
   .proposal-row[aria-current='true'] { background: #15233a; }
   .proposal-note { background: #33250b; color: #fbe3b3; }
@@ -651,7 +698,7 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
   .article, .view { padding: 1.5rem 1.25rem 3rem; }
   .article { flex-basis: 100%; }
   .page-info { padding: 0 1.25rem 2rem; }
-  .crumbs, .error.banner, .site-footer { padding-inline: 1.25rem; }
+  .crumbs, .error.banner, .audit-banner, .site-footer { padding-inline: 1.25rem; }
   .proposal-list { max-width: none; border-right: 0; border-bottom: 1px solid var(--kw-line); }
   /* Con una propuesta abierta, el detalle va primero: es lo que se vino a ver. */
   .proposals.has-detail .proposal-list { order: 2; }
@@ -955,3 +1002,37 @@ button.picker-toggle:hover { background: var(--kw-hover); }
 .md-guide pre { margin: 0; font-family: var(--kw-font-mono); font-size: 0.8125rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .md-keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.375rem 1rem; margin: 0; }
 .md-keys dd { margin: 0; }
+/* Cuestionarios (§4.16): el bloque al final de la página, el intento, la corrección y el editor. */
+.quiz-section { margin: 2rem 0 0; padding: 1rem 0 0; border-top: 1px solid var(--kw-line); }
+.quiz-section h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+.read-confirm a.primary { display: inline-flex; align-items: center; text-decoration: none; }
+.quiz-attempt { display: grid; gap: 1.5rem; max-width: 46rem; }
+.quiz-attempt > .primary { justify-self: start; }
+.quiz-status { margin: 0; font-size: 0.875rem; }
+.quiz-late { color: var(--kw-state-warning); }
+.quiz-question, .quiz-edit { display: grid; gap: 0.5rem; margin: 0; padding: 0 0 1.25rem; border: 0; border-bottom: 1px solid var(--kw-line); }
+.quiz-question legend, .quiz-edit legend { padding: 0; font-weight: 600; font-size: 0.875rem; color: var(--kw-text-muted); }
+.quiz-prompt > :first-child { margin-top: 0; }
+.quiz-prompt > :last-child { margin-bottom: 0; }
+.quiz-option { display: flex; gap: 0.5rem; align-items: baseline; }
+.quiz-passed { color: var(--kw-state-success); }
+.quiz-failed { color: var(--kw-state-warning); }
+.quiz-result { margin: 0 0 1.5rem; }
+.quiz-result > p { margin: 0 0 0.375rem; }
+.quiz-review { display: grid; gap: 1rem; margin: 1rem 0 0; padding-left: 1.25rem; }
+.quiz-review li { display: grid; gap: 0.25rem; }
+.quiz-review .quiz-mark { font-weight: 700; color: var(--kw-state-success); }
+.quiz-review .quiz-wrong .quiz-mark { color: var(--kw-state-warning); }
+.quiz-explanation { padding-left: 0.75rem; border-left: 3px solid var(--kw-state-info); font-size: 0.9375rem; }
+.quiz-history { list-style: none; display: grid; gap: 0.5rem; margin: 0; padding: 0; }
+.quiz-history summary { cursor: pointer; }
+.quiz-panel { margin: 1.25rem 0; display: grid; gap: 1rem; max-width: 46rem; }
+.quiz-options { display: grid; gap: 0.375rem; }
+.quiz-option-edit { display: flex; gap: 0.5rem; align-items: center; }
+.quiz-option-edit input[type='text'] { flex: 1; min-width: 0; }
+.quiz-row { display: flex; flex-wrap: wrap; gap: 1rem; }
+.quiz-row .field { flex: 1 1 10rem; }
+.quiz-settings { max-width: 28rem; }
+.quiz-actions { position: sticky; bottom: 0; padding: 0.75rem 0; background: var(--kw-bg); border-top: 1px solid var(--kw-line); }
+.read-status-passed { color: var(--kw-state-success); }
+.read-status-failed_out { color: var(--kw-state-warning); font-weight: 600; }

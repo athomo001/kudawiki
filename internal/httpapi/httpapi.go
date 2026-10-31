@@ -27,8 +27,11 @@ import (
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/personal"
 	"github.com/athomo001/kudawiki/internal/presence"
 	"github.com/athomo001/kudawiki/internal/proposals"
+	"github.com/athomo001/kudawiki/internal/quiz"
+	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -70,12 +73,18 @@ type wikiService interface {
 	Revert(ctx context.Context, sc repo.Scope, actorID, slug string, n, base int) error
 	SetTags(ctx context.Context, sc repo.Scope, slug string, tags []string) error
 	SetInfo(ctx context.Context, sc repo.Scope, slug string, description, icon *string) error
+	Verify(ctx context.Context, sc repo.Scope, actorID, slug string) error
+	SetReview(ctx context.Context, sc repo.Scope, actorID, slug string, ownerID *string, days *int) error
 	Move(ctx context.Context, sc repo.Scope, actorID, from, to string) error
 	SetLevel(ctx context.Context, sc repo.Scope, actorID, slug string, level int) error
 	Delete(ctx context.Context, sc repo.Scope, actorID, slug string) error
 	Restore(ctx context.Context, sc repo.Scope, actorID, id string) error
 	Announce(ctx context.Context, sc repo.Scope, actorID, title, body string) (string, error)
 	DeleteAnnouncement(ctx context.Context, sc repo.Scope, actorID, id string) error
+	// Plantillas (§4.9).
+	SaveTemplate(ctx context.Context, sc repo.Scope, actorID string, t repo.Template) (string, error)
+	DeleteTemplate(ctx context.Context, sc repo.Scope, id string) error
+	UseTemplate(ctx context.Context, sc repo.Scope, id, title, author string, now time.Time) (repo.Template, error)
 	// Quién publica directo y las excepciones por subárbol (§5.1, §5.2.1).
 	MustPropose(ctx context.Context, sc repo.Scope, slug string) (bool, error)
 	ApprovalOverrides(ctx context.Context, sc repo.Scope) ([]repo.ApprovalOverride, error)
@@ -102,6 +111,43 @@ type mediaService interface {
 	Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.PageRef, error)
 }
 
+// personalService es el espacio personal (§7).
+type personalService interface {
+	Of(ctx context.Context, userID string) (repo.Workspace, error)
+	Audit(ctx context.Context, u repo.User, slug, path string) (repo.Workspace, error)
+	Publish(ctx context.Context, actorID string, from, area personal.Space, slug, to string) (personal.Result, error)
+}
+
+// readingService es el acuse de lectura (§4.14).
+type readingService interface {
+	Create(ctx context.Context, sc repo.Scope, actorID string, in reading.Input) (string, error)
+	Candidates(ctx context.Context, sc repo.Scope, actorID, slug string) ([]repo.Member, error)
+	List(ctx context.Context, sc repo.Scope, actorID string) ([]reading.Summary, error)
+	Get(ctx context.Context, sc repo.Scope, actorID, id string) (reading.Detail, error)
+	Close(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Opened(ctx context.Context, sc repo.Scope, userID string, page repo.Page) ([]repo.MyRead, error)
+	Ack(ctx context.Context, sc repo.Scope, userID, id string, revision int) error
+}
+
+// quizService son los cuestionarios (§4.16).
+type quizService interface {
+	Create(ctx context.Context, sc repo.Scope, actorID, slug, title string) (string, error)
+	List(ctx context.Context, sc repo.Scope, actorID, slug string) ([]quiz.Listed, error)
+	Get(ctx context.Context, sc repo.Scope, actorID, id string) (quiz.View, error)
+	Update(ctx context.Context, sc repo.Scope, actorID, id string, p quiz.Patch) (quiz.Draft, error)
+	Publish(ctx context.Context, sc repo.Scope, actorID, id string) (int, error)
+	Archive(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Delete(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Preview(ctx context.Context, sc repo.Scope, actorID, id string) (quiz.AttemptView, error)
+	Start(ctx context.Context, sc repo.Scope, actorID, id string) (quiz.AttemptView, error)
+	Save(ctx context.Context, sc repo.Scope, actorID, attemptID string, answers map[string][]string) error
+	Submit(ctx context.Context, sc repo.Scope, actorID, attemptID string, answers map[string][]string) (quiz.AttemptView, error)
+	MyAttempts(ctx context.Context, sc repo.Scope, actorID, id string) ([]quiz.AttemptView, error)
+	Results(ctx context.Context, sc repo.Scope, actorID, id string) (quiz.Results, error)
+	ExportResults(ctx context.Context, sc repo.Scope, actorID, id string) (quiz.Results, error)
+	GrantExtra(ctx context.Context, sc repo.Scope, actorID, id, userID, requestID string, extra int, reason string) error
+}
+
 // reader son las consultas sin reglas de negocio que usan los handlers.
 type reader interface {
 	ListUsers(ctx context.Context) ([]repo.User, error)
@@ -122,6 +168,7 @@ type reader interface {
 	Search(ctx context.Context, s repo.Scope, q repo.SearchQuery, limit int) ([]repo.SearchHit, error)
 	Snippets(ctx context.Context, s repo.Scope, q repo.SearchQuery, hits []repo.SearchHit) error
 	SearchMeta(ctx context.Context, s repo.Scope, pageIDs []string) (tags, authors map[string][]string, err error)
+	OverduePages(ctx context.Context, s repo.Scope, pageIDs []string) (map[string]bool, error)
 	SuggestTitle(ctx context.Context, s repo.Scope, words []string) (string, error)
 	RecordMiss(ctx context.Context, s repo.Scope, query string) error
 	Misses(ctx context.Context, s repo.Scope) ([]repo.Miss, error)
@@ -129,6 +176,16 @@ type reader interface {
 	// Inicio del área (§4.17).
 	Announcements(ctx context.Context, s repo.Scope, limit int) ([]repo.Announcement, error)
 	AreaStats(ctx context.Context, s repo.Scope, limit int) (repo.AreaStats, error)
+	Templates(ctx context.Context, s repo.Scope) ([]repo.Template, error)
+	ReviewQueue(ctx context.Context, s repo.Scope, ownerID string, now time.Time) ([]repo.ReviewItem, error)
+	SentProposals(ctx context.Context, authorID, pageID string) ([]repo.SentProposal, error)
+	// Inicio personal (§15, B5): de todas las áreas de quien pregunta.
+	WatchedPages(ctx context.Context, userID string, limit int) ([]repo.WatchedPage, error)
+	OwnReviews(ctx context.Context, userID string, now time.Time) ([]repo.OwnReview, error)
+	PendingReads(ctx context.Context, userID string) ([]repo.PendingRead, error)
+	MyQuizAttempts(ctx context.Context, userID string) ([]repo.MyQuizAttempt, error)
+	ReviewProblems(ctx context.Context, s repo.Scope, now time.Time) ([]repo.ReviewProblem, error)
+	TemplateByID(ctx context.Context, s repo.Scope, id string) (repo.Template, error)
 	RecordView(ctx context.Context, s repo.Scope, slug string) error
 	AuditEvents(ctx context.Context, f repo.AuditFilter) ([]repo.AuditEntry, error)
 	AreaAudit(ctx context.Context, s repo.Scope, f repo.AuditFilter) ([]repo.AuditEntry, error)
@@ -197,6 +254,9 @@ type Deps struct {
 	Mail       mailService
 	Notify     notificationService
 	Drafts     draftStore
+	Personal   personalService
+	Reading    readingService
+	Quizzes    quizService
 	Presence   *presence.Hub
 	Read       reader
 	DB         readiness
@@ -253,6 +313,7 @@ func New(d Deps) http.Handler {
 			r.Patch("/me", a.setPreferences)
 			a.profileRoutes(r)
 			a.notificationRoutes(r)
+			a.homeRoutes(r)
 			r.Route("/admin", a.adminRoutes)
 			r.Route("/w/{ws}", a.areaRoutes)
 		})
@@ -396,10 +457,21 @@ var domainErrors = map[error]int{
 	wiki.ErrInvalidLevel:         http.StatusUnprocessableEntity,
 	wiki.ErrLevelBelowParent:     http.StatusUnprocessableEntity,
 	wiki.ErrInvalidAnnouncement:  http.StatusUnprocessableEntity,
+	wiki.ErrInvalidTemplate:      http.StatusUnprocessableEntity,
+	wiki.ErrInvalidReview:        http.StatusUnprocessableEntity,
 	wiki.ErrApprovalRequired:     http.StatusConflict,
 	wiki.ErrInvalidOverride:      http.StatusUnprocessableEntity,
 	wiki.ErrMergeConflict:        http.StatusConflict,
 	proposals.ErrNoChanges:       http.StatusUnprocessableEntity,
+	reading.ErrInvalidAudience:   http.StatusUnprocessableEntity,
+	reading.ErrInvalidRequest:    http.StatusUnprocessableEntity,
+	reading.ErrPageChanged:       http.StatusConflict,
+	reading.ErrQuizRequired:      http.StatusConflict,
+	quiz.ErrInvalidQuiz:          http.StatusUnprocessableEntity,
+	quiz.ErrNoAttempts:           http.StatusConflict,
+	quiz.ErrCooldown:             http.StatusConflict,
+	quiz.ErrAttemptClosed:        http.StatusConflict,
+	quiz.ErrQuizPublished:        http.StatusConflict,
 	proposals.ErrCommentRequired: http.StatusUnprocessableEntity,
 	proposals.ErrClosed:          http.StatusConflict,
 	proposals.ErrSelfApproval:    http.StatusConflict,

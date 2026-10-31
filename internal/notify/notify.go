@@ -26,6 +26,15 @@ const (
 	batchSize  = 100
 	digestHour = 8 // el resumen diario sale a las 8, hora local del servidor
 	admin      = 3
+	// La vigencia se mide en días: revisarla una vez por hora basta, y el barrido recorre todas
+	// las páginas vencidas de la instalación.
+	reviewEvery = time.Hour
+	// Mientras una página siga vencida, su dueño recibe un recordatorio por semana (§4.8).
+	reviewRemindEvery = 7 * 24 * time.Hour
+	// Las solicitudes de lectura (§4.14) se avisan al minuto de crearse, y se recuerdan a quien no
+	// confirmó cuando faltan dos días para el plazo.
+	readEvery      = time.Minute
+	readRemindLead = 48 * time.Hour
 )
 
 // ErrInvalidPrefs: una categoría o un valor de correo que no existe.
@@ -40,6 +49,10 @@ type store interface {
 	ApplyEvent(ctx context.Context, e repo.NotificationEvent, ns []repo.NewNotification) error
 	DueReminders(ctx context.Context, before time.Time) ([]repo.DueReminder, error)
 	ApplyReminder(ctx context.Context, d repo.DueReminder, ns []repo.NewNotification) error
+	DueReviews(ctx context.Context, now time.Time) ([]repo.DueReview, error)
+	ApplyReviewNotices(ctx context.Context, wsID string, pageIDs []string, ns []repo.NewNotification, at time.Time) error
+	ReadNotices(ctx context.Context, now time.Time, window time.Duration) ([]repo.ReadNotice, error)
+	ApplyReadNotice(ctx context.Context, n repo.ReadNotice, ns []repo.NewNotification, at time.Time) error
 	DueNotificationEmails(ctx context.Context, before time.Time, daily bool, limit int) ([]repo.NotificationEmail, error)
 	MarkEmailed(ctx context.Context, ids []string, at time.Time) error
 	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
@@ -81,6 +94,8 @@ type Service struct {
 	unsubKey    []byte
 	now         func() time.Time
 	lastDigest  time.Time
+	lastReview  time.Time
+	lastRead    time.Time
 }
 
 // NewService deriva de la MASTER_KEY la llave de los enlaces de baja: es propia (no la de las
@@ -114,6 +129,12 @@ func (s *Service) Pass(ctx context.Context) error {
 		return err
 	}
 	if err := s.remind(ctx); err != nil {
+		return err
+	}
+	if err := s.reviews(ctx); err != nil {
+		return err
+	}
+	if err := s.reads(ctx); err != nil {
 		return err
 	}
 	if err := s.email(ctx); err != nil {
@@ -313,6 +334,93 @@ func (s *Service) remind(ctx context.Context) error {
 	return nil
 }
 
+// reviews avisa a cada dueño de sus páginas vencidas (§4.8): una vez por página al vencer
+// (review_due) y, mientras sigan vencidas, un recordatorio por semana que las cuenta todas
+// (review_reminder), en un solo aviso por área para no mandar un correo por página. Al
+// recordar se anotan todas, así las páginas de una persona quedan con el mismo ritmo.
+func (s *Service) reviews(ctx context.Context) error {
+	now := s.now()
+	if now.Sub(s.lastReview) < reviewEvery {
+		return nil
+	}
+	due, err := s.store.DueReviews(ctx, now)
+	if err != nil {
+		return err
+	}
+	// DueReviews viene ordenado por área y dueño: cada tramo es una persona en un área.
+	for start := 0; start < len(due); {
+		end := start
+		for end < len(due) && due[end].WsID == due[start].WsID && due[end].OwnerID == due[start].OwnerID {
+			end++
+		}
+		if err := s.ownerReviews(ctx, due[start:end], now); err != nil {
+			return err
+		}
+		start = end
+	}
+	s.lastReview = now
+	return nil
+}
+
+func (s *Service) ownerReviews(ctx context.Context, pages []repo.DueReview, now time.Time) error {
+	var ns []repo.NewNotification
+	var touched, noticed []string
+	remind := false
+	for _, d := range pages {
+		if !d.Noticed {
+			ns = append(ns, repo.NewNotification{UserID: d.OwnerID, Kind: "review_due", Category: "review", PageID: d.PageID,
+				GroupKey: "review:" + d.PageID, Payload: payload{Title: d.Title, Days: int(now.Sub(d.DueAt).Hours() / 24)}.json()})
+			touched = append(touched, d.PageID)
+			continue
+		}
+		noticed = append(noticed, d.PageID)
+		remind = remind || now.Sub(d.NoticedAt) >= reviewRemindEvery
+	}
+	if remind {
+		// Sin GroupKey: cada semana es un aviso nuevo, con su correo.
+		ns = append(ns, repo.NewNotification{UserID: pages[0].OwnerID, Kind: "review_reminder", Category: "review", Count: len(noticed)})
+		touched = append(touched, noticed...)
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	return s.store.ApplyReviewNotices(ctx, pages[0].WsID, touched, ns, now)
+}
+
+// reads avisa a los destinatarios de cada solicitud de lectura nueva (read_request) y, cerca del
+// plazo, recuerda a quienes todavía no confirmaron (read_reminder). Un solo aviso sin leer por
+// persona y solicitud: el recordatorio reemplaza al primero si sigue ahí (§4.14).
+func (s *Service) reads(ctx context.Context) error {
+	now := s.now()
+	if now.Sub(s.lastRead) < readEvery {
+		return nil
+	}
+	list, err := s.store.ReadNotices(ctx, now, readRemindLead)
+	if err != nil {
+		return err
+	}
+	for _, n := range list {
+		// Con cuestionario, el aviso dice que hay que hacerlo (§4.16, §12.1).
+		kind, remind := "read_request", "read_reminder"
+		if n.Quiz {
+			kind, remind = "quiz_assigned", "quiz_reminder"
+		}
+		body := payload{Title: n.Title}
+		if n.Reminder {
+			kind, body.Days = remind, max(1, int(n.DueAt.Sub(now).Hours()/24+0.5))
+		}
+		ns := make([]repo.NewNotification, len(n.Users))
+		for i, u := range n.Users {
+			ns[i] = repo.NewNotification{UserID: u, Kind: kind, Category: "reading", PageID: n.PageID, GroupKey: "read:" + n.ID, Payload: body.json()}
+		}
+		if err := s.store.ApplyReadNotice(ctx, n, ns, now); err != nil {
+			return err
+		}
+	}
+	s.lastRead = now
+	return nil
+}
+
 // email resuelve los avisos que siguen sin leer pasada la ventana (notify.email_delay): salen
 // por correo, o no, según la preferencia. Sin correo configurado solo hay bandeja (§12).
 func (s *Service) email(ctx context.Context) error {
@@ -403,6 +511,10 @@ func (s *Service) link(n repo.Notification) string {
 		return area + "/proposals"
 	case "proposal_approved", "proposal_rejected", "proposal_rebase":
 		return area + "/proposals/" + n.ProposalID
+	case "review_reminder":
+		return area + "/review"
+	case "quiz_failed_out":
+		return area + "/reads"
 	}
 	if n.PageSlug != "" {
 		return area + "/p/" + n.PageSlug

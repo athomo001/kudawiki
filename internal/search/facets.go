@@ -24,6 +24,7 @@ type Facets struct {
 	Folders []Facet     `json:"folders"`
 	Authors []Facet     `json:"authors"`
 	Dates   []DateFacet `json:"dates"`
+	Overdue int         `json:"overdue"` // con la revisión vencida (§4.8)
 }
 
 // Candidate es lo que se cuenta de cada página candidata. Las páginas ya vienen filtradas por
@@ -33,6 +34,7 @@ type Candidate struct {
 	UpdatedAt time.Time
 	Tags      []string
 	Authors   []string
+	Overdue   bool
 }
 
 const maxFacetValues = 10
@@ -41,9 +43,10 @@ var dateWindows = []int{7, 30, 365}
 
 // CountFacets cuenta etiquetas, carpetas, autores y fechas sobre los candidatos. Las carpetas
 // son las del nivel siguiente a path (sin path, las de primer nivel), para ir bajando por el
-// árbol. La vigencia llega con F5.
+// árbol.
 func CountFacets(cands []Candidate, path string, now time.Time) Facets {
 	tags, folders, authors := map[string]int{}, map[string]int{}, map[string]int{}
+	overdue := 0
 	dates := make([]DateFacet, len(dateWindows))
 	for i, d := range dateWindows {
 		dates[i].Days = d
@@ -55,6 +58,9 @@ func CountFacets(cands []Candidate, path string, now time.Time) Facets {
 		for _, a := range c.Authors {
 			authors[a]++
 		}
+		if c.Overdue {
+			overdue++
+		}
 		if folder, ok := folderOf(c.Slug, path); ok {
 			folders[folder]++
 		}
@@ -64,7 +70,7 @@ func CountFacets(cands []Candidate, path string, now time.Time) Facets {
 			}
 		}
 	}
-	return Facets{Tags: top(tags), Folders: top(folders), Authors: top(authors), Dates: dates}
+	return Facets{Tags: top(tags), Folders: top(folders), Authors: top(authors), Dates: dates, Overdue: overdue}
 }
 
 // folderOf es la carpeta del nivel siguiente a path en la que está slug, si está en una.

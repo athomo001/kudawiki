@@ -76,6 +76,10 @@ type Settings struct {
 	// Historial (§4.3). KeepLast y KeepDays: 0 = sin límite; no pueden ir los dos.
 	RequireChangeSummary *bool
 	KeepLast, KeepDays   *int
+	// Vigencia (§4.8): intervalo de revisión por defecto; 0 = las páginas no vencen (§19.11).
+	ReviewDays *int
+	// Cuestionarios (§4.16.7): encendidos por defecto.
+	QuizzesEnabled *bool
 }
 
 // validRetention: las últimas N revisiones (hasta 10 000) o las de los últimos N días (hasta
@@ -113,8 +117,14 @@ func (s *Service) Update(ctx context.Context, sc repo.Scope, in Settings) error 
 	if in.KeepDays != nil && *in.KeepDays != w.KeepDays {
 		w.KeepDays, changed = *in.KeepDays, append(changed, "revisions_keep_days")
 	}
+	if in.ReviewDays != nil && *in.ReviewDays != w.ReviewDays {
+		w.ReviewDays, changed = *in.ReviewDays, append(changed, "default_review_days")
+	}
+	if in.QuizzesEnabled != nil && *in.QuizzesEnabled != w.QuizzesEnabled {
+		w.QuizzesEnabled, changed = *in.QuizzesEnabled, append(changed, "quizzes_enabled")
+	}
 	if w.Name == "" || utf8.RuneCountInString(w.Description) > maxDescription || (w.ApprovalMode != "direct" && w.ApprovalMode != "required") ||
-		!validRetention(w.KeepLast, w.KeepDays) {
+		!validRetention(w.KeepLast, w.KeepDays) || w.ReviewDays < 0 || w.ReviewDays > 3650 {
 		return ErrInvalidArea
 	}
 	if len(changed) == 0 {

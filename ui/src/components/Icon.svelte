@@ -33,6 +33,7 @@
     image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4',
     resize: 'M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7',
     files: 'M9 3h6l4 4v10H9zM15 3v4h4M5 7v14h10',
+    template: 'M5 3h14v18H5zM8 7h8M8 11h8M8 15h5',
     quote: 'M5 17h4v-5H6l1-5M14 17h4v-5h-3l1-5',
     keyboard: 'M3 7h18v10H3zM7 10.5h.01M11 10.5h.01M15 10.5h.01M8 14h8',
     rule: 'M4 12h16',

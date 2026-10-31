@@ -28,6 +28,8 @@
   let removing = $state<Announcement | null>(null);
   let confirming = $state(false);
 
+  // En el espacio personal no hay a quién anunciarle nada (§7).
+  const canAnnounce = $derived(canEdit(area) && !area.personal);
   const fail = (e: unknown) => (error = errorText(codeOf(e)));
   const loadNews = () => api<Announcement[]>('GET', `${base}/announcements`).then((n) => (news = n));
 
@@ -96,6 +98,7 @@
 
 <h1>{area.name}</h1>
 {#if area.description}<p class="lead">{area.description}</p>{/if}
+{#if area.personal && !area.audit}<p class="lead">{t('personal.intro')}</p>{/if}
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 
 {#if cover}
@@ -114,11 +117,11 @@
 {/if}
 {#if stats && !stats.pages}<p class="muted">{t('area.empty')}</p>{/if}
 
-{#if news.length || canEdit(area)}
+{#if news.length || canAnnounce}
   <section class="area-section" aria-labelledby="area-news">
     <div class="area-section-head">
       <h2 id="area-news">{t('area.announcements')}</h2>
-      {#if canEdit(area)}
+      {#if canAnnounce}
         <button type="button" class="secondary" onclick={openWriter}><Icon name="plus" size={14} /> {t('announce.new')}</button>
       {/if}
     </div>
@@ -196,7 +199,7 @@
   </ul>
 {/if}
 
-{#if canEdit(area)}
+{#if canAnnounce}
   <Dialog title={t('announce.new')} bind:open={writing}>
     <form class="stack" onsubmit={publish}>
       <label class="field">

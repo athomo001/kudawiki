@@ -86,7 +86,9 @@
   const sinceDate = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
   const dateKeys: Record<number, Key> = { 7: 'search.date_7', 30: 'search.date_30', 365: 'search.date_365' };
   const pageHref = (h: SearchHit) => `${base}/p/${h.slug}${h.section ? `#${encodeURIComponent(h.section.id)}` : ''}`;
-  const hasFacets = $derived(!!facets && (facets.tags.length + facets.folders.length + facets.authors.length > 0 || facets.dates.some((d) => d.count)));
+  const hasFacets = $derived(
+    !!facets && (facets.tags.length + facets.folders.length + facets.authors.length > 0 || facets.dates.some((d) => d.count) || facets.overdue > 0),
+  );
 </script>
 
 <form class="inline search-form" onsubmit={submit} role="search">
@@ -145,6 +147,19 @@
                 </button>
               </li>
             {/each}
+          </ul>
+        </section>
+      {/if}
+      <!-- Vigencia (§4.8, §9.4): las vencidas entre los candidatos; con el filtro puesto, también para quitarlo. -->
+      {#if facets.overdue > 0 || isActive('estado', 'vencida')}
+        <section>
+          <h2 class="side-title">{t('search.facet_review')}</h2>
+          <ul>
+            <li>
+              <button type="button" class="facet" aria-pressed={isActive('estado', 'vencida')} onclick={() => toggle('estado', 'vencida')}>
+                <span class="facet-label">{t('search.review_overdue')}</span><span class="facet-count">{facets.overdue}</span>
+              </button>
+            </li>
           </ul>
         </section>
       {/if}
