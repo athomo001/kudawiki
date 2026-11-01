@@ -361,7 +361,9 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// La reautenticación es de la sesión de quien la pide: TestReauth. Mis sesiones son de cada persona: TestSessions.
 	// Las passkeys son de cada persona y su login va sin sesión: TestPasskeys. La baja de usuarios y
 	// el superadmin desde el panel son del superadmin: TestOffboarding, TestOffboardingNow y TestSuperadminToggle.
+	// La conexión al directorio es del superadmin: TestLDAPAdmin.
 	elsewhere := []string{
+		"GET /api/admin/ldap/config", "PUT /api/admin/ldap/config", "POST /api/admin/ldap/test",
 		"GET /api/admin/users/{id}/offboarding", "POST /api/admin/users/{id}/offboarding",
 		"POST /api/auth/totp", "POST /api/me/totp", "POST /api/me/totp/confirm", "DELETE /api/me/totp", "PATCH /api/admin/users/{id}",
 		"POST /api/auth/reauth",

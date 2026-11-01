@@ -81,7 +81,7 @@ func (r *Repo) PageWatchers(ctx context.Context, e NotificationEvent, p EventPag
 		JOIN workspace_members m ON m.workspace_id = a.workspace_id AND m.user_id = w.user_id
 		JOIN users u ON u.id = w.user_id AND u.is_active = 1
 		WHERE a.workspace_id = ? AND ` + rankSQL + ` >= MAX(?, a.min_rank)
-		  AND w.created_at <= (SELECT created_at FROM notification_events WHERE id = ?) AND (a.id = ?`
+		  AND w.after_event_id < ? AND (a.id = ?`
 	args := []any{e.WsID, p.MinRank, e.ID, p.ID}
 	if unit {
 		q += ` OR a.trash_root_id = ?`
@@ -114,11 +114,17 @@ func (r *Repo) AreaAdmins(ctx context.Context, wsID string) ([]string, error) {
 	})
 }
 
+// lastEvent es el último evento que ya existe: un seguimiento nuevo recibe solo los de número
+// mayor (§12.1). Los eventos se numeran en orden y las escrituras van de a una, así que lo que
+// está en la cola al empezar a seguir es anterior, aunque sea del mismo segundo. Los que ya se
+// repartieron y borraron tienen números menores que cualquiera nuevo (AUTOINCREMENT).
+const lastEvent = `(SELECT COALESCE(MAX(id), 0) FROM notification_events)`
+
 // AutoWatch hace que quien crea o edita una página la siga, si no lo desactivó (§12.1). No
 // toca un seguimiento que ya existe: quien sigue el subárbol lo sigue igual.
 func (r *Repo) AutoWatch(ctx context.Context, pageID, userID string) error {
-	_, err := r.db.Write.ExecContext(ctx, `INSERT OR IGNORE INTO page_watchers (page_id, user_id)
-		SELECT ?, id FROM users WHERE id = ? AND auto_watch = 1`, pageID, userID)
+	_, err := r.db.Write.ExecContext(ctx, `INSERT OR IGNORE INTO page_watchers (page_id, user_id, after_event_id)
+		SELECT ?, id, `+lastEvent+` FROM users WHERE id = ? AND auto_watch = 1`, pageID, userID)
 	return err
 }
 
@@ -431,8 +437,8 @@ func (r *Repo) PageWatch(ctx context.Context, s Scope, userID string, p Page) (P
 
 // Watch sigue una página del Scope, sola o con sus subpáginas.
 func (r *Repo) Watch(ctx context.Context, s Scope, userID, pageID string, subtree bool) error {
-	return affected(r.db.Write.ExecContext(ctx, `INSERT INTO page_watchers (page_id, user_id, include_children)
-		SELECT id, ?, ? FROM pages WHERE id = ? AND workspace_id = ? AND min_rank <= ? AND deleted_at IS NULL
+	return affected(r.db.Write.ExecContext(ctx, `INSERT INTO page_watchers (page_id, user_id, include_children, after_event_id)
+		SELECT id, ?, ?, `+lastEvent+` FROM pages WHERE id = ? AND workspace_id = ? AND min_rank <= ? AND deleted_at IS NULL
 		ON CONFLICT (page_id, user_id) DO UPDATE SET include_children = excluded.include_children`,
 		userID, subtree, pageID, s.WsID, s.MaxRank))
 }

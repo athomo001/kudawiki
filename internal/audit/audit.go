@@ -93,6 +93,9 @@ var (
 	// Correo (§12).
 	SiteSMTPUpdate = Action{"site.smtp_update"}
 	SMTPTestSend   = Action{"smtp.test_send"}
+	// Directorio LDAP / AD (§8.6). La configuración guarda qué claves cambiaron, nunca sus valores.
+	LDAPConfigUpdate = Action{"ldap.config_update"}
+	LDAPTest         = Action{"ldap.test"}
 	// Recuperación de contraseña (§8.5).
 	AuthPasswordResetRequest  = Action{"auth.password_reset_request"}
 	AuthPasswordResetComplete = Action{"auth.password_reset_complete"}
@@ -139,7 +142,7 @@ var All = []Action{
 	QuizCreate, QuizUpdate, QuizPublish, QuizArchive, QuizDelete, QuizAttemptStart, QuizAttemptSubmit, QuizAttemptTimeout,
 	QuizExtraAttemptsGrant, QuizResultsExport,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
-	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
+	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend, LDAPConfigUpdate, LDAPTest,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,
 	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA, AuthReauth, SessionRevoke, AuthPasskeyAdd, AuthPasskeyRemove,
 	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,

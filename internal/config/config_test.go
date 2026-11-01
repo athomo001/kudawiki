@@ -179,3 +179,31 @@ func TestOffboarding(t *testing.T) {
 		t.Setenv(env, "30")
 	}
 }
+
+// §8.6.4: la conexión LDAP puede venir del archivo o de KUDAWIKI_AUTH_LDAP_*; la contraseña de
+// la cuenta de servicio, solo de un archivo aparte.
+func TestLDAP(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "ldap.secret")
+	os.WriteFile(secret, []byte("clave-svc\r\n"), 0o600)
+	path := filepath.Join(dir, "kudawiki.yaml")
+	os.WriteFile(path, []byte("auth:\n  ldap:\n    flavor: ad\n    urls: [ldaps://dc01:636]\n    bind_password_file: "+secret+"\n    attrs: { email: mail }\n"), 0o600)
+	t.Setenv("KUDAWIKI_AUTH_LDAP_URLS", "ldaps://dc01:636,ldaps://dc02:636")
+	t.Setenv("KUDAWIKI_AUTH_LDAP_ENABLED", "true")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := c.Auth.LDAP
+	if *l.Flavor != "ad" || len(*l.URLs) != 2 || !*l.Enabled || *l.Attrs.Email != "mail" || l.Attrs.Name != nil || l.BindDN != nil {
+		t.Errorf("ldap = %+v", l)
+	}
+	if pw, err := c.LDAPBindPassword(); err != nil || *pw != "clave-svc" {
+		t.Errorf("bind password = %v, %v", pw, err)
+	}
+	t.Setenv("KUDAWIKI_AUTH_LDAP_BIND_PASSWORD_FILE", filepath.Join(dir, "no-existe"))
+	c, _ = Load(path)
+	if _, err := c.LDAPBindPassword(); err == nil {
+		t.Error("a missing password file was accepted")
+	}
+}

@@ -83,6 +83,7 @@
             <li><a href="/admin/health">{t('health.short')}</a></li>
             <li><a href="/admin/appearance">{t('appearance.title')}</a></li>
             <li><a href="/admin/email">{t('smtp.title')}</a></li>
+            <li><a href="/admin/ldap">{t('ldap.title')}</a></li>
             <li><a href="/admin/templates">{t('templates.global_title')}</a></li>
           </ul>
         {/if}

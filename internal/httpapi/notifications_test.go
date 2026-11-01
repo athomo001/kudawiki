@@ -169,13 +169,13 @@ func TestNotificationLevels(t *testing.T) {
 	if ns, unread := f.inbox(t, "viewerTI"); len(ns) != 0 || unread != 0 {
 		t.Fatalf("fan-out ignored the level: %+v", ns)
 	}
-	// Al bajarlo de nuevo vuelve el aviso que ya tenía (la creación y el primer cambio, agrupados),
-	// pero no el cambio que se repartió mientras no podía leerla.
+	// Al bajarlo de nuevo vuelve el aviso que ya tenía (el primer cambio; la creación fue antes de
+	// que la siguiera, §12.1), pero no el cambio que se repartió mientras no podía leerla.
 	f.expect(t, "adminTI", "PATCH", "/api/w/ti/meta/plan", `{"level":1}`, http.StatusNoContent)
-	if ns, _ := f.inbox(t, "viewerTI"); len(ns) != 1 || ns[0].Count != 2 {
+	if ns, _ := f.inbox(t, "viewerTI"); len(ns) != 1 || ns[0].Count != 1 {
 		t.Fatalf("after lowering the level only the earlier notice should be back: %+v", ns)
 	}
-	if ns, _ := f.inbox(t, "editorTI"); kinds(ns) != "page_changed" || ns[0].Count != 3 {
+	if ns, _ := f.inbox(t, "editorTI"); kinds(ns) != "page_changed" || ns[0].Count != 2 {
 		t.Fatalf("editor inbox: %+v", ns)
 	}
 
@@ -192,6 +192,30 @@ func TestNotificationLevels(t *testing.T) {
 	missing := f.do("viewerTI", "PUT", "/api/w/ti/watch/no-existe", `{"subtree":false}`)
 	if hidden.Code != http.StatusNotFound || hidden.Body.String() != missing.Body.String() {
 		t.Fatalf("watch a hidden page: %d %s / %s", hidden.Code, hidden.Body, missing.Body)
+	}
+}
+
+// TestWatchOnlyLaterEvents: un seguimiento solo recibe los eventos posteriores a él (§12.1),
+// aunque sean del mismo segundo y el reparto llegue después. Antes se comparaban las fechas al
+// segundo, y lo que pasó justo antes de empezar a seguir se colaba según el reloj.
+func TestWatchOnlyLaterEvents(t *testing.T) {
+	f := newFixture(t)
+	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/acta", `{"title":"Acta","markdown":"uno","base_revision":0}`, http.StatusNoContent)
+	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/acta", `{"title":"Acta","markdown":"dos","base_revision":1}`, http.StatusNoContent)
+	// Los dos eventos siguen en la cola, sin repartir, cuando el lector empieza a seguirla.
+	f.expect(t, "viewerTI", "PUT", "/api/w/ti/watch/acta", `{"subtree":false}`, http.StatusNoContent)
+	if ns, unread := f.inbox(t, "viewerTI"); len(ns) != 0 || unread != 0 {
+		t.Fatalf("events from before the watch were delivered: %+v", ns)
+	}
+	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/acta", `{"title":"Acta","markdown":"tres","base_revision":2}`, http.StatusNoContent)
+	if ns, _ := f.inbox(t, "viewerTI"); kinds(ns) != "page_changed" || ns[0].Count != 1 {
+		t.Fatalf("the change after the watch: %+v", ns)
+	}
+	// Seguir el subárbol desde arriba cumple la misma regla.
+	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/acta/anexo", `{"title":"Anexo","markdown":"a","base_revision":0}`, http.StatusNoContent)
+	f.expect(t, "editorTI", "PUT", "/api/w/ti/watch/acta", `{"subtree":true}`, http.StatusNoContent)
+	if ns, _ := f.inbox(t, "editorTI"); strings.Contains(kinds(ns), "page_changed") {
+		t.Fatalf("subtree watch got an earlier event: %+v", ns)
 	}
 }
 

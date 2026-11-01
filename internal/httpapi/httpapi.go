@@ -279,6 +279,7 @@ type Deps struct {
 	Media      mediaService
 	Branding   brandingService
 	Mail       mailService
+	LDAP       ldapService
 	Notify     notificationService
 	Drafts     draftStore
 	Personal   personalService

@@ -32,6 +32,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/health"
 	"github.com/athomo001/kudawiki/internal/httpapi"
 	"github.com/athomo001/kudawiki/internal/jobs"
+	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/notify"
@@ -245,6 +246,20 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	l := cfg.Auth.LDAP
+	bindPassword, err := cfg.LDAPBindPassword()
+	if err != nil {
+		return err
+	}
+	directory, err := ldap.NewService(store, rec, masterKey, ldap.Patch{Enabled: l.Enabled, Flavor: l.Flavor, URLs: l.URLs,
+		StartTLS: l.StartTLS, CAFile: l.CAFile, InsecureSkipVerify: l.InsecureSkipVerify, BindDN: l.BindDN, BindPassword: bindPassword,
+		DomainNetbios: l.DomainNetbios, UserBaseDN: l.UserBaseDN, UserFilter: l.UserFilter, LoginAttrs: l.LoginAttrs, GroupBaseDN: l.GroupBaseDN,
+		Attrs: &ldap.AttrsPatch{Email: l.Attrs.Email, Name: l.Attrs.Name, GUID: l.Attrs.GUID}, DisabledFilter: l.DisabledFilter, Timeout: l.Timeout},
+		time.Now, logger)
+	if err != nil {
+		return err
+	}
+	directory.LogInsecure(ctx)
 	svc.SetSecondFactor(auth.SecondFactor{Key: masterKey, Enforce: auth.MFAPolicy(cfg.Auth.TOTP.EnforceFor), BaseURL: cfg.BaseURL})
 	if !svc.PasskeysAvailable() {
 		logger.Warn("passkeys disabled: base_url needs https and a domain name (or http://localhost)", "base_url", cfg.BaseURL)
@@ -280,7 +295,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, logger), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
 			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
-			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
+			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

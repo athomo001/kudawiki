@@ -27,6 +27,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
+	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
@@ -88,6 +89,10 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	directory, err := ldap.NewService(store, rec, bytes.Repeat([]byte{1}, 32), ldap.Patch{}, time.Now, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
 	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), BaseURL: origin})
@@ -99,7 +104,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	leaving := offboarding.NewService(store, files, rec, bytes.Repeat([]byte{1}, 32),
 		offboarding.Config{Grace: 30 * 24 * time.Hour, PseudonymizeAfter: 365 * 24 * time.Hour}, func() time.Time { return clock }, slog.New(slog.DiscardHandler))
 	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, slog.Default()), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
-		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
+		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 

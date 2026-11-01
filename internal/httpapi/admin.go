@@ -37,6 +37,7 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Get("/health", a.globalHealth)
 	a.siteAdminRoutes(r)
 	a.smtpAdminRoutes(r)
+	a.ldapAdminRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(a.globalTemplates)
 		r.Get("/templates", a.listTemplates)

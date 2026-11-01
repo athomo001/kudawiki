@@ -974,6 +974,24 @@ section.settings { margin-top: 2.5rem; }
 }
 .asset-view img { max-width: 100%; max-height: 2.5rem; }
 
+/* Administración → Directorio (§8.6.5): el mismo marco que Correo; cada paso de la prueba en una
+   línea, con su estado en texto y color, nunca solo en color. */
+.directory textarea, .directory input:not(.port):not([type]) { font-family: var(--kw-font-mono); font-size: 0.875rem; }
+.directory .check + small { display: block; margin: -0.25rem 0 0.25rem; }
+.directory h3 { margin: 1rem 0 0.25rem; font-size: 0.9375rem; overflow-wrap: anywhere; }
+.ldap-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.375rem; }
+.ldap-steps li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.75rem; align-items: baseline; }
+.ldap-steps li small { display: block; }
+.ldap-status { font-size: 0.8125rem; font-weight: 600; }
+.ldap-steps .ok .ldap-status { color: var(--kw-state-success); }
+.ldap-steps .warn .ldap-status { color: var(--kw-state-warning); }
+.ldap-steps .fail .ldap-status { color: var(--kw-state-error); }
+.ldap-user-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; }
+.ldap-user-form .field { flex: 1 1 16rem; margin: 0; }
+.ldap-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.75rem 0; }
+.ldap-facts dt { color: var(--kw-text-muted); }
+.ldap-facts dd { margin: 0; overflow-wrap: anywhere; }
+
 /* Mi perfil (SPEC §8.5.2): una columna sin cajas, como Apariencia. */
 .profile { max-width: 36rem; }
 .profile h2 { margin: 1.75rem 0 0.25rem; }

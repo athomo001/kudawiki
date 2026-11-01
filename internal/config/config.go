@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -80,6 +81,10 @@ type Config struct {
 		TOTP struct {
 			EnforceFor string `yaml:"enforce_for"`
 		} `yaml:"totp"`
+		// LDAP: la conexión al directorio (§8.6.4). Lo que esté aquí gana sobre el panel y se
+		// muestra bloqueado; nil es "no está en el archivo". La valida el paquete ldap. La
+		// contraseña de la cuenta de servicio solo va como archivo, nunca en este YAML.
+		LDAP LDAP `yaml:"ldap"`
 	} `yaml:"auth"`
 	// Notify.EmailDelay: cuánto espera un aviso sin leer antes de salir por correo (SPEC §12.1).
 	Notify struct {
@@ -90,6 +95,44 @@ type Config struct {
 	Approval struct {
 		RemindAfterDays int `yaml:"remind_after_days"`
 	} `yaml:"approval"`
+}
+
+// LDAP son las claves de auth.ldap que el archivo puede fijar.
+type LDAP struct {
+	Enabled            *bool     `yaml:"enabled"`
+	Flavor             *string   `yaml:"flavor"`
+	URLs               *[]string `yaml:"urls"`
+	StartTLS           *bool     `yaml:"start_tls"`
+	CAFile             *string   `yaml:"ca_file"`
+	InsecureSkipVerify *bool     `yaml:"insecure_skip_verify"`
+	BindDN             *string   `yaml:"bind_dn"`
+	BindPasswordFile   *string   `yaml:"bind_password_file"`
+	DomainNetbios      *string   `yaml:"domain_netbios"`
+	UserBaseDN         *string   `yaml:"user_base_dn"`
+	UserFilter         *string   `yaml:"user_filter"`
+	LoginAttrs         *[]string `yaml:"login_attrs"`
+	GroupBaseDN        *string   `yaml:"group_base_dn"`
+	Attrs              struct {
+		Email *string `yaml:"email"`
+		Name  *string `yaml:"name"`
+		GUID  *string `yaml:"guid"`
+	} `yaml:"attrs"`
+	DisabledFilter *string `yaml:"disabled_filter"`
+	Timeout        *string `yaml:"timeout"`
+}
+
+// LDAPBindPassword lee la contraseña de la cuenta de servicio de bind_password_file; nil si no
+// está. Se quita el salto de línea final, que casi todos los editores agregan.
+func (c Config) LDAPBindPassword() (*string, error) {
+	if c.Auth.LDAP.BindPasswordFile == nil {
+		return nil, nil
+	}
+	b, err := os.ReadFile(*c.Auth.LDAP.BindPasswordFile)
+	if err != nil {
+		return nil, fmt.Errorf("auth.ldap.bind_password_file: %w", err)
+	}
+	pw := strings.TrimRight(string(b), "\r\n")
+	return &pw, nil
 }
 
 // AuditFloorDays es el piso de retención de la auditoría (SPEC §11.2): el superadmin es a quien
@@ -200,17 +243,30 @@ func Load(path string) (Config, error) {
 		}
 	}
 	for env, dst := range map[string]**string{
-		"KUDAWIKI_BRANDING_TITLE":         &c.Branding.Title,
-		"KUDAWIKI_BRANDING_COMPANY":       &c.Branding.Company,
-		"KUDAWIKI_BRANDING_COLOR_PRIMARY": &c.Branding.ColorPrimary,
-		"KUDAWIKI_BRANDING_COLOR_HEADER":  &c.Branding.ColorHeader,
-		"KUDAWIKI_BRANDING_COLOR_SIDEBAR": &c.Branding.ColorSidebar,
-		"KUDAWIKI_BRANDING_LOGIN_MESSAGE": &c.Branding.LoginMessage,
-		"KUDAWIKI_SMTP_HOST":              &c.SMTP.Host,
-		"KUDAWIKI_SMTP_SECURITY":          &c.SMTP.Security,
-		"KUDAWIKI_SMTP_USERNAME":          &c.SMTP.Username,
-		"KUDAWIKI_SMTP_PASSWORD":          &c.SMTP.Password,
-		"KUDAWIKI_SMTP_FROM":              &c.SMTP.From,
+		"KUDAWIKI_BRANDING_TITLE":               &c.Branding.Title,
+		"KUDAWIKI_BRANDING_COMPANY":             &c.Branding.Company,
+		"KUDAWIKI_BRANDING_COLOR_PRIMARY":       &c.Branding.ColorPrimary,
+		"KUDAWIKI_BRANDING_COLOR_HEADER":        &c.Branding.ColorHeader,
+		"KUDAWIKI_BRANDING_COLOR_SIDEBAR":       &c.Branding.ColorSidebar,
+		"KUDAWIKI_BRANDING_LOGIN_MESSAGE":       &c.Branding.LoginMessage,
+		"KUDAWIKI_SMTP_HOST":                    &c.SMTP.Host,
+		"KUDAWIKI_SMTP_SECURITY":                &c.SMTP.Security,
+		"KUDAWIKI_SMTP_USERNAME":                &c.SMTP.Username,
+		"KUDAWIKI_SMTP_PASSWORD":                &c.SMTP.Password,
+		"KUDAWIKI_SMTP_FROM":                    &c.SMTP.From,
+		"KUDAWIKI_AUTH_LDAP_FLAVOR":             &c.Auth.LDAP.Flavor,
+		"KUDAWIKI_AUTH_LDAP_CA_FILE":            &c.Auth.LDAP.CAFile,
+		"KUDAWIKI_AUTH_LDAP_BIND_DN":            &c.Auth.LDAP.BindDN,
+		"KUDAWIKI_AUTH_LDAP_BIND_PASSWORD_FILE": &c.Auth.LDAP.BindPasswordFile,
+		"KUDAWIKI_AUTH_LDAP_DOMAIN_NETBIOS":     &c.Auth.LDAP.DomainNetbios,
+		"KUDAWIKI_AUTH_LDAP_USER_BASE_DN":       &c.Auth.LDAP.UserBaseDN,
+		"KUDAWIKI_AUTH_LDAP_USER_FILTER":        &c.Auth.LDAP.UserFilter,
+		"KUDAWIKI_AUTH_LDAP_GROUP_BASE_DN":      &c.Auth.LDAP.GroupBaseDN,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_EMAIL":        &c.Auth.LDAP.Attrs.Email,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_NAME":         &c.Auth.LDAP.Attrs.Name,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_GUID":         &c.Auth.LDAP.Attrs.GUID,
+		"KUDAWIKI_AUTH_LDAP_DISABLED_FILTER":    &c.Auth.LDAP.DisabledFilter,
+		"KUDAWIKI_AUTH_LDAP_TIMEOUT":            &c.Auth.LDAP.Timeout,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = &v
@@ -222,6 +278,29 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("KUDAWIKI_BRANDING_SHOW_POWERED_BY: %w", err)
 		}
 		c.Branding.ShowPoweredBy = &b
+	}
+	for env, dst := range map[string]**bool{
+		"KUDAWIKI_AUTH_LDAP_ENABLED":              &c.Auth.LDAP.Enabled,
+		"KUDAWIKI_AUTH_LDAP_START_TLS":            &c.Auth.LDAP.StartTLS,
+		"KUDAWIKI_AUTH_LDAP_INSECURE_SKIP_VERIFY": &c.Auth.LDAP.InsecureSkipVerify,
+	} {
+		if v, ok := os.LookupEnv(env); ok {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("%s: %w", env, err)
+			}
+			*dst = &b
+		}
+	}
+	// Las listas van separadas por comas: KUDAWIKI_AUTH_LDAP_URLS=ldaps://dc01:636,ldaps://dc02:636.
+	for env, dst := range map[string]**[]string{
+		"KUDAWIKI_AUTH_LDAP_URLS":        &c.Auth.LDAP.URLs,
+		"KUDAWIKI_AUTH_LDAP_LOGIN_ATTRS": &c.Auth.LDAP.LoginAttrs,
+	} {
+		if v, ok := os.LookupEnv(env); ok {
+			list := strings.Split(v, ",")
+			*dst = &list
+		}
 	}
 	if v, ok := os.LookupEnv("KUDAWIKI_AUTH_LOCAL_PASSWORD_RESET"); ok {
 		b, err := strconv.ParseBool(v)
