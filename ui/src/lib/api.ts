@@ -39,8 +39,23 @@ export type Me = {
   has_avatar: boolean;
   personal: { slug: string };
   totp: TOTPStatus;
+  // Cuántas passkeys tiene y si esta instalación las admite (base_url con https, §8.1).
+  passkeys: { count: number; available: boolean };
   // Se le exige el 2FA y no lo tiene: la interfaz muestra solo su configuración (SPEC §8.1).
   mfa_setup_required: boolean;
+};
+
+// Una passkey en el perfil (§8.1): nunca la clave, solo su nombre y su uso.
+export type PasskeyInfo = { id: string; name: string; created_at: string; last_used_at: string | null };
+
+// Una sesión en "Mis sesiones" (§8.2): navegador y sistema leídos del user agent, vacíos si no se reconocen.
+export type SessionInfo = {
+  id: string;
+  device: { browser: string; os: string };
+  ip: string;
+  created_at: string;
+  last_seen_at: string;
+  current: boolean;
 };
 
 export type TOTPStatus = { enabled: boolean; required: boolean; recovery_codes_left: number };
@@ -265,7 +280,8 @@ export type NotificationKind =
   | 'quiz_assigned'
   | 'quiz_reminder'
   | 'quiz_extra_attempts'
-  | 'quiz_failed_out';
+  | 'quiz_failed_out'
+  | 'ownership_received';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -322,7 +338,8 @@ export type AuditEvent = {
   id: number;
   at: string;
   action: string;
-  actor?: { name: string; email: string };
+  // pseudonym: la persona se dio de baja hace más de audit.pseudonymize_after_days (§13.10).
+  actor?: { name: string; email: string; pseudonym?: undefined } | { pseudonym: string; name?: undefined; email?: undefined };
   ip?: string;
   workspace?: string;
   page?: string;
@@ -408,8 +425,36 @@ export type Facet = { value: string; count: number };
 export type Facets = { tags: Facet[]; folders: Facet[]; authors: Facet[]; dates: { days: number; count: number }[]; overdue: number };
 export type SearchResult = { results: SearchHit[]; more?: boolean; suggestion?: string; facets?: Facets };
 
+// Lo delicado pide reautenticarse (SPEC §8.2): ante 401 reauth_required, quien registró
+// onReauth (el diálogo de App) pide contraseña y código, y el pedido se repite una vez. Si varios
+// pedidos lo necesitan a la vez, como al abrir un espacio personal en modo auditoría, se pregunta
+// una sola vez.
+let askReauth: (() => Promise<boolean>) | null = null;
+let pendingReauth: Promise<boolean> | null = null;
+
+export function onReauth(ask: (() => Promise<boolean>) | null) {
+  askReauth = ask;
+}
+
+function reauth(): Promise<boolean> {
+  if (!askReauth) return Promise.resolve(false);
+  pendingReauth ??= askReauth().finally(() => (pendingReauth = null));
+  return pendingReauth;
+}
+
 // Mismo origen: el navegador manda la cookie de sesión y Sec-Fetch-Site (CSRF, SPEC §8.2).
 export async function api<T = void>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await request<T>(method, path, body);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401 && e.code === 'reauth_required' && path !== '/auth/reauth' && (await reauth())) {
+      return request<T>(method, path, body);
+    }
+    throw e;
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {

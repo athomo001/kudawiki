@@ -14,6 +14,7 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -44,6 +45,11 @@ type store interface {
 	CreateSession(ctx context.Context, s repo.Session) error
 	SessionByHash(ctx context.Context, tokenHash string) (repo.Session, error)
 	TouchSession(ctx context.Context, tokenHash string, at time.Time) error
+	SetReauth(ctx context.Context, tokenHash string, until time.Time) error
+	// Mis sesiones y el aviso de inicio de sesión nuevo (§8.2).
+	SessionsOf(ctx context.Context, userID string) ([]repo.Session, error)
+	DeleteUserSession(ctx context.Context, userID, id string) error
+	RecordLogin(ctx context.Context, userID, ip, browser string, at time.Time) (bool, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	CreateInvitedUser(ctx context.Context, u repo.User, t repo.AuthToken) error
 	AcceptInvite(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
@@ -72,6 +78,12 @@ type store interface {
 	RecoveryCodesLeft(ctx context.Context, userID string) (int, error)
 	DisableTOTP(ctx context.Context, userID string) error
 	IsAreaAdmin(ctx context.Context, userID string) (bool, error)
+	// Passkeys (SPEC §8.1).
+	CreatePasskey(ctx context.Context, p repo.Passkey) error
+	PasskeysOf(ctx context.Context, userID string) ([]repo.Passkey, error)
+	UsePasskey(ctx context.Context, id string, signCount uint32, backupState bool, at time.Time) error
+	DeletePasskey(ctx context.Context, userID, id string) error
+	DeletePasskeys(ctx context.Context, userID string) (int64, error)
 }
 
 type Service struct {
@@ -85,10 +97,12 @@ type Service struct {
 	inviteTTL time.Duration
 	async     func(func()) // lo que corre fuera de la petición; los tests lo hacen sincrónico
 	mfa       SecondFactor
+	rp        *webauthn.WebAuthn // nil si base_url no admite passkeys (§8.1)
 
 	mu         sync.Mutex
 	attempts   map[string]attempt
 	challenges map[string]mfaChallenge // por hash del token: el segundo paso del login (§8.1)
+	ceremonies map[string]ceremony     // registros y verificaciones de passkeys empezados
 }
 
 type mfaChallenge struct {
@@ -96,11 +110,12 @@ type mfaChallenge struct {
 	expires time.Time
 }
 
-// LoginResult es la sesión o, si la persona tiene 2FA, el desafío del segundo paso. Los dos son
-// tokens en claro que solo viajan en una cookie.
+// LoginResult es la sesión o, si la persona tiene 2FA, el desafío del segundo paso y con qué puede
+// darlo ("totp", "passkey"). Session y Challenge son tokens en claro que solo viajan en una cookie.
 type LoginResult struct {
 	Session   string
 	Challenge string
+	Methods   []string
 }
 
 type attempt struct {
@@ -115,7 +130,7 @@ func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolic
 		return nil, err
 	}
 	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{},
-		challenges: map[string]mfaChallenge{}, mfa: SecondFactor{Enforce: MFAAdmins},
+		challenges: map[string]mfaChallenge{}, ceremonies: map[string]ceremony{}, mfa: SecondFactor{Enforce: MFAAdmins},
 		resetTTL: defaultResetTTL, inviteTTL: defaultInviteTTL, async: func(f func()) { go f() }}, nil
 }
 
@@ -172,28 +187,26 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 	}
 
 	s.forget(key)
-	if u.TOTPEnabled {
-		return s.challenge(u.ID)
+	if u.TOTPEnabled || u.Passkeys > 0 {
+		return s.challenge(u)
 	}
-	token, err := s.startSession(ctx, u, "")
+	token, err := s.startSession(ctx, u, nil)
 	return LoginResult{Session: token}, err
 }
 
-// startSession abre la sesión de quien ya probó quién es. factor es el segundo, si hubo.
-func (s *Service) startSession(ctx context.Context, u repo.User, factor string) (string, error) {
+// startSession abre la sesión de quien ya probó quién es. meta dice cómo, para la auditoría.
+func (s *Service) startSession(ctx context.Context, u repo.User, meta map[string]any) (string, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", err
 	}
-	now := s.now()
-	if err := s.store.CreateSession(ctx, repo.Session{TokenHash: hashToken(token), UserID: u.ID, CreatedAt: now, LastSeenAt: now}); err != nil {
+	now, c := s.now(), clientFrom(ctx)
+	if err := s.store.CreateSession(ctx, repo.Session{TokenHash: hashToken(token), ID: ulid.Make().String(), UserID: u.ID,
+		CreatedAt: now, LastSeenAt: now, IP: c.IP, UserAgent: c.UserAgent}); err != nil {
 		return "", err
 	}
-	e := audit.Event{Action: audit.AuthLogin, TargetType: "user", TargetID: u.ID, Actor: actorOf(u)}
-	if factor != "" {
-		e.Meta = map[string]any{"second_factor": factor}
-	}
-	s.audit.Record(ctx, e)
+	s.noticeNewLogin(ctx, u, c)
+	s.audit.Record(ctx, audit.Event{Action: audit.AuthLogin, TargetType: "user", TargetID: u.ID, Actor: actorOf(u), Meta: meta})
 	return token, nil
 }
 
@@ -293,7 +306,7 @@ func (s *Service) session(ctx context.Context, token string, touch bool) (repo.U
 		return repo.User{}, err
 	}
 	now := s.now()
-	if now.Sub(sess.LastSeenAt) > sessionIdle || now.Sub(sess.CreatedAt) > sessionAbsolute {
+	if expired(sess, now) {
 		return repo.User{}, errors.Join(ErrNoSession, s.store.DeleteSession(ctx, h))
 	}
 	u, err := s.store.UserByID(ctx, sess.UserID)

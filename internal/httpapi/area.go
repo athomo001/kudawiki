@@ -74,11 +74,16 @@ func (a api) workspaceBoundary(next http.Handler) http.Handler {
 
 // auditPersonal es el modo auditoría (§7): el superadmin puede leer el espacio personal de otra
 // persona, nunca escribir en él, y cada pedido queda en la auditoría. Para cualquier otro, y para
-// cualquier escritura, el 404 uniforme.
+// cualquier escritura, el 404 uniforme. Entrar pide reautenticarse (§8.2), y la confirmación vence
+// a los 10 minutos como cualquier otra: leer más allá vuelve a pedirla.
 func (a api) auditPersonal(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	slug := chi.URLParam(r, "ws")
 	if r.Method != http.MethodGet || !strings.HasPrefix(slug, "~") {
 		a.notFound(w, r)
+		return
+	}
+	// Solo al superadmin se le pide: a los demás les toca el 404 de Audit, igual que siempre.
+	if currentUser(r).IsGlobalAdmin && !a.reauthenticated(w, r) {
 		return
 	}
 	ws, err := a.Personal.Audit(r.Context(), currentUser(r), slug, strings.TrimPrefix(r.URL.Path, "/api/w/"+slug))
@@ -115,11 +120,12 @@ func (a api) requireRank(min int) func(http.Handler) http.Handler {
 }
 
 // memberRoutes las comparten el admin de área y el panel del superadmin; las diferencias
-// de permisos (quién da el rol admin) las decide workspace.Service, no la ruta.
+// de permisos (quién da el rol admin) las decide workspace.Service, no la ruta. Agregar a alguien,
+// cambiarle el rol o quitárselo es cambiar roles: pide reautenticarse (§8.2).
 func (a api) memberRoutes(r chi.Router) {
 	r.Get("/", a.listMembers)
-	r.Post("/", a.setMember)
-	r.Delete("/{user_id}", a.removeMember)
+	r.With(a.requireReauth).Post("/", a.setMember)
+	r.With(a.requireReauth).Delete("/{user_id}", a.removeMember)
 }
 
 func actor(r *http.Request) workspace.Actor {

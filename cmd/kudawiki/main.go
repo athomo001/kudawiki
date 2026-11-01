@@ -35,6 +35,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/offboarding"
 	"github.com/athomo001/kudawiki/internal/personal"
 	"github.com/athomo001/kudawiki/internal/presence"
 	"github.com/athomo001/kudawiki/internal/proposals"
@@ -244,7 +245,10 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	svc.SetSecondFactor(auth.SecondFactor{Key: masterKey, Enforce: auth.MFAPolicy(cfg.Auth.TOTP.EnforceFor)})
+	svc.SetSecondFactor(auth.SecondFactor{Key: masterKey, Enforce: auth.MFAPolicy(cfg.Auth.TOTP.EnforceFor), BaseURL: cfg.BaseURL})
+	if !svc.PasskeysAvailable() {
+		logger.Warn("passkeys disabled: base_url needs https and a domain name (or http://localhost)", "base_url", cfg.BaseURL)
+	}
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: cfg.BaseURL, PasswordReset: cfg.Auth.Local.PasswordReset,
 		ResetTTL: cfg.ResetTTL(), InviteTTL: cfg.InviteTTL(), Log: logger})
 
@@ -260,6 +264,10 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, masterKey, cfg.BaseURL, cfg.EmailDelay(), cfg.RemindAfter(), time.Now)
 	jobsDone.Go(func() { notes.Run(jobCtx, logger) })
+	// La baja de usuarios: completa las que vencieron y seudonimiza la auditoría (§8.4, §13.10).
+	leaving := offboarding.NewService(store, files, rec, masterKey,
+		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
+	jobsDone.Go(func() { leaving.Daily(jobCtx) })
 	hour, minute := cfg.BackupAt()
 	jobsDone.Go(func() {
 		jobs.Backup{DB: db.Read, StorageDir: cfg.StorageDir(), Dir: cfg.BackupDir(), Hour: hour, Minute: minute, Audit: rec, Now: time.Now, Log: logger,
@@ -270,8 +278,8 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	editing := presence.NewHub()
 	srv := &http.Server{
 		Addr: cfg.Listen,
-		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
-			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes,
+		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, logger), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
+			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
 			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

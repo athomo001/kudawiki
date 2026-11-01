@@ -3,8 +3,10 @@
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import Avatar from '../components/Avatar.svelte';
   import ReadingPrefsForm from '../components/ReadingPrefsForm.svelte';
+  import SessionList from '../components/SessionList.svelte';
   import NotificationPrefsForm from '../components/NotificationPrefsForm.svelte';
   import TotpSetup from '../components/TotpSetup.svelte';
+  import PasskeyList from '../components/PasskeyList.svelte';
 
   // Mi perfil (SPEC §8.5.2, §14.1): lo que la persona cambia de sí misma. El correo y los roles
   // los cambia quien administra; aquí solo se muestran.
@@ -43,6 +45,7 @@
 
   // Desactivar el 2FA pide la contraseña y un código (§8.1): una sesión abierta no alcanza.
   let offPassword = $state('');
+  let offRevoke = $state(true);
   let offCode = $state('');
   let offBusy = $state(false);
   let offError = $state('');
@@ -99,7 +102,7 @@
     offBusy = true;
     offError = '';
     try {
-      await api('DELETE', '/me/totp', { password: offPassword, code: offCode });
+      await api('DELETE', '/me/totp', { password: offPassword, code: offCode, revoke_others: offRevoke });
       offPassword = offCode = '';
       await onchanged();
     } catch (err) {
@@ -236,7 +239,8 @@
         {t('totp.on')}
         <span class="muted">· {t('totp.codes_left', { n: String(me.totp.recovery_codes_left) })}</span>
       </p>
-      {#if me.totp.required}
+      <!-- Con una passkey al lado, el 2FA obligatorio sigue cumplido sin el TOTP (§8.1). -->
+      {#if me.totp.required && me.passkeys.count === 0}
         <p class="muted small">{t('totp.required_note')}</p>
       {:else}
         <form class="stack" onsubmit={disableTotp}>
@@ -250,6 +254,10 @@
             <input autocomplete="one-time-code" required aria-describedby="totp-off-hint" bind:value={offCode} />
           </label>
           <small id="totp-off-hint" class="muted">{t('totp.login_hint')}</small>
+          <label class="check">
+            <input type="checkbox" bind:checked={offRevoke} />
+            {t('profile.revoke_others')}
+          </label>
           {#if offError}<p class="error" role="alert">{offError}</p>{/if}
           <button type="submit" disabled={offBusy}>{offBusy ? t('common.saving') : t('totp.disable')}</button>
         </form>
@@ -259,4 +267,8 @@
       <TotpSetup revokeOption ondone={onchanged} />
     {/if}
   </section>
+
+  {#if me.passkeys.available}<PasskeyList {onchanged} />{/if}
+
+  <SessionList />
 </div>

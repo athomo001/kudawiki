@@ -161,15 +161,15 @@ func TestTOTPDisableAndReset(t *testing.T) {
 	ana, _ := r.UserByEmail(ctx, "ana@empresa.cl")
 
 	// A quien se le exige no puede apagarlo.
-	if err := s.DisableTOTP(ctx, ana, goodPassword, "x"); !errors.Is(err, ErrTOTPRequired) {
+	if err := s.DisableTOTP(ctx, ana, "", goodPassword, "x", false); !errors.Is(err, ErrTOTPRequired) {
 		t.Errorf("superadmin disables: %v", err)
 	}
 	c.t = c.t.Add(30 * time.Second)
 	code := totpCode(secret, c.t.Unix()/totpPeriod)
-	if err := s.DisableTOTP(ctx, beto, "otra-clave", code); !errors.Is(err, ErrWrongPassword) {
+	if err := s.DisableTOTP(ctx, beto, "", "otra-clave", code, false); !errors.Is(err, ErrWrongPassword) {
 		t.Errorf("wrong password: %v", err)
 	}
-	if err := s.DisableTOTP(ctx, beto, goodPassword, code); err != nil {
+	if err := s.DisableTOTP(ctx, beto, "", goodPassword, code, false); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := s.Login(ctx, "10.0.0.1", "beto@empresa.cl", goodPassword); res.Session == "" {

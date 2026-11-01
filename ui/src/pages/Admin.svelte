@@ -1,13 +1,26 @@
 <script lang="ts">
-  import { api, codeOf } from '../lib/api';
-  import { t, errorText } from '../lib/i18n/index.svelte';
+  import { api, codeOf, formatDate } from '../lib/api';
+  import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import OffboardDialog from '../components/OffboardDialog.svelte';
 
-  type User = { id: string; email: string; full_name: string; is_global_admin: boolean; invited: boolean; totp_enabled: boolean };
+  // offboarding_at: baja en curso, que se completa ese día; offboarded_at: baja completa (§8.4).
+  type User = {
+    id: string;
+    email: string;
+    full_name: string;
+    is_global_admin: boolean;
+    is_active: boolean;
+    invited: boolean;
+    totp_enabled: boolean;
+    offboarding_at?: string;
+    offboarded_at?: string;
+  };
   type Area = { id: string; slug: string; name: string; description: string };
 
   // onchanged recarga la sesión: el nombre nuevo de un área sale también en el selector y el menú.
-  let { onchanged }: { onchanged: () => void } = $props();
+  // selfId: a sí mismo no se ofrece cerrar todas las sesiones; para eso está "Mis sesiones".
+  let { onchanged, selfId }: { onchanged: () => void; selfId: string } = $props();
 
   let users = $state<User[]>([]);
   let areas = $state<Area[]>([]);
@@ -28,6 +41,16 @@
   // Restablecer el 2FA de quien perdió el celular (§14.2): se confirma en un diálogo.
   let resetting = $state<User | null>(null);
   let confirmingReset = $state(false);
+  // Cerrar todas las sesiones de alguien (§8.2, B16), por ejemplo si perdió el notebook.
+  let revoking = $state<User | null>(null);
+  let confirmingRevoke = $state(false);
+  // Lo que pasó con la última acción sobre una persona: sesiones cerradas, baja, reactivación.
+  let notice = $state('');
+  // La baja (§8.4) y el superadmin (B15), cada uno con su confirmación.
+  let offboarding = $state<User | null>(null);
+  let confirmingOffboard = $state(false);
+  let promoting = $state<User | null>(null);
+  let confirmingSuper = $state(false);
 
   async function run(action?: () => Promise<void>) {
     busy = true;
@@ -98,6 +121,40 @@
     });
   }
 
+  function revokeSessions(e: SubmitEvent) {
+    e.preventDefault();
+    const u = revoking;
+    if (!u) return;
+    run(async () => {
+      const res = await api<{ sessions_closed: number }>('PATCH', `/admin/users/${u.id}`, { revoke_sessions: true });
+      notice = t('admin.sessions_revoked', { name: u.full_name, n: String(res.sessions_closed) });
+      confirmingRevoke = false;
+    });
+  }
+
+  function reactivate(u: User) {
+    run(async () => {
+      await api('PATCH', `/admin/users/${u.id}`, { is_active: true });
+      notice = t('admin.reactivated', { name: u.full_name });
+    });
+  }
+
+  function setSuperadmin(e: SubmitEvent) {
+    e.preventDefault();
+    const u = promoting;
+    if (!u) return;
+    run(async () => {
+      await api('PATCH', `/admin/users/${u.id}`, { is_global_admin: !u.is_global_admin });
+      confirmingSuper = false;
+    });
+  }
+
+  function status(u: User): string {
+    if (u.offboarded_at) return t('admin.status_offboarded', { date: formatDate(u.offboarded_at, locale()) });
+    if (u.offboarding_at) return t('admin.status_inactive', { date: formatDate(u.offboarding_at, locale()) });
+    return u.invited ? t('admin.status_invited') : t('admin.status_active');
+  }
+
   async function copy() {
     if (!result?.url) return;
     await navigator.clipboard.writeText(result.url);
@@ -112,6 +169,7 @@
 
 <h1>{t('nav.admin')}</h1>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
+{#if notice}<p role="status" class="muted">{notice}</p>{/if}
 
 <section aria-labelledby="people">
   <h2 id="people">{t('admin.people')}</h2>
@@ -132,12 +190,37 @@
             <td>{u.full_name}</td>
             <td>{u.email}</td>
             <td>
-              {u.invited ? t('admin.status_invited') : t('admin.status_active')}
+              {status(u)}
               {#if u.is_global_admin}· {t('admin.superadmin')}{/if}
               {#if u.totp_enabled}· {t('admin.totp_on')}{/if}
             </td>
             <td>
-              {#if u.invited}
+              {#if u.offboarded_at}
+                <button
+                  type="button"
+                  class="link"
+                  aria-label={t('admin.reactivate_label', { name: u.full_name })}
+                  disabled={busy}
+                  onclick={() => reactivate(u)}>{t('admin.reactivate')}</button
+                >
+              {:else if u.offboarding_at}
+                <!-- Durante la gracia nada se perdió todavía: su espacio personal sigue ahí. -->
+                <a href={`/w/~${u.id.toLowerCase()}`} aria-label={t('personal.audit_label', { name: u.full_name })}>{t('personal.audit_link')}</a> ·
+                <button
+                  type="button"
+                  class="link"
+                  aria-label={t('admin.reactivate_label', { name: u.full_name })}
+                  disabled={busy}
+                  onclick={() => reactivate(u)}>{t('admin.reactivate')}</button
+                >
+                ·
+                <button
+                  type="button"
+                  class="link"
+                  disabled={busy}
+                  onclick={() => ((offboarding = u), (notice = ''), (confirmingOffboard = true))}>{t('admin.offboard_complete_now')}</button
+                >
+              {:else if u.invited}
                 <button type="button" class="link" disabled={busy} onclick={() => resend(u)}>{t('admin.invite_resend')}</button>
               {:else}
                 <!-- Modo auditoría (§7): solo lectura, y cada pedido queda en la auditoría. -->
@@ -157,6 +240,33 @@
                     aria-label={t('admin.totp_reset_label', { name: u.full_name })}
                     disabled={busy}
                     onclick={() => ((resetting = u), (confirmingReset = true))}>{t('admin.totp_reset')}</button
+                  >
+                {/if}
+                {#if u.id !== selfId}
+                  ·
+                  <button
+                    type="button"
+                    class="link"
+                    aria-label={t('admin.sessions_revoke_label', { name: u.full_name })}
+                    disabled={busy}
+                    onclick={() => ((revoking = u), (notice = ''), (confirmingRevoke = true))}>{t('admin.sessions_revoke')}</button
+                  >
+                  ·
+                  <button
+                    type="button"
+                    class="link"
+                    aria-label={t(u.is_global_admin ? 'admin.superadmin_revoke_label' : 'admin.superadmin_grant_label', { name: u.full_name })}
+                    disabled={busy}
+                    onclick={() => ((promoting = u), (confirmingSuper = true))}
+                    >{t(u.is_global_admin ? 'admin.superadmin_revoke' : 'admin.superadmin_grant')}</button
+                  >
+                  ·
+                  <button
+                    type="button"
+                    class="link danger"
+                    aria-label={t('admin.offboard_label', { name: u.full_name })}
+                    disabled={busy}
+                    onclick={() => ((offboarding = u), (notice = ''), (confirmingOffboard = true))}>{t('admin.offboard')}</button
                   >
                 {/if}
               {/if}
@@ -237,3 +347,25 @@
     <button type="submit" class="primary danger-btn" disabled={busy}>{t('admin.totp_reset')}</button>
   </form>
 </Dialog>
+
+<Dialog title={t('admin.sessions_revoke')} bind:open={confirmingRevoke}>
+  <form class="stack" onsubmit={revokeSessions}>
+    <p>{t('admin.sessions_revoke_confirm', { name: revoking?.full_name ?? '' })}</p>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    <button type="submit" class="primary danger-btn" disabled={busy}>{t('admin.sessions_revoke')}</button>
+  </form>
+</Dialog>
+
+<Dialog title={t(promoting?.is_global_admin ? 'admin.superadmin_revoke' : 'admin.superadmin_grant')} bind:open={confirmingSuper}>
+  <form class="stack" onsubmit={setSuperadmin}>
+    <p>
+      {t(promoting?.is_global_admin ? 'admin.superadmin_revoke_confirm' : 'admin.superadmin_grant_confirm', { name: promoting?.full_name ?? '' })}
+    </p>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    <button type="submit" class="primary" disabled={busy}>
+      {t(promoting?.is_global_admin ? 'admin.superadmin_revoke' : 'admin.superadmin_grant')}
+    </button>
+  </form>
+</Dialog>
+
+<OffboardDialog user={offboarding} bind:open={confirmingOffboard} ondone={(m) => run(async () => void (notice = m))} />

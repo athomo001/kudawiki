@@ -13,11 +13,15 @@ const mfaCookie = "kw_mfa"
 
 // mfaSetupPaths es lo único que puede pedir quien tiene que configurar el 2FA (§8.1): verse a sí
 // mismo, salir y configurarlo. Lo demás responde 403 mfa_setup_required.
+// Una passkey también lo cumple; registrarla pide reautenticarse, por eso entra /auth/reauth.
 var mfaSetupPaths = map[string]bool{
-	"GET /api/auth/me":          true,
-	"POST /api/auth/logout":     true,
-	"POST /api/me/totp":         true,
-	"POST /api/me/totp/confirm": true,
+	"GET /api/auth/me":             true,
+	"POST /api/auth/logout":        true,
+	"POST /api/me/totp":            true,
+	"POST /api/me/totp/confirm":    true,
+	"POST /api/auth/reauth":        true,
+	"POST /api/me/passkeys/begin":  true,
+	"POST /api/me/passkeys/finish": true,
 }
 
 func (a api) totpRoutes(r chi.Router) {
@@ -92,13 +96,15 @@ func (a api) confirmTOTP(w http.ResponseWriter, r *http.Request) {
 
 func (a api) disableTOTP(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Password string `json:"password"`
-		Code     string `json:"code"`
+		Password     string `json:"password"`
+		Code         string `json:"code"`
+		RevokeOthers bool   `json:"revoke_others"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
-	err := a.Auth.DisableTOTP(r.Context(), currentUser(r), in.Password, in.Code)
+	c, _ := r.Cookie(sessionCookie)
+	err := a.Auth.DisableTOTP(r.Context(), currentUser(r), c.Value, in.Password, in.Code, in.RevokeOthers)
 	if a.rateLimited(w, r, err) {
 		return
 	}
@@ -109,20 +115,54 @@ func (a api) disableTOTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// patchUser es PATCH /admin/users/{id} (§14.2). Por ahora solo restablece el 2FA; activar y dar
-// superadmin llegan con la baja de usuarios (B15, F6).
+// patchUser es PATCH /admin/users/{id} (§14.2): restablece el 2FA, cierra todas las sesiones de
+// la persona (B16), la reactiva y le da o le quita el superadmin (B15). Desactivar es iniciar la
+// baja (POST …/offboarding), que decide qué pasa con lo suyo: aquí is_active solo vale true.
 func (a api) patchUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ResetTOTP bool `json:"reset_totp"`
+		ResetTOTP      bool  `json:"reset_totp"`
+		RevokeSessions bool  `json:"revoke_sessions"`
+		IsActive       *bool `json:"is_active"`
+		IsGlobalAdmin  *bool `json:"is_global_admin"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
-	if in.ResetTOTP {
-		if err := a.Auth.ResetTOTP(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if in.IsActive != nil && !*in.IsActive {
+		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	// Reactivar y cambiar el superadmin es cambiar roles: pide reautenticarse (§8.2).
+	if (in.IsActive != nil || in.IsGlobalAdmin != nil) && !a.reauthenticated(w, r) {
+		return
+	}
+	if in.IsActive != nil {
+		if err := a.Offboarding.Reactivate(r.Context(), currentUser(r).ID, id); err != nil {
 			a.fail(w, r, err)
 			return
 		}
+	}
+	if in.IsGlobalAdmin != nil {
+		if err := a.Offboarding.SetSuperadmin(r.Context(), currentUser(r).ID, id, *in.IsGlobalAdmin); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	if in.ResetTOTP {
+		if err := a.Auth.ResetTOTP(r.Context(), id); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	if in.RevokeSessions {
+		n, err := a.Auth.AdminRevokeSessions(r.Context(), id)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.json(w, http.StatusOK, map[string]int64{"sessions_closed": n})
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

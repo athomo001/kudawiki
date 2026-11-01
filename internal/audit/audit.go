@@ -105,11 +105,28 @@ var (
 	AuthTOTPLockout      = Action{"auth.totp_lockout"}
 	AuthTOTPRecoveryUsed = Action{"auth.totp_recovery_used"}
 	CLIReset2FA          = Action{"admin.cli_reset_2fa"}
+	// Reautenticación antes de lo delicado (§8.2).
+	AuthReauth = Action{"auth.reauth"}
+	// Cerrar sesiones desde "Mis sesiones" o el panel (§8.2); la consola tiene la suya.
+	SessionRevoke = Action{"session.revoke"}
+	// Passkeys (§8.1): alta y baja por la persona; el restablecimiento es auth.totp_reset.
+	AuthPasskeyAdd    = Action{"auth.passkey_add"}
+	AuthPasskeyRemove = Action{"auth.passkey_remove"}
 	// Propuestas (§5.2). Aprobar con cambios es proposal.approve con meta.modified.
 	ProposalSubmit   = Action{"proposal.submit"}
 	ProposalApprove  = Action{"proposal.approve"}
 	ProposalReject   = Action{"proposal.reject"}
 	ProposalWithdraw = Action{"proposal.withdraw"}
+	// Baja de usuarios (§8.4) y el panel de personas (B15). page.owner_transfer también sale al
+	// quitar a alguien de un área; user.pseudonymize es del job (B14, §13.10).
+	UserOffboardingStart    = Action{"user.offboarding_start"}
+	UserOffboardingComplete = Action{"user.offboarding_complete"}
+	UserReactivate          = Action{"user.reactivate"}
+	UserSuperadminGrant     = Action{"user.superadmin_grant"}
+	UserSuperadminRevoke    = Action{"user.superadmin_revoke"}
+	UserPseudonymize        = Action{"user.pseudonymize"}
+	PageOwnerTransfer       = Action{"page.owner_transfer"}
+	PersonalPurge           = Action{"personal.purge"}
 )
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
@@ -124,8 +141,10 @@ var All = []Action{
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,
-	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA,
+	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA, AuthReauth, SessionRevoke, AuthPasskeyAdd, AuthPasskeyRemove,
 	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,
+	UserOffboardingStart, UserOffboardingComplete, UserReactivate, UserSuperadminGrant, UserSuperadminRevoke, UserPseudonymize,
+	PageOwnerTransfer, PersonalPurge,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.

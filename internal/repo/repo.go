@@ -46,6 +46,11 @@ type User struct {
 	Invited       bool // creado por invitación y todavía sin contraseña (SPEC §8.5.3)
 	HasAvatar     bool // la foto se lee aparte (Avatar): no viaja en cada request
 	TOTPEnabled   bool // el secreto se lee aparte (TOTPOf), solo al verificar un código (§8.1)
+	Passkeys      int  // cuántas tiene; las credenciales se leen aparte (PasskeysOf, §8.1)
+	// Baja (§8.4): OffboardingAt es el fin de la gracia de una baja en curso y OffboardedAt cuándo
+	// se completó. Cero si no hay.
+	OffboardingAt time.Time
+	OffboardedAt  time.Time
 }
 
 // ReadingPrefs son las preferencias de lectura de SPEC §15. Los valores los valida auth.
@@ -56,9 +61,14 @@ type ReadingPrefs struct {
 
 type Session struct {
 	TokenHash  string
+	ID         string // el nombre público, para "Mis sesiones" (§8.2)
 	UserID     string
+	IP         string
+	UserAgent  string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+	// ReauthUntil es hasta cuándo vale la reautenticación de esta sesión (§8.2); cero si no hubo.
+	ReauthUntil time.Time
 }
 
 func (r *Repo) CreateUser(ctx context.Context, u User) error {
@@ -71,7 +81,8 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 }
 
 const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
-	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled`
+	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled,
+	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -95,13 +106,16 @@ type scanner interface{ Scan(dest ...any) error }
 func scanUser(row scanner) (User, error) {
 	var u User
 	var prefs string
-	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled)
+	var offboarding, offboarded sql.NullTime
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled, &u.Passkeys,
+		&offboarding, &offboarded)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, err
 	}
+	u.OffboardingAt, u.OffboardedAt = offboarding.Time, offboarded.Time
 	// '{}' (la fila nunca tocó sus preferencias) deja Font vacío: es la predeterminada.
 	if err := json.Unmarshal([]byte(prefs), &u.ReadingPrefs); err != nil {
 		return User{}, err
@@ -145,20 +159,28 @@ func collect[T any](rows *sql.Rows, scan func(scanner) (T, error)) ([]T, error) 
 
 func (r *Repo) CreateSession(ctx context.Context, s Session) error {
 	_, err := r.db.Write.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)`,
-		s.TokenHash, s.UserID, s.CreatedAt.UTC(), s.LastSeenAt.UTC())
+		`INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		s.TokenHash, s.ID, s.UserID, s.CreatedAt.UTC(), s.LastSeenAt.UTC(), s.IP, s.UserAgent)
 	return err
 }
 
 func (r *Repo) SessionByHash(ctx context.Context, tokenHash string) (Session, error) {
 	s := Session{TokenHash: tokenHash}
+	var reauth sql.NullTime
 	err := r.db.Read.QueryRowContext(ctx,
-		`SELECT user_id, created_at, last_seen_at FROM sessions WHERE token_hash = ?`, tokenHash).
-		Scan(&s.UserID, &s.CreatedAt, &s.LastSeenAt)
+		`SELECT user_id, created_at, last_seen_at, reauth_until FROM sessions WHERE token_hash = ?`, tokenHash).
+		Scan(&s.UserID, &s.CreatedAt, &s.LastSeenAt, &reauth)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
+	s.ReauthUntil = reauth.Time
 	return s, err
+}
+
+// SetReauth deja reautenticada una sesión hasta until (§8.2).
+func (r *Repo) SetReauth(ctx context.Context, tokenHash string, until time.Time) error {
+	_, err := r.db.Write.ExecContext(ctx, `UPDATE sessions SET reauth_until = ? WHERE token_hash = ?`, until.UTC(), tokenHash)
+	return err
 }
 
 func (r *Repo) TouchSession(ctx context.Context, tokenHash string, at time.Time) error {

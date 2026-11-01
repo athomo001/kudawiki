@@ -185,6 +185,7 @@ func TestSelfApproval(t *testing.T) {
 	f := newFixture(t)
 	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/a", `{"title":"A","markdown":"a","base_revision":0}`, http.StatusNoContent)
 	own := idOf(t, f.expect(t, "adminTI", "POST", "/api/w/ti/proposals", `{"slug":"a","title":"A","markdown":"b","base_revision":1}`, http.StatusCreated))
+	f.reauth(t, "super")
 	f.expect(t, "super", "POST", "/api/admin/workspaces/"+f.wsID(t, "ti")+"/members", `{"email":"editorTI@empresa.cl","role":"admin"}`, http.StatusNoContent)
 	f.enrollTOTP(t, "editorTI") // como admin, desde ya se le exige el 2FA (§8.1)
 	f.expect(t, "adminTI", "POST", "/api/w/ti/proposals/"+own+"/approve", `{}`, http.StatusConflict)

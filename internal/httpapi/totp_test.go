@@ -38,7 +38,7 @@ func TestTOTP(t *testing.T) {
 
 	// Con 2FA, la contraseña sola no abre sesión: da el desafío en su propia cookie.
 	w := f.do("", "POST", "/api/auth/login", `{"email":"adminTI@empresa.cl","password":"`+password+`"}`)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"totp_required":true`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"mfa_required":true`) {
 		t.Fatalf("login with 2FA: %d %s", w.Code, w.Body)
 	}
 	cookies := w.Result().Cookies()

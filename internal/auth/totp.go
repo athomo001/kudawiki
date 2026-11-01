@@ -50,9 +50,11 @@ const (
 
 // SecondFactor es lo que el 2FA necesita del arranque. Sin la llave no se puede cifrar el secreto:
 // la consola (`kudawiki admin`) no la carga y solo borra.
+// BaseURL decide si hay passkeys: su host es el RP ID (§8.1).
 type SecondFactor struct {
 	Key     []byte
 	Enforce MFAPolicy
+	BaseURL string
 }
 
 func (s *Service) SetSecondFactor(f SecondFactor) {
@@ -60,6 +62,7 @@ func (s *Service) SetSecondFactor(f SecondFactor) {
 		f.Enforce = MFAAdmins
 	}
 	s.mfa = f
+	s.rp = relyingParty(f.BaseURL)
 }
 
 // TOTPSetup es lo que ve la persona al empezar el alta: el secreto para escribirlo a mano y la
@@ -87,9 +90,10 @@ func (s *Service) MFARequired(ctx context.Context, u repo.User) (bool, error) {
 	return s.store.IsAreaAdmin(ctx, u.ID)
 }
 
-// NeedsMFASetup: la persona tiene que configurar el 2FA antes de hacer cualquier otra cosa.
+// NeedsMFASetup: la persona tiene que configurar el 2FA antes de hacer cualquier otra cosa. Una
+// passkey lo cumple igual que el TOTP (§8.1).
 func (s *Service) NeedsMFASetup(ctx context.Context, u repo.User) (bool, error) {
-	if u.TOTPEnabled {
+	if u.TOTPEnabled || u.Passkeys > 0 {
 		return false, nil
 	}
 	return s.MFARequired(ctx, u)
@@ -197,13 +201,14 @@ func (s *Service) ConfirmTOTP(ctx context.Context, u repo.User, sessionToken, co
 }
 
 // DisableTOTP lo apaga la persona misma, con su contraseña y un código: una sesión robada no
-// alcanza. A quien se le exige no puede apagarlo.
-func (s *Service) DisableTOTP(ctx context.Context, u repo.User, password, code string) error {
+// alcanza. A quien se le exige no puede apagarlo, salvo que le quede una passkey (§8.1).
+// revokeOthers cierra las demás sesiones (§8.2).
+func (s *Service) DisableTOTP(ctx context.Context, u repo.User, sessionToken, password, code string, revokeOthers bool) error {
 	required, err := s.MFARequired(ctx, u)
 	if err != nil {
 		return err
 	}
-	if required {
+	if required && u.Passkeys == 0 {
 		return ErrTOTPRequired
 	}
 	if !u.TOTPEnabled {
@@ -230,23 +235,41 @@ func (s *Service) DisableTOTP(ctx context.Context, u repo.User, password, code s
 		return err
 	}
 	s.forget(key)
-	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPDisable, TargetType: "user", TargetID: u.ID})
+	var closed int64
+	if revokeOthers {
+		if closed, err = s.store.DeleteOtherSessions(ctx, u.ID, hashToken(sessionToken)); err != nil {
+			return err
+		}
+	}
+	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPDisable, TargetType: "user", TargetID: u.ID,
+		Meta: map[string]any{"other_sessions_closed": closed}})
 	return nil
 }
 
-// ResetTOTP es el restablecimiento del superadmin para quien perdió el celular (§14.2). Si a la
-// persona se le exige, en su próximo pedido tendrá que configurarlo de nuevo.
+// ResetTOTP es el restablecimiento del superadmin para quien perdió el celular (§14.2): borra el
+// TOTP y las passkeys. Si a la persona se le exige, en su próximo pedido tendrá que configurarlo
+// de nuevo.
 func (s *Service) ResetTOTP(ctx context.Context, userID string) error {
-	if err := s.store.DisableTOTP(ctx, userID); err != nil {
+	n, err := s.resetSecondFactor(ctx, userID)
+	if err != nil {
 		return err
 	}
-	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPReset, TargetType: "user", TargetID: userID})
+	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPReset, TargetType: "user", TargetID: userID, Meta: map[string]any{"passkeys": n}})
 	return nil
+}
+
+// resetSecondFactor borra todo el 2FA de una persona y dice cuántas passkeys tenía.
+func (s *Service) resetSecondFactor(ctx context.Context, userID string) (int64, error) {
+	if err := s.store.DisableTOTP(ctx, userID); err != nil {
+		return 0, err
+	}
+	return s.store.DeletePasskeys(ctx, userID)
 }
 
 // challenge guarda el primer paso de un login con 2FA: la contraseña ya se verificó y falta el
-// código. Vive en memoria, como los intentos: si el servidor se reinicia se vuelve a empezar.
-func (s *Service) challenge(userID string) (LoginResult, error) {
+// código o la passkey. Vive en memoria, como los intentos: si el servidor se reinicia se vuelve a
+// empezar.
+func (s *Service) challenge(u repo.User) (LoginResult, error) {
 	token, err := newToken()
 	if err != nil {
 		return LoginResult{}, err
@@ -259,8 +282,15 @@ func (s *Service) challenge(userID string) (LoginResult, error) {
 			delete(s.challenges, k)
 		}
 	}
-	s.challenges[hashToken(token)] = mfaChallenge{userID: userID, expires: now.Add(mfaChallengeTTL)}
-	return LoginResult{Challenge: token}, nil
+	s.challenges[hashToken(token)] = mfaChallenge{userID: u.ID, expires: now.Add(mfaChallengeTTL)}
+	var methods []string
+	if u.TOTPEnabled {
+		methods = append(methods, "totp")
+	}
+	if u.Passkeys > 0 && s.rp != nil {
+		methods = append(methods, "passkey")
+	}
+	return LoginResult{Challenge: token, Methods: methods}, nil
 }
 
 // VerifyLogin es el segundo paso (§14.1 POST /auth/totp): con el código de la app o uno de
@@ -297,7 +327,7 @@ func (s *Service) VerifyLogin(ctx context.Context, challenge, code string) (stri
 	delete(s.challenges, h)
 	s.mu.Unlock()
 	s.forget(key)
-	return s.startSession(ctx, u, factor)
+	return s.startSession(ctx, u, map[string]any{"second_factor": factor})
 }
 
 // checkCode acepta un código de la app (6 dígitos) o uno de recuperación. attempt es el número

@@ -129,6 +129,7 @@ func TestGlobalTemplates(t *testing.T) {
 	if w := f.do("super", "PUT", "/api/admin/templates/"+id, `{"name":"Ficha cambiada","markdown":"y","level":1}`); w.Code != http.StatusNoContent {
 		t.Fatalf("update global: %d %s", w.Code, w.Body)
 	}
+	f.reauth(t, "super")
 	if w := f.do("super", "POST", "/api/admin/workspaces/"+f.wsID(t, "ops")+"/members", `{"email":"adminTI@empresa.cl","role":"admin"}`); w.Code != http.StatusNoContent {
 		t.Fatalf("add admin: %d %s", w.Code, w.Body)
 	}

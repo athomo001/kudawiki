@@ -27,6 +27,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/offboarding"
 	"github.com/athomo001/kudawiki/internal/personal"
 	"github.com/athomo001/kudawiki/internal/presence"
 	"github.com/athomo001/kudawiki/internal/proposals"
@@ -47,8 +48,26 @@ type authService interface {
 	TOTPStatus(ctx context.Context, u repo.User) (auth.TOTPStatus, error)
 	BeginTOTP(ctx context.Context, u repo.User, issuer string) (auth.TOTPSetup, error)
 	ConfirmTOTP(ctx context.Context, u repo.User, sessionToken, code string, revokeOthers bool) ([]string, error)
-	DisableTOTP(ctx context.Context, u repo.User, password, code string) error
+	DisableTOTP(ctx context.Context, u repo.User, sessionToken, password, code string, revokeOthers bool) error
 	ResetTOTP(ctx context.Context, userID string) error
+	// Passkeys (§8.1): las opciones y las credenciales viajan como el JSON de WebAuthn.
+	PasskeysAvailable() bool
+	Passkeys(ctx context.Context, u repo.User) ([]auth.PasskeyInfo, error)
+	BeginPasskey(ctx context.Context, u repo.User, sessionToken, rpName string) (json.RawMessage, error)
+	FinishPasskey(ctx context.Context, u repo.User, sessionToken, name string, credential []byte) (auth.PasskeyInfo, error)
+	DeletePasskey(ctx context.Context, u repo.User, id string) error
+	BeginPasskeyLogin(ctx context.Context) (json.RawMessage, string, error)
+	FinishPasskeyLogin(ctx context.Context, ip, token, challenge string, credential []byte) (string, error)
+	BeginPasskeyReauth(ctx context.Context, u repo.User, sessionToken string) (json.RawMessage, error)
+	FinishPasskeyReauth(ctx context.Context, u repo.User, sessionToken string, credential []byte) error
+	// Reautenticación antes de lo delicado (§8.2).
+	Reauth(ctx context.Context, u repo.User, sessionToken, password, code string) error
+	Reauthenticated(ctx context.Context, sessionToken string) (bool, error)
+	// Mis sesiones (§8.2) y el cierre desde el panel (B16).
+	Sessions(ctx context.Context, u repo.User, sessionToken string) ([]auth.SessionInfo, error)
+	RevokeSession(ctx context.Context, u repo.User, id string) error
+	RevokeOtherSessions(ctx context.Context, u repo.User, sessionToken string) (int64, error)
+	AdminRevokeSessions(ctx context.Context, userID string) (int64, error)
 	Authenticate(ctx context.Context, token string) (repo.User, error)
 	Check(ctx context.Context, token string) (repo.User, error)
 	Logout(ctx context.Context, token string) error
@@ -265,11 +284,13 @@ type Deps struct {
 	Personal   personalService
 	Reading    readingService
 	Quizzes    quizService
-	Presence   *presence.Hub
-	Read       reader
-	DB         readiness
-	UI         fs.FS // contenido de ui/dist
-	BaseURL    *url.URL
+	// Offboarding es la baja de usuarios y el superadmin desde el panel (§8.4, B15).
+	Offboarding offboardingService
+	Presence    *presence.Hub
+	Read        reader
+	DB          readiness
+	UI          fs.FS // contenido de ui/dist
+	BaseURL     *url.URL
 	// TrashRetention dice cuándo se purga lo que está en la papelera (SPEC §4.5).
 	TrashRetention time.Duration
 	// StorageDir es la carpeta de los archivos subidos: la salud la compara con la BD (§13.7).
@@ -304,14 +325,18 @@ func New(d Deps) http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		// La IP de quien pide va al contexto para la auditoría (§11.2); la sesión agrega quién es.
+		// La IP y el navegador, también para la sesión que se abra (§8.2).
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				next.ServeHTTP(w, r.WithContext(audit.WithActor(r.Context(), audit.Actor{IP: clientIP(r)})))
+				ctx := audit.WithActor(r.Context(), audit.Actor{IP: clientIP(r)})
+				next.ServeHTTP(w, r.WithContext(auth.WithClient(ctx, auth.Client{IP: clientIP(r), UserAgent: r.UserAgent()})))
 			})
 		})
 		r.Use(middleware.RateLimit(limit, time.Now))
 		r.Post("/auth/login", a.login)
 		r.Post("/auth/totp", a.verifyTOTP)
+		r.Post("/auth/passkey/begin", a.beginPasskeyLogin)
+		r.Post("/auth/passkey/finish", a.finishPasskeyLogin)
 		r.Post("/auth/invite/accept", a.acceptInvite)
 		r.Post("/auth/password-reset", a.requestPasswordReset)
 		r.Post("/auth/password-reset/complete", a.completePasswordReset)
@@ -319,9 +344,12 @@ func New(d Deps) http.Handler {
 			r.Use(a.requireSession)
 			r.Post("/auth/logout", a.logout)
 			r.Get("/auth/me", a.me)
+			r.Post("/auth/reauth", a.reauth)
 			r.Patch("/me", a.setPreferences)
 			a.profileRoutes(r)
 			a.totpRoutes(r)
+			a.passkeyRoutes(r)
+			a.sessionRoutes(r)
 			a.notificationRoutes(r)
 			a.homeRoutes(r)
 			r.Route("/admin", a.adminRoutes)
@@ -398,7 +426,7 @@ func (a api) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/reset" || r.URL.Path == "/invite" || r.URL.Path == "/unsubscribe" {
 		h.Set("Referrer-Policy", "no-referrer") // las páginas que abren un enlace con token (§8.5.1, §12.1)
 	}
-	page = brandPage(page, site, a.Auth.ResetAvailable(r.Context()), nonce)
+	page = brandPage(page, site, loginOptions{PasswordReset: a.Auth.ResetAvailable(r.Context()), Passkeys: a.Auth.PasskeysAvailable()}, nonce)
 	w.Write(bytes.Replace(page, []byte("<head>"), []byte(`<head><meta name="csp-nonce" content="`+nonce+`">`), 1))
 }
 
@@ -435,72 +463,82 @@ func (a api) error(w http.ResponseWriter, r *http.Request, status int, code stri
 
 // domainErrors: el texto de cada error de dominio es su código estable.
 var domainErrors = map[error]int{
-	auth.ErrInvalidCredentials:   http.StatusUnauthorized,
-	auth.ErrPasswordTooShort:     http.StatusUnprocessableEntity,
-	auth.ErrPasswordCommon:       http.StatusUnprocessableEntity,
-	auth.ErrInvalidUser:          http.StatusUnprocessableEntity,
-	auth.ErrEmailTaken:           http.StatusConflict,
-	auth.ErrInvalidInvite:        http.StatusGone,
-	auth.ErrInvalidReset:         http.StatusGone,
-	auth.ErrSamePassword:         http.StatusUnprocessableEntity,
-	auth.ErrNoLocalPassword:      http.StatusConflict,
-	auth.ErrResetUnavailable:     http.StatusNotFound,
-	auth.ErrNotInvited:           http.StatusConflict,
-	auth.ErrInvalidPreferences:   http.StatusUnprocessableEntity,
-	auth.ErrWrongPassword:        http.StatusUnprocessableEntity,
-	auth.ErrAvatarTooLarge:       http.StatusRequestEntityTooLarge,
-	auth.ErrAvatarType:           http.StatusUnsupportedMediaType,
-	auth.ErrTOTPEnabled:          http.StatusConflict,
-	auth.ErrTOTPNotStarted:       http.StatusConflict,
-	auth.ErrTOTPRequired:         http.StatusConflict,
-	auth.ErrInvalidCode:          http.StatusUnprocessableEntity,
-	auth.ErrMFAExpired:           http.StatusUnauthorized,
-	workspace.ErrInvalidArea:     http.StatusUnprocessableEntity,
-	workspace.ErrSlugTaken:       http.StatusConflict,
-	workspace.ErrInvalidRole:     http.StatusUnprocessableEntity,
-	workspace.ErrUserNotFound:    http.StatusUnprocessableEntity,
-	workspace.ErrForbidden:       http.StatusForbidden,
-	wiki.ErrInvalidPage:          http.StatusUnprocessableEntity,
-	wiki.ErrInvalidInfo:          http.StatusUnprocessableEntity,
-	wiki.ErrConflict:             http.StatusConflict,
-	wiki.ErrPathUnavailable:      http.StatusConflict,
-	wiki.ErrSecretInHeading:      http.StatusUnprocessableEntity,
-	wiki.ErrSecretUnclosed:       http.StatusUnprocessableEntity,
-	wiki.ErrSummaryRequired:      http.StatusUnprocessableEntity,
-	wiki.ErrInvalidTags:          http.StatusUnprocessableEntity,
-	wiki.ErrInvalidMove:          http.StatusUnprocessableEntity,
-	wiki.ErrInvalidLevel:         http.StatusUnprocessableEntity,
-	wiki.ErrLevelBelowParent:     http.StatusUnprocessableEntity,
-	wiki.ErrInvalidAnnouncement:  http.StatusUnprocessableEntity,
-	wiki.ErrInvalidTemplate:      http.StatusUnprocessableEntity,
-	wiki.ErrInvalidReview:        http.StatusUnprocessableEntity,
-	wiki.ErrApprovalRequired:     http.StatusConflict,
-	wiki.ErrInvalidOverride:      http.StatusUnprocessableEntity,
-	wiki.ErrMergeConflict:        http.StatusConflict,
-	proposals.ErrNoChanges:       http.StatusUnprocessableEntity,
-	reading.ErrInvalidAudience:   http.StatusUnprocessableEntity,
-	reading.ErrInvalidRequest:    http.StatusUnprocessableEntity,
-	reading.ErrPageChanged:       http.StatusConflict,
-	reading.ErrQuizRequired:      http.StatusConflict,
-	quiz.ErrInvalidQuiz:          http.StatusUnprocessableEntity,
-	quiz.ErrNoAttempts:           http.StatusConflict,
-	quiz.ErrCooldown:             http.StatusConflict,
-	quiz.ErrAttemptClosed:        http.StatusConflict,
-	quiz.ErrQuizPublished:        http.StatusConflict,
-	proposals.ErrCommentRequired: http.StatusUnprocessableEntity,
-	proposals.ErrClosed:          http.StatusConflict,
-	proposals.ErrSelfApproval:    http.StatusConflict,
-	proposals.ErrInvalid:         http.StatusBadRequest,
-	notify.ErrInvalidPrefs:       http.StatusUnprocessableEntity,
-	media.ErrTooLarge:            http.StatusRequestEntityTooLarge,
-	media.ErrUnsupportedType:     http.StatusUnsupportedMediaType,
-	branding.ErrInvalid:          http.StatusUnprocessableEntity,
-	branding.ErrLocked:           http.StatusConflict,
-	branding.ErrTooLarge:         http.StatusRequestEntityTooLarge,
-	branding.ErrUnsupportedType:  http.StatusUnsupportedMediaType,
-	mail.ErrInvalid:              http.StatusUnprocessableEntity,
-	mail.ErrLocked:               http.StatusConflict,
-	mail.ErrNotConfigured:        http.StatusConflict,
+	auth.ErrInvalidCredentials:        http.StatusUnauthorized,
+	auth.ErrPasswordTooShort:          http.StatusUnprocessableEntity,
+	auth.ErrPasswordCommon:            http.StatusUnprocessableEntity,
+	auth.ErrInvalidUser:               http.StatusUnprocessableEntity,
+	auth.ErrEmailTaken:                http.StatusConflict,
+	auth.ErrInvalidInvite:             http.StatusGone,
+	auth.ErrInvalidReset:              http.StatusGone,
+	auth.ErrSamePassword:              http.StatusUnprocessableEntity,
+	auth.ErrNoLocalPassword:           http.StatusConflict,
+	auth.ErrResetUnavailable:          http.StatusNotFound,
+	auth.ErrNotInvited:                http.StatusConflict,
+	auth.ErrInvalidPreferences:        http.StatusUnprocessableEntity,
+	auth.ErrWrongPassword:             http.StatusUnprocessableEntity,
+	auth.ErrAvatarTooLarge:            http.StatusRequestEntityTooLarge,
+	auth.ErrAvatarType:                http.StatusUnsupportedMediaType,
+	auth.ErrTOTPEnabled:               http.StatusConflict,
+	auth.ErrTOTPNotStarted:            http.StatusConflict,
+	auth.ErrTOTPRequired:              http.StatusConflict,
+	auth.ErrInvalidCode:               http.StatusUnprocessableEntity,
+	auth.ErrMFAExpired:                http.StatusUnauthorized,
+	auth.ErrPasskeysUnavailable:       http.StatusConflict,
+	auth.ErrPasskeyInvalid:            http.StatusUnprocessableEntity,
+	auth.ErrInvalidPasskeyName:        http.StatusUnprocessableEntity,
+	workspace.ErrInvalidArea:          http.StatusUnprocessableEntity,
+	workspace.ErrSlugTaken:            http.StatusConflict,
+	workspace.ErrInvalidRole:          http.StatusUnprocessableEntity,
+	workspace.ErrUserNotFound:         http.StatusUnprocessableEntity,
+	workspace.ErrForbidden:            http.StatusForbidden,
+	wiki.ErrInvalidPage:               http.StatusUnprocessableEntity,
+	wiki.ErrInvalidInfo:               http.StatusUnprocessableEntity,
+	wiki.ErrConflict:                  http.StatusConflict,
+	wiki.ErrPathUnavailable:           http.StatusConflict,
+	wiki.ErrSecretInHeading:           http.StatusUnprocessableEntity,
+	wiki.ErrSecretUnclosed:            http.StatusUnprocessableEntity,
+	wiki.ErrSummaryRequired:           http.StatusUnprocessableEntity,
+	wiki.ErrInvalidTags:               http.StatusUnprocessableEntity,
+	wiki.ErrInvalidMove:               http.StatusUnprocessableEntity,
+	wiki.ErrInvalidLevel:              http.StatusUnprocessableEntity,
+	wiki.ErrLevelBelowParent:          http.StatusUnprocessableEntity,
+	wiki.ErrInvalidAnnouncement:       http.StatusUnprocessableEntity,
+	wiki.ErrInvalidTemplate:           http.StatusUnprocessableEntity,
+	wiki.ErrInvalidReview:             http.StatusUnprocessableEntity,
+	wiki.ErrApprovalRequired:          http.StatusConflict,
+	wiki.ErrInvalidOverride:           http.StatusUnprocessableEntity,
+	wiki.ErrMergeConflict:             http.StatusConflict,
+	proposals.ErrNoChanges:            http.StatusUnprocessableEntity,
+	reading.ErrInvalidAudience:        http.StatusUnprocessableEntity,
+	reading.ErrInvalidRequest:         http.StatusUnprocessableEntity,
+	reading.ErrPageChanged:            http.StatusConflict,
+	reading.ErrQuizRequired:           http.StatusConflict,
+	quiz.ErrInvalidQuiz:               http.StatusUnprocessableEntity,
+	quiz.ErrNoAttempts:                http.StatusConflict,
+	quiz.ErrCooldown:                  http.StatusConflict,
+	quiz.ErrAttemptClosed:             http.StatusConflict,
+	quiz.ErrQuizPublished:             http.StatusConflict,
+	proposals.ErrCommentRequired:      http.StatusUnprocessableEntity,
+	proposals.ErrClosed:               http.StatusConflict,
+	proposals.ErrSelfApproval:         http.StatusConflict,
+	proposals.ErrInvalid:              http.StatusBadRequest,
+	notify.ErrInvalidPrefs:            http.StatusUnprocessableEntity,
+	media.ErrTooLarge:                 http.StatusRequestEntityTooLarge,
+	media.ErrUnsupportedType:          http.StatusUnsupportedMediaType,
+	branding.ErrInvalid:               http.StatusUnprocessableEntity,
+	branding.ErrLocked:                http.StatusConflict,
+	branding.ErrTooLarge:              http.StatusRequestEntityTooLarge,
+	branding.ErrUnsupportedType:       http.StatusUnsupportedMediaType,
+	mail.ErrInvalid:                   http.StatusUnprocessableEntity,
+	mail.ErrLocked:                    http.StatusConflict,
+	mail.ErrNotConfigured:             http.StatusConflict,
+	offboarding.ErrSelf:               http.StatusConflict,
+	offboarding.ErrAlreadyOffboarded:  http.StatusConflict,
+	offboarding.ErrOffboardingPending: http.StatusConflict,
+	offboarding.ErrAlreadyActive:      http.StatusConflict,
+	offboarding.ErrUserInactive:       http.StatusConflict,
+	offboarding.ErrInvalidReceiver:    http.StatusUnprocessableEntity,
+	offboarding.ErrNeedsAdmin:         http.StatusConflict,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.

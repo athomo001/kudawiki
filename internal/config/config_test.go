@@ -155,3 +155,27 @@ func TestAuthLocal(t *testing.T) {
 		t.Error("a reset link valid for days should be rejected")
 	}
 }
+
+// La baja (§8.4, §13.10): 30 días de gracia y un año para seudonimizar, decididos el 2026-11-01.
+func TestOffboarding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("{}\n"), 0o600)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OffboardingGrace() != 30*24*time.Hour || c.PseudonymizeAfter() != 365*24*time.Hour {
+		t.Errorf("defaults: grace %v, pseudonymize after %v", c.OffboardingGrace(), c.PseudonymizeAfter())
+	}
+	t.Setenv("KUDAWIKI_OFFBOARDING_GRACE_DAYS", "0")
+	if c, err = Load(path); err != nil || c.OffboardingGrace() != 0 {
+		t.Errorf("grace 0: %v %v", c.OffboardingGrace(), err)
+	}
+	for env, v := range map[string]string{"KUDAWIKI_OFFBOARDING_GRACE_DAYS": "-1", "KUDAWIKI_AUDIT_PSEUDONYMIZE_AFTER_DAYS": "0"} {
+		t.Setenv(env, v)
+		if _, err := Load(path); err == nil {
+			t.Errorf("%s=%s accepted", env, v)
+		}
+		t.Setenv(env, "30")
+	}
+}

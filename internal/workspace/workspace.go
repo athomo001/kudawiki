@@ -4,6 +4,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -31,7 +32,10 @@ type store interface {
 	UserByEmail(ctx context.Context, email string) (repo.User, error)
 	MemberRole(ctx context.Context, s repo.Scope, userID string) (string, error)
 	SetMember(ctx context.Context, s repo.Scope, userID, role string) error
-	RemoveMember(ctx context.Context, s repo.Scope, userID string) error
+	RemoveMember(ctx context.Context, s repo.Scope, userID, receiver string) (repo.Transfer, error)
+	OldestAdmin(ctx context.Context, s repo.Scope, except string) (string, error)
+	UserByID(ctx context.Context, id string) (repo.User, error)
+	AddNotifications(ctx context.Context, wsID string, ns []repo.NewNotification) error
 }
 
 // Actor es quien hace el cambio.
@@ -43,9 +47,12 @@ type Actor struct {
 type Service struct {
 	store store
 	audit *audit.Recorder
+	log   *slog.Logger
 }
 
-func NewService(s store, rec *audit.Recorder) *Service { return &Service{store: s, audit: rec} }
+func NewService(s store, rec *audit.Recorder, log *slog.Logger) *Service {
+	return &Service{store: s, audit: rec, log: log}
+}
 
 // Create es solo del superadmin; la ruta ya lo exige.
 func (s *Service) Create(ctx context.Context, slug, name string) (repo.Workspace, error) {
@@ -179,12 +186,43 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, sc repo.Scope, user
 	if err != nil || before == "" {
 		return err // quitar a alguien que no es miembro no hace nada y no se registra
 	}
-	if err := s.store.RemoveMember(ctx, sc, userID); err != nil {
+	// Lo suyo en esta área pasa al admin más antiguo que queda; si no queda ninguno, a quien lo
+	// sacó, que entonces es el superadmin (§8.4).
+	receiver, err := s.store.OldestAdmin(ctx, sc, userID)
+	if err != nil {
+		return err
+	}
+	if receiver == "" {
+		receiver = a.UserID
+	}
+	t, err := s.store.RemoveMember(ctx, sc, userID, receiver)
+	if err != nil {
 		return err
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.WsMemberRemove, WsID: sc.WsID, TargetType: "user", TargetID: userID,
 		Meta: map[string]any{"role": before}})
+	s.transferred(ctx, t, userID, a.UserID)
 	return nil
+}
+
+// transferred registra cada página que cambió de dueño y avisa a quien la recibió, salvo que
+// sea quien hizo el cambio: ya lo sabe.
+func (s *Service) transferred(ctx context.Context, t repo.Transfer, from, actorID string) {
+	for _, id := range t.PageIDs {
+		s.audit.Record(ctx, audit.Event{Action: audit.PageOwnerTransfer, WsID: t.WsID, TargetType: "page", TargetID: id,
+			Meta: map[string]any{"from": from, "to": t.To}})
+	}
+	if t.Empty() || t.To == actorID {
+		return
+	}
+	u, err := s.store.UserByID(ctx, from)
+	if err == nil {
+		err = s.store.AddNotifications(ctx, t.WsID, []repo.NewNotification{t.Notice(u.FullName)})
+	}
+	if err != nil {
+		// El cambio de dueño ya está hecho y auditado; sin el aviso, la persona lo ve igual en el área.
+		s.log.Error("ownership notice failed", "workspace", t.WsID, "err", err)
+	}
 }
 
 // authorize aplica §3.1 y §19.10: el rol admin lo da y lo quita solo el superadmin, así un

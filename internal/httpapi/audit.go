@@ -36,7 +36,11 @@ func (a api) auditJSON(w http.ResponseWriter, r *http.Request, es []repo.AuditEn
 		json.Unmarshal([]byte(e.Snapshot), &actor)
 		ev := map[string]any{"id": e.ID, "at": e.At, "action": e.Action, "target_type": e.TargetType,
 			"target_id": e.TargetID, "meta": meta}
-		if e.ActorID != "" {
+		switch {
+		case actor["pseudonym"] != "":
+			// Seudonimizada tras la baja (§13.10): ni nombre ni correo ni IP.
+			ev["actor"] = map[string]string{"pseudonym": actor["pseudonym"]}
+		case e.ActorID != "":
 			ev["actor"] = map[string]string{"name": actor["name"], "email": actor["email"]}
 			if withIP {
 				ev["ip"] = actor["ip"]

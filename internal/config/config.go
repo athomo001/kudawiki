@@ -28,9 +28,16 @@ type Config struct {
 	Trash struct {
 		RetentionDays int `yaml:"retention_days"`
 	} `yaml:"trash"`
+	// Audit.PseudonymizeAfterDays: a los cuántos días de completada una baja se reemplaza la
+	// copia del actor por un seudónimo (§13.10, §19.17).
 	Audit struct {
-		RetentionDays int `yaml:"retention_days"`
+		RetentionDays         int `yaml:"retention_days"`
+		PseudonymizeAfterDays int `yaml:"pseudonymize_after_days"`
 	} `yaml:"audit"`
+	// Offboarding.GraceDays: el período de gracia de la baja de usuarios (§8.4, §19.15).
+	Offboarding struct {
+		GraceDays int `yaml:"grace_days"`
+	} `yaml:"offboarding"`
 	// Backup: el respaldo automático, una vez al día a esa hora local, y cuántos se guardan
 	// (SPEC §13.3). El destino externo llega con F8.
 	Backup struct {
@@ -132,6 +139,15 @@ func (c Config) AuditRetention() time.Duration {
 	return time.Duration(max(c.Audit.RetentionDays, AuditFloorDays)) * 24 * time.Hour
 }
 
+// OffboardingGrace y PseudonymizeAfter son los plazos de la baja (SPEC §8.4, §13.10).
+func (c Config) OffboardingGrace() time.Duration {
+	return time.Duration(c.Offboarding.GraceDays) * 24 * time.Hour
+}
+
+func (c Config) PseudonymizeAfter() time.Duration {
+	return time.Duration(c.Audit.PseudonymizeAfterDays) * 24 * time.Hour
+}
+
 // Load arma la configuración: valores por defecto, luego el archivo y al final las variables.
 // Si path está vacío se usa DefaultPath solo si existe; un path explícito que no existe es un error.
 func Load(path string) (Config, error) {
@@ -141,10 +157,12 @@ func Load(path string) (Config, error) {
 		DataDir:       "/var/lib/kudawiki",
 		MasterKeyFile: "/etc/kudawiki/master.key",
 	}
-	c.Upload.MaxBytes = 25 << 20 // 25 MB (SPEC §4.4)
-	c.Trash.RetentionDays = 30   // SPEC §4.5
-	c.Audit.RetentionDays = 730  // 2 años (SPEC §11.1)
-	c.Backup.Time = "03:00"      // SPEC §13.3
+	c.Upload.MaxBytes = 25 << 20        // 25 MB (SPEC §4.4)
+	c.Trash.RetentionDays = 30          // SPEC §4.5
+	c.Audit.RetentionDays = 730         // 2 años (SPEC §11.1)
+	c.Audit.PseudonymizeAfterDays = 365 // 1 año tras la baja (SPEC §19.17)
+	c.Offboarding.GraceDays = 30        // SPEC §8.4, §19.15
+	c.Backup.Time = "03:00"             // SPEC §13.3
 	c.Backup.KeepDaily, c.Backup.KeepWeekly, c.Backup.KeepMonthly = 7, 4, 6
 	c.Auth.Local.PasswordReset = true // SPEC §8.5.1
 	c.Auth.Local.ResetTTL, c.Auth.Local.InviteTTL = "30m", "168h"
@@ -247,6 +265,18 @@ func Load(path string) (Config, error) {
 		}
 		c.Audit.RetentionDays = n
 	}
+	for env, dst := range map[string]*int{
+		"KUDAWIKI_AUDIT_PSEUDONYMIZE_AFTER_DAYS": &c.Audit.PseudonymizeAfterDays,
+		"KUDAWIKI_OFFBOARDING_GRACE_DAYS":        &c.Offboarding.GraceDays,
+	} {
+		if v, ok := os.LookupEnv(env); ok {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("%s: %w", env, err)
+			}
+			*dst = n
+		}
+	}
 	return c, c.validate()
 }
 
@@ -294,6 +324,13 @@ func (c Config) validate() error {
 	}
 	if c.Approval.RemindAfterDays < 1 || c.Approval.RemindAfterDays > 90 {
 		return fmt.Errorf("approval.remind_after_days must be between 1 and 90, got %d", c.Approval.RemindAfterDays)
+	}
+	// 0 días de gracia: la baja se completa en la próxima pasada del job diario.
+	if c.Offboarding.GraceDays < 0 || c.Offboarding.GraceDays > 365 {
+		return fmt.Errorf("offboarding.grace_days must be between 0 and 365, got %d", c.Offboarding.GraceDays)
+	}
+	if c.Audit.PseudonymizeAfterDays < 1 {
+		return fmt.Errorf("audit.pseudonymize_after_days must be positive, got %d", c.Audit.PseudonymizeAfterDays)
 	}
 	if c.Listen == "" || c.DataDir == "" || c.MasterKeyFile == "" {
 		return errors.New("listen, data_dir and master_key_file are required")

@@ -32,6 +32,7 @@ var templates = map[string]int{
 	"password_reset":            3, // §8.5.1
 	"password_changed":          3, // §8.5.1, §8.5.2: aviso de seguridad, no desactivable
 	"superadmin_password_reset": 2, // §8.5.3: a los demás superadmins
+	"new_login":                 3, // §8.2: IP o navegador nuevo; de seguridad, no desactivable
 	// Avisos (§5.3, §12.1): nunca llevan contenido de la página, solo su título.
 	"proposal_pending":    2,
 	"proposal_reminder":   2,
@@ -48,6 +49,7 @@ var templates = map[string]int{
 	"quiz_reminder":       2,
 	"quiz_extra_attempts": 1,
 	"quiz_failed_out":     2,
+	"ownership_received":  2, // §8.4
 	"digest":              1,
 }
 
@@ -56,6 +58,7 @@ var lineTemplates = map[string]bool{
 	"proposal_pending": true, "proposal_reminder": true, "proposal_approved": true, "proposal_rejected": true,
 	"proposal_rebase": true, "page_changed": true, "page_deleted": true, "review_due": true, "review_reminder": true,
 	"read_request": true, "read_reminder": true, "quiz_assigned": true, "quiz_reminder": true, "quiz_extra_attempts": true, "quiz_failed_out": true,
+	"ownership_received": true,
 }
 
 // content es la descripción de un correo: de ella salen el HTML y el texto plano, así nunca

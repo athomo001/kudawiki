@@ -200,7 +200,7 @@ func TestPresence(t *testing.T) {
 	}
 
 	// Sale del área: su conexión se corta y el admin deja de verlo.
-	if err := repo.New(f.db).RemoveMember(context.Background(), repo.Scope{WsID: wsID(t, f, "ti")}, f.users["editorTI"]); err != nil {
+	if _, err := repo.New(f.db).RemoveMember(context.Background(), repo.Scope{WsID: wsID(t, f, "ti")}, f.users["editorTI"], ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := editors(editor); err != io.EOF {

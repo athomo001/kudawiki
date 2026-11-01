@@ -174,9 +174,3 @@ func (r *Repo) SetMember(ctx context.Context, s Scope, userID, role string) erro
 		 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`, s.WsID, userID, role)
 	return err
 }
-
-func (r *Repo) RemoveMember(ctx context.Context, s Scope, userID string) error {
-	_, err := r.db.Write.ExecContext(ctx,
-		`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, s.WsID, userID)
-	return err
-}

@@ -31,6 +31,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
+	"github.com/athomo001/kudawiki/internal/offboarding"
 	"github.com/athomo001/kudawiki/internal/personal"
 	"github.com/athomo001/kudawiki/internal/presence"
 	"github.com/athomo001/kudawiki/internal/proposals"
@@ -56,7 +57,11 @@ type fixture struct {
 	// El 2FA de quienes lo tienen obligatorio (super, adminTI, adminFin, §8.1): el secreto y
 	// los códigos de recuperación, para los tests del segundo paso.
 	totp   map[string]enrolled
+	spent  map[string]int  // cuántos códigos de recuperación gastó reauth de cada uno
 	notify *notify.Service // los tests de avisos corren el worker a mano (Pass)
+	// La baja de usuarios; los tests corren su job a mano (Run) y mueven su reloj (§8.4).
+	offboarding *offboarding.Service
+	clock       *time.Time
 }
 
 // unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
@@ -85,13 +90,16 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
-	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32)})
+	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), BaseURL: origin})
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
 	files := media.NewService(store, rec, storage, 1<<20)
-	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
-		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
+	clock := time.Now()
+	leaving := offboarding.NewService(store, files, rec, bytes.Repeat([]byte{1}, 32),
+		offboarding.Config{Grace: 30 * 24 * time.Hour, PseudonymizeAfter: 365 * 24 * time.Hour}, func() time.Time { return clock }, slog.New(slog.DiscardHandler))
+	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, slog.Default()), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
+		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
@@ -105,7 +113,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 			t.Fatal(err)
 		}
 	}
-	ws := workspace.NewService(store, rec)
+	ws := workspace.NewService(store, rec, slog.Default())
 	ti, _ := ws.Create(ctx, "ti", "TI")
 	fin, _ := ws.Create(ctx, "finanzas", "Finanzas")
 	for name, m := range map[string]struct {
@@ -117,7 +125,8 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 	}
 
-	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}}
+	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}, spent: map[string]int{},
+		offboarding: leaving, clock: &clock}
 	for name := range users {
 		w := f.do("", "POST", "/api/auth/login", `{"email":"`+name+`@empresa.cl","password":"`+password+`"}`)
 		if w.Code != http.StatusNoContent {
@@ -158,6 +167,19 @@ func (f fixture) enrollTOTP(t *testing.T, who string) enrolled {
 		t.Fatalf("confirm totp %s: %d %s", who, w.Code, w.Body)
 	}
 	return enrolled{secret: secret, codes: out.RecoveryCodes}
+}
+
+// reauth reautentica la sesión de una persona (§8.2), como lo haría el diálogo de la interfaz. El
+// código de la app de este paso ya se gastó al configurarlo: usa uno de recuperación, desde el
+// último, para no pisar los que los tests usan por índice.
+func (f fixture) reauth(t *testing.T, who string) {
+	t.Helper()
+	codes := f.totp[who].codes
+	f.spent[who]++
+	code := codes[len(codes)-f.spent[who]]
+	if w := f.do(who, "POST", "/api/auth/reauth", `{"password":"`+password+`","code":"`+code+`"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("reauth %s: %d %s", who, w.Code, w.Body)
+	}
 }
 
 // totpNow es el código de la app en este momento (RFC 6238, como auth).
@@ -314,6 +336,8 @@ func TestLoginRejectsBadInput(t *testing.T) {
 // §3.1 y §19.10: el admin de área gestiona lectores y editores, nunca el rol admin ni su propia fila.
 func TestAreaAdminLimits(t *testing.T) {
 	f := newFixture(t)
+	f.reauth(t, "adminTI")
+	f.reauth(t, "super")
 	for _, tc := range []struct {
 		body string
 		want int

@@ -4,6 +4,7 @@
   import { applyPrefs } from './lib/prefs';
   import { navigate, route } from './lib/router.svelte';
   import TopBar from './components/TopBar.svelte';
+  import ReauthDialog from './components/ReauthDialog.svelte';
   import Login from './Login.svelte';
   import MfaSetup from './pages/MfaSetup.svelte';
   import Home from './pages/Home.svelte';
@@ -139,6 +140,8 @@
   <Forgot />
   <SiteFooter />
 {:else if ready}
+  <!-- También en la configuración obligatoria del 2FA: registrar una passkey pide reautenticarse. -->
+  {#if me}<ReauthDialog totp={me.totp.enabled} passkeys={me.passkeys.count > 0 && me.passkeys.available} />{/if}
   {#if me?.mfa_setup_required}
     <MfaSetup email={me.email} ondone={loadMe} onlogout={logout} />
     <SiteFooter />
@@ -156,7 +159,7 @@
         {:else if route.path === '/me/profile'}
           <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
         {:else if route.path === '/admin' && me.is_global_admin}
-          <Admin onchanged={loadMe} />
+          <Admin onchanged={loadMe} selfId={me.id} />
         {:else if route.path === '/admin/audit' && me.is_global_admin}
           <Audit endpoint="/admin/audit" global />
         {:else if route.path === '/admin/health' && me.is_global_admin}

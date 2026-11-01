@@ -14,7 +14,7 @@ import (
 
 func TestCreateValidatesSlug(t *testing.T) {
 	r := repo.New(dbtest.Open(t))
-	s := NewService(r, audit.NewRecorder(r, time.Now, slog.New(slog.DiscardHandler)))
+	s := NewService(r, audit.NewRecorder(r, time.Now, slog.New(slog.DiscardHandler)), slog.New(slog.DiscardHandler))
 	ctx := context.Background()
 	for slug, want := range map[string]error{
 		"ti":            nil,

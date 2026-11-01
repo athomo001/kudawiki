@@ -157,10 +157,13 @@ Orden acordado con el dueño el 2026-10-30: 1. plantillas → 2. vigencia → 3.
 
 Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones, aviso de login nuevo y B16 (F6.1c) → 4. passkeys (F6.1d) → 5. baja de usuarios con B14 y B15 → 6. LDAP/AD.
 
-- [ ] TOTP, passkeys, reauth, "mis sesiones". *(TOTP hecho en F6.1a, 2026-10-31: obligatorio para los admins, segundo paso del login, códigos de recuperación, restablecer desde el panel y `kudawiki admin reset-2fa`; Chrome 30/30)*
+- [x] TOTP (§8.1). *(F6.1a, 2026-10-31: obligatorio para los admins, segundo paso del login, códigos de recuperación, restablecer desde el panel y `kudawiki admin reset-2fa`; Chrome 30/30)*
+- [x] Reautenticación (§8.2). *(F6.1b, 2026-10-31: contraseña + código por 10 minutos y por sesión, exigida al cambiar miembros y en el modo auditoría; Chrome 22/22)*
+- [x] Mis sesiones, aviso de inicio de sesión nuevo y el superadmin cerrando las sesiones de otra persona (§8.2, B16). *(F6.1c, 2026-10-31: listar y cerrar, *cerrar todas las demás*, correo `new_login`; Chrome 20/20)*
+- [x] Passkeys (§8.1): segundo factor equivalente al TOTP y login sin contraseña para usuarios locales; la reauth las acepta. *(F6.1d, 2026-10-31: registro con reautenticación, *Entrar con una passkey*, segundo paso, reauth, cumplen el 2FA obligatorio, restablecer las borra; Chrome 17/17)*
+- [x] Baja de usuarios (§8.4) con período de gracia, con la seudonimización en la auditoría (B14) y activar o desactivar personas y dar o quitar superadmin desde el panel (B15). *(F6, 2026-11-01: 30 días de gracia, receptor por área, último admin, transferencia de páginas, cuestionarios y solicitudes de lectura, borrado de lo no publicado, aviso al receptor, quitar de un área transfiere, seudónimo al año, reactivar y superadmin con reauth; Chrome 29/29. Los sellados, con F7; la baja detectada en AD, con LDAP)*
 - [ ] LDAP/AD: login, JIT, mapeo de grupos, sincronización periódica, salvaguardas.
 - [ ] LDAP: configuración desde el panel, pruebas de conexión y de usuario, cualquier directorio (`ad`, `openldap`, `generic` con detección automática), solo grupos mapeados, vinculación de cuentas locales (§8.6).
-- [ ] Baja de usuarios (§8.4) con período de gracia.
 
 **Criterio de salida:** probado contra un AD real o Samba AD DC, OpenLDAP, FreeIPA y 389 DS en contenedores, incluida una baja en AD que transfiere el contenido; la conexión se configura y se diagnostica desde el panel.
 

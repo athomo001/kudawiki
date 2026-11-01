@@ -180,6 +180,7 @@ func TestNotificationLevels(t *testing.T) {
 	}
 
 	// Sin membresía, nada: ni el aviso que ya tenía.
+	f.reauth(t, "adminTI")
 	f.expect(t, "adminTI", "DELETE", "/api/w/ti/members/"+f.users["editorTI"], "", http.StatusNoContent)
 	if got := f.expect(t, "editorTI", "GET", "/api/me/notifications", "", http.StatusOK); strings.Contains(got, "kwsecreto") {
 		t.Fatalf("a former member still sees the notice: %s", got)

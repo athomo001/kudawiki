@@ -78,7 +78,8 @@
         <tr>
           <td>{formatDate(e.at, locale())}</td>
           <td>
-            {#if e.actor}{e.actor.name} <small class="muted">{e.actor.email}{#if e.ip} · {e.ip}{/if}</small>
+            {#if e.actor?.pseudonym}<span class="muted">{t('audit.pseudonymized', { id: e.actor.pseudonym })}</span>
+            {:else if e.actor}{e.actor.name} <small class="muted">{e.actor.email}{#if e.ip} · {e.ip}{/if}</small>
             {:else}<span class="muted">{t('audit.system')}</span>{/if}
           </td>
           <td>{label(e.action)}{#if detail(e)}<br /><small class="muted">{detail(e)}</small>{/if}</td>

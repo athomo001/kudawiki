@@ -35,7 +35,7 @@ func setup(t *testing.T) env {
 	if err := store.CreateUser(ctx, repo.User{ID: "u1", Email: "a@x.cl", FullName: "A", IsActive: true, Locale: "es"}); err != nil {
 		t.Fatal(err)
 	}
-	ws := workspace.NewService(store, rec)
+	ws := workspace.NewService(store, rec, slog.Default())
 	ti, _ := ws.Create(ctx, "ti", "TI")
 	fin, _ := ws.Create(ctx, "finanzas", "Finanzas")
 	// u1 es admin de las dos: dueño de lo que crea, como en un área real (§4.8).

@@ -9,9 +9,20 @@ export type Site = {
   logo: string; // versión del logo subido, o vacío (logo de Kudawiki)
   logo_dark: string;
   password_reset: boolean; // el login ofrece "¿Olvidaste tu contraseña?" (§8.5.1): hay correo
+  passkeys: boolean; // el login ofrece "Entrar con una passkey" (§8.1): base_url las admite
 };
 
-const fallback: Site = { title: 'Kudawiki', company: '', login_message: '', show_powered_by: true, header_dark: true, logo: '', logo_dark: '', password_reset: false };
+const fallback: Site = {
+  title: 'Kudawiki',
+  company: '',
+  login_message: '',
+  show_powered_by: true,
+  header_dark: true,
+  logo: '',
+  logo_dark: '',
+  password_reset: false,
+  passkeys: false,
+};
 
 function embedded(): Site {
   try {

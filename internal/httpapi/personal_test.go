@@ -58,7 +58,9 @@ func TestPersonalSpace(t *testing.T) {
 		uniformFor(who, "PUT", base+"/pages/otra", `{"title":"x","markdown":"x","base_revision":0}`)
 	}
 
-	// Modo auditoría: el superadmin lee, no escribe, y cada lectura queda registrada.
+	// Modo auditoría: el superadmin lee, no escribe, y cada lectura queda registrada. Entrar pide
+	// reautenticarse (TestReauth).
+	f.reauth(t, "super")
 	if body := f.expect(t, "super", "GET", base+"/pages/borrador", "", http.StatusOK); !strings.Contains(body, "kwpersonal") {
 		t.Errorf("superadmin audit read: %s", body)
 	}
@@ -150,6 +152,7 @@ func TestPersonalSpace(t *testing.T) {
 	}
 	f.expect(t, "viewerTI", "GET", page.Markdown[strings.Index(page.Markdown, "/api/w/ti/media/"):len(page.Markdown)-1], "", http.StatusOK)
 	// Si la persona deja de ser miembro del área, el borrador ya no le cuenta nada de ella.
+	f.reauth(t, "adminTI")
 	f.expect(t, "adminTI", "DELETE", "/api/w/ti/members/"+f.users["editorTI"], "", http.StatusNoContent)
 	if !strings.Contains(f.expect(t, "editorTI", "GET", base+"/pages/otro", "", http.StatusOK), `"sent":[]`) {
 		t.Error("the draft still reports an area its author left")

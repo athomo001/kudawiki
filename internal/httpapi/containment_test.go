@@ -292,6 +292,8 @@ func TestContainmentMatrix(t *testing.T) {
 	f := newFixture(t)
 	s := seed(t, f)
 	uniform := f.do("adminTI", "GET", "/api/w/no-existe/tree", "")
+	// Cambiar miembros pide reautenticarse (§8.2); quien no tiene el rol ve el 404 igual (TestReauth).
+	f.reauth(t, "adminTI")
 
 	for who, r := range rank {
 		var bodies, trashBodies []string
@@ -356,8 +358,16 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// TestGlobalTemplates. El inicio personal cruza las áreas de quien pregunta: TestPersonalHome. Publicar,
 	// archivar, probar y empezar un cuestionario cambian datos: TestQuizzes. El 2FA es de cada
 	// persona, el segundo paso del login va sin sesión y el restablecimiento es del superadmin: TestTOTP.
+	// La reautenticación es de la sesión de quien la pide: TestReauth. Mis sesiones son de cada persona: TestSessions.
+	// Las passkeys son de cada persona y su login va sin sesión: TestPasskeys. La baja de usuarios y
+	// el superadmin desde el panel son del superadmin: TestOffboarding, TestOffboardingNow y TestSuperadminToggle.
 	elsewhere := []string{
+		"GET /api/admin/users/{id}/offboarding", "POST /api/admin/users/{id}/offboarding",
 		"POST /api/auth/totp", "POST /api/me/totp", "POST /api/me/totp/confirm", "DELETE /api/me/totp", "PATCH /api/admin/users/{id}",
+		"POST /api/auth/reauth",
+		"GET /api/me/sessions", "DELETE /api/me/sessions/{id}", "POST /api/me/sessions/revoke-others",
+		"GET /api/me/passkeys", "POST /api/me/passkeys/begin", "POST /api/me/passkeys/finish", "DELETE /api/me/passkeys/{id}",
+		"POST /api/auth/passkey/begin", "POST /api/auth/passkey/finish", "POST /api/auth/reauth/passkey/begin", "POST /api/auth/reauth/passkey/finish",
 		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
 		"GET /healthz", "GET /readyz", "GET /*",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
