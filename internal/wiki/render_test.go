@@ -246,3 +246,19 @@ func TestSecret(t *testing.T) {
 		t.Errorf("unclosed inside code: %v", err)
 	}
 }
+
+// En un artículo compartido con otra área, los [[enlaces]] son su texto: ni enlace ni ruta, para
+// que quien lee desde el destino no sepa qué otras páginas tiene el origen (§4.19, §17).
+func TestRenderLinksAsText(t *testing.T) {
+	out, _ := render(t, "Ver [[redes/vpn]] y [[redes/wifi|la wifi]]. [[secret:clave]] Ctrl+[[Ctrl+C]]", Options{LinksAsText: true})
+	for _, want := range []string{"Ver redes/vpn y la wifi.", `<span class="secret">`, "<kbd>Ctrl</kbd>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
+	}
+	for _, bad := range []string{"<a", "href", "[["} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q in %s", bad, out)
+		}
+	}
+}

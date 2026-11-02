@@ -35,7 +35,7 @@ type Proposal struct {
 	CreatedAt  time.Time
 	ReviewedAt time.Time
 	// SourcePageID: la página del espacio personal de la que salió (§7), y Media, las copias de
-	// su media en el área, que se guardan sin página en la misma transacción. Solo al crearla.
+	// su media en el área, que se guardan sin página en la misma transacción.
 	SourcePageID string
 	Media        []Media
 }
@@ -120,13 +120,8 @@ func (r *Repo) CreateProposal(ctx context.Context, s Scope, p Proposal) error {
 		p.ID, s.WsID, pageID, p.Slug, base, rank, p.Title, p.Markdown, p.Lang, p.Summary, p.AuthorID, p.SourcePageID); err != nil {
 		return err
 	}
-	for _, m := range p.Media {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO media_assets (id, workspace_id, original_filename, mime_type, file_size_bytes, sha256, has_thumbnail, uploaded_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.ID, s.WsID, m.Filename, m.MimeType, m.Size, m.SHA256, m.HasThumbnail, m.UploadedBy); err != nil {
-			return err
-		}
+	if err := insertProposalMedia(ctx, tx, s, p.Media); err != nil {
+		return err
 	}
 	if err := emit(ctx, tx, s, EventProposalSubmitted, p.AuthorID, p.PageID, p.ID); err != nil {
 		return err
@@ -162,14 +157,57 @@ func (r *Repo) Proposals(ctx context.Context, s Scope, f ProposalFilter) ([]Prop
 	return collect(rows, scanProposal)
 }
 
+// OpenProposal es la propuesta abierta (pendiente o rechazada) de un autor sobre una página, o
+// sobre una ruta si pageID es vacío (página nueva). Ahí se suman sus envíos siguientes (§5.2).
+// Si hay más de una (de antes de esa regla), la más reciente.
+func (r *Repo) OpenProposal(ctx context.Context, s Scope, authorID, pageID, slug string) (Proposal, error) {
+	q := proposalColumns(false) + proposalFrom + ` AND pr.author_id = ? AND pr.status IN ('pending','rejected')`
+	args := []any{s.WsID, s.MaxRank, s.MaxRank, authorID}
+	if pageID != "" {
+		q += ` AND pr.page_id = ?`
+		args = append(args, pageID)
+	} else {
+		q += ` AND pr.page_id IS NULL AND pr.target_slug = ?`
+		args = append(args, slug)
+	}
+	return scanProposal(r.db.Read.QueryRowContext(ctx, q+` ORDER BY pr.created_at DESC, pr.id DESC LIMIT 1`, args...))
+}
+
 // UpdateProposal guarda lo que el autor cambió en una propuesta pendiente o rechazada (§5.2).
-// Base 0 la deja donde estaba (una página nueva no tiene revisión).
+// Base 0 la deja donde estaba (una página nueva no tiene revisión). Si llega de nuevo desde el
+// espacio personal (§7), trae su página de origen y las copias de su media, que se guardan sin
+// página como al crearla; las de la vuelta anterior que ya no use las borra la purga (§4.4).
 func (r *Repo) UpdateProposal(ctx context.Context, s Scope, p Proposal) error {
-	return affected(r.db.Write.ExecContext(ctx,
+	tx, err := r.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := affected(tx.ExecContext(ctx,
 		`UPDATE proposals SET title = ?, content_markdown = ?, lang = ?, change_summary = NULLIF(?, ''),
-		   base_revision = CASE WHEN page_id IS NULL THEN NULL ELSE ? END, updated_at = CURRENT_TIMESTAMP
+		   base_revision = CASE WHEN page_id IS NULL THEN NULL ELSE ? END,
+		   source_personal_page_id = COALESCE(NULLIF(?, ''), source_personal_page_id), updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ? AND workspace_id = ? AND author_id = ? AND status IN ('pending','rejected')`,
-		p.Title, p.Markdown, p.Lang, p.Summary, p.Base, p.ID, s.WsID, p.AuthorID))
+		p.Title, p.Markdown, p.Lang, p.Summary, p.Base, p.SourcePageID, p.ID, s.WsID, p.AuthorID)); err != nil {
+		return err
+	}
+	if err := insertProposalMedia(ctx, tx, s, p.Media); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// insertProposalMedia guarda sin página las copias de media de una página del espacio personal.
+func insertProposalMedia(ctx context.Context, tx *sql.Tx, s Scope, media []Media) error {
+	for _, m := range media {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO media_assets (id, workspace_id, original_filename, mime_type, file_size_bytes, sha256, has_thumbnail, uploaded_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			m.ID, s.WsID, m.Filename, m.MimeType, m.Size, m.SHA256, m.HasThumbnail, m.UploadedBy); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetProposalStatus pasa una propuesta de uno de los estados from a to. Si ya no estaba en

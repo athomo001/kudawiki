@@ -153,8 +153,18 @@
   const target = $derived(slug ?? path.trim());
   const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*(\/[a-z0-9]+(-[a-z0-9]+)*)*$/;
 
-  const checkApproval = async (to: string) =>
-    (mustPropose = (await api<{ must_propose: boolean }>('GET', `/w/${area.slug}/approval/${to}`)).must_propose);
+  // Devuelve la propuesta abierta de quien escribe en esa ruta ('' si no tiene): lo que envíe se
+  // suma ahí (§5.2).
+  const checkApproval = async (to: string) => {
+    const a = await api<{ must_propose: boolean; open_proposal: string }>('GET', `/w/${area.slug}/approval/${to}`);
+    mustPropose = a.must_propose;
+    return a.open_proposal;
+  };
+  // Se llegó desde la página porque ya había una propuesta abierta en ella.
+  const continued = new URLSearchParams(route.query).has('continued');
+  // Desde la página, con la propuesta rechazada: guardar también la reenvía, como enviar desde la
+  // página (§5.2).
+  const resend = $derived(continued && draft?.status === 'rejected' && !approving);
 
   // Autoguardado en el servidor (SPEC §4.11): cada 10 s, si el título, el contenido o la ruta
   // cambiaron desde lo último guardado. Solo al editar una página, nueva o existente: una
@@ -337,6 +347,7 @@
       navigate(`/w/${area.slug}/p/${draft.slug}`);
     } else {
       await api('PATCH', `/w/${area.slug}/proposals/${draft.id}`, body);
+      if (resend) await api('POST', `/w/${area.slug}/proposals/${draft.id}/submit`);
       navigate(`/w/${area.slug}/proposals/${draft.id}`);
     }
   }
@@ -477,7 +488,11 @@
           api<Draft>('GET', `/w/${area.slug}/drafts/${p.slug}`)
             .then((d) => (d.title !== p.title || d.markdown !== p.markdown) && (recover = d))
             .catch(() => {});
-          return checkApproval(p.slug);
+          return checkApproval(p.slug).then((open) => {
+            // Con una propuesta abierta en esta página se sigue desde ella y no desde lo publicado:
+            // partir de la página perdería la vuelta anterior al sumar el envío (§5.2).
+            if (open && mustPropose) navigate(`/w/${area.slug}/proposals/${open}/edit?continued=1`, { replace: true });
+          });
         })
         .catch((e) => (error = errorText(e instanceof ApiError && e.status === 404 ? 'not_found' : codeOf(e))));
     }
@@ -535,8 +550,9 @@
     <button type="button" class="editor-btn" onclick={() => (guide = true)}><Icon name="help" size={16} /> {t('mdguide.open')}</button>
     <button type="button" class="editor-btn" onclick={discard}>{t('editor.discard')}</button>
     <button type="submit" class="editor-btn editor-save" disabled={busy}>
-      {#if busy}{proposing ? t('editor.sending') : t('common.saving')}
+      {#if busy}{proposing || resend ? t('editor.sending') : t('common.saving')}
       {:else if approving}{t('proposals.approve')}
+      {:else if resend}{t('editor.submit_review')}
       {:else if draft}{t('editor.save_proposal')}
       {:else if proposing}{t('editor.submit_review')}
       {:else}{t('common.save')}{/if}
@@ -572,6 +588,7 @@
       <button type="button" class="link" onclick={() => (pending = [])}>{t('editor.drafts_hide')}</button>
     </div>
   {/if}
+  {#if draft && continued && !approving}<p class="editor-note" role="status">{t('editor.continued')}</p>{/if}
   {#if contentOnly && !approving}<p class="editor-note">{t('editor.propose_note')}</p>{/if}
   <!-- Como en el diseño aprobado: el formato a la izquierda, idioma y nivel a la derecha. -->
   <div class="editor-bar">

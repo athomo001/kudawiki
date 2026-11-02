@@ -285,7 +285,12 @@ export type NotificationKind =
   | 'quiz_extra_attempts'
   | 'quiz_failed_out'
   | 'ownership_received'
-  | 'role_changed';
+  | 'role_changed'
+  | 'share_pending'
+  | 'share_approved'
+  | 'share_rejected'
+  | 'shared_received'
+  | 'share_ended';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -296,6 +301,10 @@ export type Notification = {
   actor: string;
   days: number | null;
   role?: Role; // role_changed: el rol que tiene ahora
+  // Artículos compartidos (§4.19): el área de origen, la de destino y el vínculo.
+  from?: string;
+  target?: string;
+  share?: string;
   count: number;
   read: boolean;
   updated_at: string;
@@ -317,6 +326,8 @@ export function notificationHref(n: Notification): string {
   if (n.kind.startsWith('proposal_')) return `${area}/proposals/${n.proposal}`;
   if (n.kind === 'review_reminder') return `${area}/review`;
   if (n.kind === 'quiz_failed_out') return `${area}/reads`;
+  if (n.kind === 'share_pending' || n.kind === 'share_ended') return `${area}/shares`;
+  if (n.kind === 'shared_received') return `${area}/shared/${n.share}`;
   return n.page ? `${area}/p/${n.page}` : area;
 }
 export type RevisionMeta = {
@@ -413,7 +424,25 @@ export type AreaStats = {
 export type Access = {
   level: Level;
   members: { name: string; email: string; role: Role; group?: string; can_read: boolean; can_read_simulated?: boolean }[];
+  // Las áreas que la leen por un artículo compartido, con cuántas personas (§4.19).
+  shared_with: { area: string; members: number }[];
 };
+
+// Artículos compartidos entre áreas (§4.19). Desde el origen, un pedido o un vínculo activo.
+export type Share = {
+  id: string;
+  page: { slug: string; title: string };
+  target: { id: string; name: string };
+  status: 'pending' | 'active';
+  requested_by: string;
+  reviewer: string;
+  created_at: string;
+  reviewed_at: string | null;
+};
+// Desde el destino: solo el artículo y el nombre del área de origen, nunca su ruta.
+export type SharedItem = { id: string; title: string; description: string; icon: string; area: { name: string }; updated_at: string };
+export type SharedArticle = SharedItem & { html: string; toc: Heading[] | null; lang: string; updated_by: string; owner: string };
+export type SharedHit = { id: string; title: string; area: { name: string }; snippet: { text: string; hit?: boolean }[] };
 
 // Rango de cada rol: el nivel más alto que puede leer y asignar (SPEC §3.2).
 export const rankOf = (role: Role): Level => ({ viewer: 1, editor: 2, admin: 3 })[role] as Level;
@@ -428,7 +457,8 @@ export type SearchHit = {
 export type Facet = { value: string; count: number };
 // Filtros de la página de resultados con sus conteos; solo cuentan lo que quien busca ve.
 export type Facets = { tags: Facet[]; folders: Facet[]; authors: Facet[]; dates: { days: number; count: number }[]; overdue: number };
-export type SearchResult = { results: SearchHit[]; more?: boolean; suggestion?: string; facets?: Facets };
+// shared: lo que otras áreas le comparten al área que coincide (§4.19); solo en la primera página y sin filtros.
+export type SearchResult = { results: SearchHit[]; more?: boolean; suggestion?: string; facets?: Facets; shared?: SharedHit[] };
 
 // Lo delicado pide reautenticarse (SPEC §8.2): ante 401 reauth_required, quien registró
 // onReauth (el diálogo de App) pide contraseña y código, y el pedido se repite una vez. Si varios

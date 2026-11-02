@@ -34,6 +34,10 @@ type Options struct {
 	// SourceLines marca cada bloque con la línea del Markdown donde empieza (data-line). Solo lo
 	// pide la vista previa del editor, para desplazar juntas sus dos columnas (SPEC §4.2).
 	SourceLines bool
+	// LinksAsText muestra cada [[enlace]] como su texto, sin enlace: es la vista de un artículo
+	// compartido desde otra área, que no tiene por dónde llegar a las demás páginas del origen y
+	// no debe saber cuáles existen (§4.19, §17).
+	LinksAsText bool
 	toc         []Heading // lo llena el transformador
 }
 
@@ -66,6 +70,7 @@ type wikiToken struct {
 	ast.BaseInline
 	raw, base string
 	broken    bool
+	plain     bool // LinksAsText
 }
 
 // secretPrefix abre un texto oculto, [[secret:valor]] (§4.10). Nunca es una ruta: una ruta no
@@ -301,7 +306,7 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 				opts.toc = append(opts.toc, Heading{Level: n.Level, ID: string(id.([]byte)), Text: string(n.Lines().Value(src))})
 			}
 		case *wikiToken:
-			n.base = opts.Base
+			n.base, n.plain = opts.Base, opts.LinksAsText
 			n.broken = opts.Exists != nil && n.target() != "" && !opts.Exists(n.target())
 		case *ast.Blockquote:
 			if c := asCallout(n, src); c != nil {
@@ -529,6 +534,12 @@ func renderWikiToken(w util.BufWriter, t *wikiToken) {
 		// "[contenido censurado]" al copiar (lib/enhance.ts). Ocultar en pantalla, no proteger:
 		// para eso están los sellados (§6).
 		fmt.Fprintf(w, `<span class="secret"><span class="secret-value">%s</span></span>`, html.EscapeString(secret))
+	case target != "" && t.plain:
+		_, label, hasLabel := strings.Cut(t.raw, "|")
+		if !hasLabel {
+			label = target
+		}
+		w.WriteString(html.EscapeString(strings.TrimSpace(label)))
 	case target != "" && t.base != "":
 		_, label, hasLabel := strings.Cut(t.raw, "|")
 		if !hasLabel {

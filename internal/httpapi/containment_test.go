@@ -25,6 +25,10 @@ var leaks = map[int]string{1: "kwvisible", 2: "kwleakdos", 3: "kwleaktres"}
 // trashed es la marca de una página en la papelera: solo puede aparecer en la papelera misma.
 const trashed = "kwpapelera"
 
+// sharedMark es la marca de un artículo de "finanzas" compartido con "ti" (§4.19): lo ven todos
+// los miembros de "ti" y nadie más. La otra página de "finanzas" (kwleakfin) sigue sin verse.
+const sharedMark = "kwajena"
+
 type seeded struct {
 	slug       map[int]string // nivel → ruta; 0 = ruta inexistente
 	media      map[int]string // nivel → URL de su media
@@ -35,6 +39,9 @@ type seeded struct {
 	newPage    string         // propuesta de una página nueva bajo la N3: nace N3
 	trashID    string         // la unidad de la papelera, borrada por editorTI
 	trashMedia string         // URL de la media de la página borrada
+	shared     string         // vínculo activo de una página de "finanzas" con "ti"
+	sharedFile string         // id de la media de esa página
+	rejected   string         // pedido de editorTI para compartir nivel/uno, ya rechazado
 }
 
 func setLevel(t *testing.T, f fixture, slug string, rank int) {
@@ -73,6 +80,7 @@ func seed(t *testing.T, f fixture) seeded {
 		t.Fatalf("seed finanzas: %d %s", w.Code, w.Body)
 	}
 	s.trashID, s.trashMedia = seedTrash(t, f)
+	s.shared, s.sharedFile, s.rejected = seedShares(t, f)
 	// Propuestas con la marca de su página: solo las ve su autor (adminTI) y el admin del área.
 	for lvl := 1; lvl <= 3; lvl++ {
 		s.proposal[lvl] = propose(t, f, `{"slug":"`+s.slug[lvl]+`","title":"Propuesta `+leaks[lvl]+`","markdown":"Cambio `+leaks[lvl]+`","base_revision":1}`)
@@ -122,6 +130,37 @@ func seed(t *testing.T, f fixture) seeded {
 		s.quiz[lvl] = out.ID
 	}
 	return s
+}
+
+// seedShares comparte (adminFin, aprobado de una) una página N1 de "finanzas" con imagen con
+// "ti", y deja en "ti" un pedido rechazado: aprobarlo, rechazarlo o retirarlo choca (409) y la
+// matriz no cambia nada. Un vínculo activo desde "ti" no: haría proponer a editorTI (§4.19).
+func seedShares(t *testing.T, f fixture) (shared, file, rejected string) {
+	t.Helper()
+	var ti, fin string
+	f.db.Read.QueryRow(`SELECT id FROM workspaces WHERE slug = 'ti'`).Scan(&ti)
+	f.db.Read.QueryRow(`SELECT id FROM workspaces WHERE slug = 'finanzas'`).Scan(&fin)
+	var up struct{ URL string }
+	json.Unmarshal(f.upload("adminFin", "finanzas", sharedMark+".png", pngBytes(t)).Body.Bytes(), &up)
+	md := "## " + sharedMark + "\\nVer [[plan]].\\n\\n![" + sharedMark + "](" + up.URL + ")"
+	for _, step := range []struct {
+		who, method, path, body string
+		code                    int
+	}{
+		{"adminFin", "PUT", "/api/w/finanzas/pages/guia", `{"title":"Guía ` + sharedMark + `","markdown":"` + md + `","base_revision":0}`, 204},
+		{"adminFin", "POST", "/api/w/finanzas/shares", `{"page":"guia","targets":["` + ti + `"]}`, 200},
+		{"editorTI", "POST", "/api/w/ti/shares", `{"page":"nivel/uno","targets":["` + fin + `"]}`, 200},
+	} {
+		if w := f.do(step.who, step.method, step.path, step.body); w.Code != step.code {
+			t.Fatalf("seed shares %s %s: %d %s", step.method, step.path, w.Code, w.Body)
+		}
+	}
+	f.db.Read.QueryRow(`SELECT id FROM page_shares WHERE target_workspace_id = ?`, ti).Scan(&shared)
+	f.db.Read.QueryRow(`SELECT id FROM page_shares WHERE target_workspace_id = ?`, fin).Scan(&rejected)
+	if w := f.do("adminTI", "POST", "/api/w/ti/shares/"+rejected+"/reject", `{"comment":"no"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("seed shares reject: %d %s", w.Code, w.Body)
+	}
+	return shared, up.URL[strings.LastIndex(up.URL, "/")+1:], rejected
 }
 
 func propose(t *testing.T, f fixture, body string) string {
@@ -285,6 +324,22 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/templates", "POST", "/api/w/ti/templates", `{"name":"","level":1}`, 3, false, 422},
 		{"/api/w/{ws}/templates/{id}", "PUT", tpl, `{"name":"","level":1}`, 3, true, 422},
 		{"/api/w/{ws}/templates/{id}", "DELETE", "/api/w/ti/templates/no-existe", "", 3, false, 404},
+		// Artículos compartidos (§4.19). Desde el origen: pedir sin áreas se rechaza antes de buscar la
+		// página; el pedido sembrado ya está rechazado, así que resolverlo o retirarlo choca.
+		{"/api/w/{ws}/share-targets", "GET", "/api/w/ti/share-targets", "", 2, false, 200},
+		{"/api/w/{ws}/shares", "POST", "/api/w/ti/shares", `{"page":"` + p + `","targets":[]}`, 2, false, 422},
+		{"/api/w/{ws}/shares", "GET", "/api/w/ti/shares", "", 3, false, 200},
+		{"/api/w/{ws}/shares/{id}/approve", "POST", "/api/w/ti/shares/" + s.rejected + "/approve", "", 3, false, 409},
+		{"/api/w/{ws}/shares/{id}/reject", "POST", "/api/w/ti/shares/" + s.rejected + "/reject", `{"comment":""}`, 3, false, 422},
+		{"/api/w/{ws}/shares/{id}/reject", "POST", "/api/w/ti/shares/" + s.rejected + "/reject", `{"comment":"x"}`, 3, false, 409},
+		{"/api/w/{ws}/shares/{id}", "DELETE", "/api/w/ti/shares/" + s.rejected, "", 3, false, 409},
+		// Desde el destino: lo compartido con "ti" lo lee cualquier miembro, por el vínculo y nunca
+		// por "finanzas". Quitarlo es del admin; uno que no existe da el 404 para todos (TestShares).
+		{"/api/w/{ws}/shared", "GET", "/api/w/ti/shared", "", 1, false, 200},
+		{"/api/w/{ws}/shared/{id}", "GET", "/api/w/ti/shared/" + s.shared, "", 1, false, 200},
+		{"/api/w/{ws}/shared/{id}/media/{media}", "GET", "/api/w/ti/shared/" + s.shared + "/media/" + s.sharedFile, "", 1, false, 200},
+		{"/api/w/{ws}/search", "GET", "/api/w/ti/search?q=" + sharedMark, "", 1, false, 200},
+		{"/api/w/{ws}/shared/{id}", "DELETE", "/api/w/ti/shared/no-existe", "", 4, false, 0},
 	}
 }
 
@@ -328,6 +383,13 @@ func TestContainmentMatrix(t *testing.T) {
 		}
 		if strings.Contains(all, "kwleakfin") {
 			t.Errorf("%s received content from another area", who)
+		}
+		// Lo compartido con "ti" llega a sus miembros, sin delatar dónde vive en el origen.
+		if seen := strings.Contains(all, sharedMark); seen != (r >= 1) {
+			t.Errorf("%s (rank %d) sees the article shared with ti: %v", who, r, seen)
+		}
+		if strings.Contains(all, "/w/finanzas") || strings.Contains(all, "guia") {
+			t.Errorf("%s received the source path of a shared article", who)
 		}
 		// Lo borrado solo aparece en la papelera, y ahí solo para el admin y para quien lo borró.
 		if strings.Contains(all, trashed) {

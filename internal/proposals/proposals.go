@@ -30,6 +30,7 @@ type store interface {
 	CreateProposal(ctx context.Context, s repo.Scope, p repo.Proposal) error
 	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
 	Proposals(ctx context.Context, s repo.Scope, f repo.ProposalFilter) ([]repo.Proposal, error)
+	OpenProposal(ctx context.Context, s repo.Scope, authorID, pageID, slug string) (repo.Proposal, error)
 	UpdateProposal(ctx context.Context, s repo.Scope, p repo.Proposal) error
 	SetProposalStatus(ctx context.Context, s repo.Scope, id string, from []string, to, reviewerID, comment string) error
 }
@@ -116,7 +117,14 @@ func (s *Service) Create(ctx context.Context, sc repo.Scope, authorID string, d 
 	} else if p.Lang == "" {
 		p.Lang = "es"
 	}
-	err := s.store.CreateProposal(ctx, sc, p)
+	open, err := s.store.OpenProposal(ctx, sc, authorID, p.PageID, p.Slug)
+	if err == nil {
+		return open.ID, s.accumulate(ctx, sc, open, p)
+	}
+	if !errors.Is(err, repo.ErrNotFound) {
+		return "", err
+	}
+	err = s.store.CreateProposal(ctx, sc, p)
 	if errors.Is(err, repo.ErrConflict) || errors.Is(err, repo.ErrHidden) {
 		// Igual que al crear la página: un solo mensaje, y el intento queda registrado (§19.35).
 		s.record(ctx, sc, audit.PathUnavailable, "page", "", map[string]any{"op": "propose"})
@@ -127,6 +135,46 @@ func (s *Service) Create(ctx context.Context, sc repo.Scope, authorID string, d 
 	}
 	s.record(ctx, sc, audit.ProposalSubmit, "proposal", p.ID, map[string]any{"new_page": p.PageID == ""})
 	return p.ID, nil
+}
+
+// accumulate suma un envío a la propuesta abierta de su autor sobre la misma página (§5.2): quien
+// corrige varias veces antes de que la revisen deja una sola propuesta, no una por vuelta. El
+// texto nuevo reemplaza al anterior. Si estaba rechazada, el envío es también el reenvío; si
+// sigue pendiente, no vuelve a avisar a los admins ni cambia su lugar en la bandeja.
+func (s *Service) accumulate(ctx context.Context, sc repo.Scope, open, p repo.Proposal) error {
+	p.ID = open.ID
+	if p.PageID == "" {
+		p.Base = 0
+	}
+	if err := s.store.UpdateProposal(ctx, sc, p); err != nil {
+		return err
+	}
+	meta := map[string]any{"new_page": p.PageID == "", "accumulated": true}
+	if open.Status == "rejected" {
+		if err := s.transition(ctx, sc, open.ID, []string{"rejected"}, "pending", "", ""); err != nil {
+			return err
+		}
+		meta["resubmit"] = true
+	}
+	s.record(ctx, sc, audit.ProposalSubmit, "proposal", open.ID, meta)
+	return nil
+}
+
+// Open es la propuesta abierta de quien escribe en esa ruta, o "" si no tiene: el editor sigue
+// desde ella en vez de partir de la página, para no perder la vuelta anterior (§5.2).
+func (s *Service) Open(ctx context.Context, sc repo.Scope, userID, slug string) (string, error) {
+	pageID := ""
+	page, err := s.store.PageBySlug(ctx, sc, slug)
+	if err == nil {
+		pageID = page.ID
+	} else if !errors.Is(err, repo.ErrNotFound) {
+		return "", err
+	}
+	p, err := s.store.OpenProposal(ctx, sc, userID, pageID, slug)
+	if errors.Is(err, repo.ErrNotFound) {
+		return "", nil
+	}
+	return p.ID, err
 }
 
 // visible devuelve la propuesta si quien pregunta es su autor o un admin del área; si no, el 404

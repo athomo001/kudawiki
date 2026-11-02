@@ -148,6 +148,11 @@ type payload struct {
 	Actor string `json:"actor,omitempty"`
 	Days  int    `json:"days,omitempty"`
 	Role  string `json:"role,omitempty"` // role_changed: el rol que tiene ahora
+	// Artículos compartidos (§4.19): From es el área de origen (aviso al destino), Target el área
+	// de destino (aviso al origen) y Share el vínculo, para llegar al artículo desde el destino.
+	From   string `json:"from,omitempty"`
+	Target string `json:"target,omitempty"`
+	Share  string `json:"share,omitempty"`
 }
 
 func (p payload) json() string {
@@ -503,7 +508,7 @@ func (s *Service) vars(n repo.NotificationEmail) map[string]string {
 	var p payload
 	_ = json.Unmarshal([]byte(n.Payload), &p)
 	return map[string]string{"name": n.FullName, "title": p.Title, "actor": p.Actor, "area": n.AreaName,
-		"days": strconv.Itoa(p.Days), "count": strconv.Itoa(n.Count), "role": p.Role}
+		"days": strconv.Itoa(p.Days), "count": strconv.Itoa(n.Count), "role": p.Role, "from": p.From, "target": p.Target}
 }
 
 // link es a dónde lleva un aviso: la página, la propuesta o la bandeja del área. Las mismas
@@ -519,6 +524,12 @@ func (s *Service) link(n repo.Notification) string {
 		return area + "/review"
 	case "quiz_failed_out":
 		return area + "/reads"
+	case "share_pending", "share_ended":
+		return area + "/shares"
+	case "shared_received":
+		var p payload
+		_ = json.Unmarshal([]byte(n.Payload), &p)
+		return area + "/shared/" + p.Share
 	}
 	if n.PageSlug != "" {
 		return area + "/p/" + n.PageSlug

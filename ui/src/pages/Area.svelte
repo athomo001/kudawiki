@@ -20,6 +20,8 @@
   import Settings from './Settings.svelte';
   import Health from './Health.svelte';
   import Proposals from './Proposals.svelte';
+  import Shared from './Shared.svelte';
+  import Shares from './Shares.svelte';
   import NotFound from './NotFound.svelte';
   import SiteFooter from '../components/SiteFooter.svelte';
 
@@ -31,12 +33,14 @@
   let misses = $state<{ query: string; count: number }[]>([]);
   let error = $state('');
   const base = $derived(`/w/${area.slug}`);
-  const view = $derived(sub.match(/^(p|edit|history|tags|reads|quiz|quizzes)\/(.+)$/));
+  const view = $derived(sub.match(/^(p|edit|history|tags|reads|quiz|quizzes|shared)\/(.+)$/));
   const kind = $derived(view?.[1]);
   const pageSlug = $derived(view?.[2] ?? '');
   // Bandeja de propuestas: proposals, proposals/{id} y proposals/{id}/edit (SPEC §5.2).
   const proposalView = $derived(sub.match(/^proposals(?:\/([^/]+)(\/edit)?)?$/));
   let pending = $state(0);
+  // Cuántos artículos le comparten otras áreas: "Compartido" aparece solo si hay alguno (§4.19).
+  let sharedCount = $state(0);
   const titles = $derived(new Map(refs.map((r) => [r.slug, r.title])));
 
   // Migas de pan (SPEC §15): área / carpetas / página. Una carpeta que no es página va sin enlace.
@@ -58,6 +62,7 @@
     quiz: 'quiz.title',
     quizzes: 'quiz.title',
     audit: 'audit.title',
+    shared: 'shared.title',
     search: 'search.open',
     new: 'page.new',
     history: 'page.history',
@@ -86,6 +91,7 @@
           { sub: 'settings', label: 'area_admin.general', icon: 'settings' },
           { sub: 'settings/publishing', label: 'area_admin.publishing', icon: 'check' },
           { sub: 'settings/content', label: 'area_admin.content', icon: 'history' },
+          { sub: 'shares', label: 'shares.title', icon: 'link' },
           templates,
         ],
       },
@@ -129,6 +135,15 @@
     }
   }
 
+  async function loadShared() {
+    if (area.personal) return;
+    try {
+      sharedCount = (await api<unknown[]>('GET', `${base}/shared`)).length;
+    } catch {
+      sharedCount = 0;
+    }
+  }
+
   function changed() {
     loadTree();
     loadPending();
@@ -139,8 +154,10 @@
     refs = [];
     misses = [];
     pending = 0;
+    sharedCount = 0;
     loadTree();
     loadPending();
+    loadShared();
     // "Lo que buscan y no encuentran" es solo para el admin del área (SPEC §9.6).
     if (area.role === 'admin') api<typeof misses>('GET', `${base}/search-misses`).then((m) => (misses = m)).catch(() => {});
   });
@@ -183,6 +200,11 @@
         <Icon name="list" size={16} /> {t('proposals.title')}{#if pending}<span class="nav-count">{pending}</span>{/if}
       </a>
     {/if}
+    {#if sharedCount}
+      <a class="nav-item" href={`${base}/shared`} aria-current={sub === 'shared' || kind === 'shared' ? 'page' : undefined}>
+        <Icon name="link" size={16} /> {t('shared.title')}
+      </a>
+    {/if}
     <hr />
     <Tree nodes={buildTree(refs)} {base} current={pageSlug} />
     {#if canEdit(area)}
@@ -221,6 +243,8 @@
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
       <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
+    {:else if kind === 'shared' && !area.personal}
+      <Shared {area} id={pageSlug} onchanged={loadShared} />
     {:else if proposalView && canWrite(area) && !area.personal}
       <Proposals {area} id={proposalView[1] ?? ''} {selfId} onchanged={changed} />
     {:else}
@@ -229,6 +253,10 @@
           <AreaHome {area} {tags} {misses} />
         {:else if sub === 'search'}
           <SearchResults {area} />
+        {:else if sub === 'shared' && !area.personal}
+          <Shared {area} id="" onchanged={loadShared} />
+        {:else if sub === 'shares' && area.role === 'admin' && !area.personal}
+          <Shares {area} context={adminContext} />
         {:else if kind === 'tags'}
           <TagPages {area} tag={decodeURIComponent(pageSlug)} />
         {:else if kind === 'history'}

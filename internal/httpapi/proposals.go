@@ -200,14 +200,21 @@ func (a api) rejectProposal(w http.ResponseWriter, r *http.Request) {
 	a.noContent(w, r, a.Proposals.Reject(r.Context(), scopeOf(r), currentUser(r).ID, chi.URLParam(r, "id"), in.Comment))
 }
 
-// approval le dice al editor si en esa ruta quien escribe publica directo o envía a revisión (§5.1).
+// approval le dice al editor si en esa ruta quien escribe publica directo o envía a revisión
+// (§5.1) y si ya tiene ahí una propuesta abierta, que es donde se suma lo que envíe (§5.2).
 func (a api) approval(w http.ResponseWriter, r *http.Request) {
-	must, err := a.Wiki.MustPropose(r.Context(), scopeOf(r), chi.URLParam(r, "*"))
+	slug := chi.URLParam(r, "*")
+	must, err := a.Wiki.MustPropose(r.Context(), scopeOf(r), slug)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.json(w, http.StatusOK, map[string]bool{"must_propose": must})
+	open, err := a.Proposals.Open(r.Context(), scopeOf(r), currentUser(r).ID, slug)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.json(w, http.StatusOK, map[string]any{"must_propose": must, "open_proposal": open})
 }
 
 func (a api) approvalOverrides(w http.ResponseWriter, r *http.Request) {

@@ -31,13 +31,13 @@
     };
   });
 
-  // Varios guardados de una página, o varias propuestas nuevas, son un solo aviso con su cuenta; el
-  // recordatorio de vigencia cuenta las páginas por revisar (§4.8).
+  // Varios guardados de una página, o varias propuestas o pedidos para compartir nuevos, son un solo
+  // aviso con su cuenta; el recordatorio de vigencia cuenta las páginas por revisar (§4.8).
   function text(n: Notification): string {
-    const many = n.count > 1 && (n.kind === 'page_changed' || n.kind === 'proposal_pending' || n.kind === 'review_reminder');
+    const many = n.count > 1 && ['page_changed', 'proposal_pending', 'review_reminder', 'share_pending'].includes(n.kind);
     const key = `notif.kind.${n.kind}${many ? '_many' : ''}` as Key;
     const role = n.role ? t(`role.${n.role}`) : '';
-    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? ''), area: n.area.name || t('personal.title'), role });
+    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? ''), area: n.area.name || t('personal.title'), role, from: n.from ?? '', target: n.target ?? '' });
   }
 
   async function read(ids: string[]) {

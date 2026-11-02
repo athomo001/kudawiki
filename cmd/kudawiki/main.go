@@ -43,6 +43,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/shares"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
 	"golang.org/x/term"
@@ -293,6 +294,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
+			Shares:   shares.NewService(store, rec, logger),
 			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
 			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,

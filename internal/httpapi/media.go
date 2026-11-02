@@ -4,6 +4,7 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/athomo001/kudawiki/internal/media"
@@ -18,6 +19,11 @@ func (a api) getMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	serveMedia(w, r, m, f)
+}
+
+// serveMedia entrega un archivo de la media, del área o de un artículo compartido (§4.19).
+func serveMedia(w http.ResponseWriter, r *http.Request, m repo.Media, f *os.File) {
 	disposition := "attachment" // todo lo que no es imagen se descarga, no se abre en la wiki (SPEC §4.4)
 	if strings.HasPrefix(m.MimeType, "image/") {
 		disposition = "inline"

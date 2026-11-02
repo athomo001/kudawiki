@@ -35,6 +35,7 @@ func (a api) areaRoutes(r chi.Router) {
 	r.Use(a.workspaceBoundary)
 	a.pageRoutes(r)
 	a.proposalRoutes(r)
+	a.shareRoutes(r)
 	a.areaHomeRoutes(r)
 	a.draftRoutes(r)
 	a.templateRoutes(r)

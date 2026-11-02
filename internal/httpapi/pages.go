@@ -243,6 +243,8 @@ func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, err)
 			return
 		}
+		// Solo se comparte lo N1: al subir de nivel (ella o sus hijas) deja de compartirse (§4.19).
+		a.Shares.Sweep(r.Context(), scopeOf(r), currentUser(r).ID)
 	}
 	if in.Tags != nil {
 		if err := a.Wiki.SetTags(r.Context(), scopeOf(r), slug, *in.Tags); err != nil {
@@ -291,7 +293,17 @@ func (a api) access(w http.ResponseWriter, r *http.Request) {
 		}
 		people[i] = entry
 	}
-	a.json(w, http.StatusOK, map[string]any{"level": p.MinRank, "members": people})
+	// Las áreas que la leen por un vínculo activo también la ven (§4.19): suman a la respuesta.
+	audience, err := a.Shares.Audience(r.Context(), scopeOf(r), p.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	shared := make([]map[string]any, len(audience))
+	for i, s := range audience {
+		shared[i] = map[string]any{"area": s.Area, "members": s.Members}
+	}
+	a.json(w, http.StatusOK, map[string]any{"level": p.MinRank, "members": people, "shared_with": shared})
 }
 
 func (a api) move(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +317,8 @@ func (a api) move(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// Mover bajo una página de más nivel sube el de las movidas (§3.2): las que dejan N1 dejan de compartirse.
+	a.Shares.Sweep(r.Context(), scopeOf(r), currentUser(r).ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -313,6 +327,8 @@ func (a api) deletePage(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// Lo borrado deja de compartirse y no vuelve al restaurarlo (§4.19).
+	a.Shares.Sweep(r.Context(), scopeOf(r), currentUser(r).ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

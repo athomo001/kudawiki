@@ -205,3 +205,70 @@ func (f fixture) wsID(t *testing.T, slug string) string {
 	t.Fatalf("no area %s", slug)
 	return ""
 }
+
+// Los envíos repetidos de una misma persona sobre una página se suman a su propuesta abierta:
+// la bandeja del admin no se llena de versiones de lo mismo (§5.2, decisión del 2026-11-02).
+func TestProposalAccumulates(t *testing.T) {
+	f := newFixture(t)
+	f.expect(t, "adminTI", "PUT", "/api/w/ti/pages/redes/vpn", `{"title":"VPN","markdown":"`+vpn+`","base_revision":0}`, http.StatusNoContent)
+	f.expect(t, "adminTI", "PATCH", "/api/w/ti/settings", `{"approval_mode":"required","viewers_can_propose":true}`, http.StatusNoContent)
+	if got := f.expect(t, "editorTI", "GET", "/api/w/ti/approval/redes/vpn", "", http.StatusOK); !strings.Contains(got, `"open_proposal":""`) {
+		t.Errorf("approval before proposing: %s", got)
+	}
+
+	send := func(who, md string, code int) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"slug": "redes/vpn", "title": "VPN", "markdown": md, "base_revision": 1})
+		return idOf(t, f.expect(t, who, "POST", "/api/w/ti/proposals", string(body), code))
+	}
+	first := send("editorTI", strings.Replace(vpn, "Paso dos.", "Paso 2.", 1), http.StatusCreated)
+	// La segunda vuelta corrige la primera: misma propuesta, con el texto nuevo.
+	fixed := strings.Replace(vpn, "Paso dos.", "Paso dos, con la VPN abierta.", 1)
+	if again := send("editorTI", fixed, http.StatusCreated); again != first {
+		t.Fatalf("second send created %s, want %s", again, first)
+	}
+	var detail struct{ Markdown string }
+	json.Unmarshal([]byte(f.expect(t, "editorTI", "GET", "/api/w/ti/proposals/"+first, "", http.StatusOK)), &detail)
+	if detail.Markdown != fixed {
+		t.Errorf("accumulated content: %q", detail.Markdown)
+	}
+	if got := f.expect(t, "editorTI", "GET", "/api/w/ti/approval/redes/vpn", "", http.StatusOK); !strings.Contains(got, `"open_proposal":"`+first+`"`) {
+		t.Errorf("approval with an open proposal: %s", got)
+	}
+	// Otra persona sobre la misma página tiene la suya; el admin ve dos, no tres.
+	byViewer := send("viewerTI", strings.Replace(vpn, "Paso tres.", "Paso 3.", 1), http.StatusCreated)
+	if byViewer == first {
+		t.Fatal("another author's send went into the editor's proposal")
+	}
+	if got := f.expect(t, "adminTI", "GET", "/api/w/ti/proposals?view=pending", "", http.StatusOK); strings.Count(got, `"id"`) != 2 {
+		t.Errorf("admin pending: %s", got)
+	}
+
+	// Rechazada, el envío siguiente desde la página la corrige y la vuelve a mandar.
+	f.expect(t, "adminTI", "POST", "/api/w/ti/proposals/"+first+"/reject", `{"comment":"Falta el paso tres"}`, http.StatusNoContent)
+	if again := send("editorTI", strings.Replace(fixed, "Paso tres.", "Paso tres, y listo.", 1), http.StatusCreated); again != first {
+		t.Fatalf("send after rejection created %s, want %s", again, first)
+	}
+	if p := f.proposal(t, "adminTI", first); p.Status != "pending" || p.Comment != "" {
+		t.Errorf("resubmitted by sending again: %+v", p)
+	}
+
+	// Resuelta, ya no está abierta: lo que venga después es una propuesta nueva.
+	f.expect(t, "adminTI", "POST", "/api/w/ti/proposals/"+first+"/approve", `{}`, http.StatusOK)
+	var page struct{ Revision int }
+	json.Unmarshal([]byte(f.expect(t, "editorTI", "GET", "/api/w/ti/pages/redes/vpn", "", http.StatusOK)), &page)
+	body, _ := json.Marshal(map[string]any{"slug": "redes/vpn", "title": "VPN", "markdown": "Otra vuelta.", "base_revision": page.Revision})
+	if next := idOf(t, f.expect(t, "editorTI", "POST", "/api/w/ti/proposals", string(body), http.StatusCreated)); next == first {
+		t.Error("a send after approval reused the merged proposal")
+	}
+
+	// Una página nueva se reconoce por su ruta.
+	wifi := idOf(t, f.expect(t, "editorTI", "POST", "/api/w/ti/proposals", `{"slug":"redes/wifi","title":"Wifi","markdown":"uno","base_revision":0}`, http.StatusCreated))
+	if again := idOf(t, f.expect(t, "editorTI", "POST", "/api/w/ti/proposals", `{"slug":"redes/wifi","title":"Wifi","markdown":"dos","base_revision":0}`, http.StatusCreated)); again != wifi {
+		t.Errorf("new page: second send created %s, want %s", again, wifi)
+	}
+	audit := f.expect(t, "adminTI", "GET", "/api/w/ti/audit", "", http.StatusOK)
+	if !strings.Contains(audit, `"accumulated":true`) {
+		t.Errorf("audit lacks the accumulated sends: %s", audit)
+	}
+}

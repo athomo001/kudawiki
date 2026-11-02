@@ -18,6 +18,7 @@ const (
 	pageSize      = 20
 	maxCandidates = 200 // SPEC §9.5: más allá no se pagina
 	searchTimeout = 3 * time.Second
+	sharedHits    = 5 // los compartidos van aparte, arriba: unos pocos, no compiten con los del área (§4.19)
 )
 
 type snippetPart struct {
@@ -86,6 +87,20 @@ func (a api) search(w http.ResponseWriter, r *http.Request) {
 		results = append(results, item)
 	}
 	out["results"] = results
+	// Lo que otras áreas le comparten entra aparte, con la marca de origen (§4.19). Solo con texto
+	// y sin filtros: las etiquetas, rutas y autores son del área de origen, no de esta.
+	if page == 1 && q.Match != "" && len(q.Tags) == 0 && q.Path == "" && q.Author == "" && q.Since.IsZero() && !q.Overdue {
+		hits, err := a.Shares.Search(r.Context(), scopeOf(r), q.Match, sharedHits)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		shared := make([]map[string]any, len(hits))
+		for i, h := range hits {
+			shared[i] = map[string]any{"id": h.ID, "title": h.Title, "area": map[string]string{"name": h.SourceName}, "snippet": split(h.Snippet)}
+		}
+		out["shared"] = shared
+	}
 
 	if page == 1 {
 		facets, err := a.facets(r, q, cands)

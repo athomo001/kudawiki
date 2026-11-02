@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, codeOf, type Area, type Facets, type SearchHit, type SearchResult } from '../lib/api';
+  import { api, codeOf, type Area, type Facets, type SearchHit, type SearchResult, type SharedHit } from '../lib/api';
   import { t, errorText, type Key } from '../lib/i18n/index.svelte';
   import { navigate, route } from '../lib/router.svelte';
   import Snippet from '../components/Snippet.svelte';
@@ -13,6 +13,7 @@
   let current = $state(''); // la consulta de la URL, la que se buscó
   let sort = $state<'relevance' | 'date'>('relevance');
   let hits = $state<SearchHit[]>([]);
+  let shared = $state<SharedHit[]>([]);
   let facets = $state<Facets | null>(null);
   let more = $state(false);
   let page = $state(1);
@@ -31,6 +32,7 @@
       const res = await api<SearchResult>('GET', `${url(current)}&page=${page}`);
       hits = reset ? res.results : [...hits, ...res.results];
       if (reset) facets = res.facets ?? null;
+      if (reset) shared = res.shared ?? [];
       more = !!res.more;
       suggestion = res.suggestion ?? '';
     } catch (e) {
@@ -167,6 +169,21 @@
   {/if}
 
   <div class="results-main">
+    {#if shared.length}
+      <!-- Compartido con el área desde otras (§4.19): aparte, con el área de origen y sin ruta. -->
+      <section aria-label={t('shared.title')}>
+        <h2 class="side-title">{t('shared.title')}</h2>
+        <ol class="results">
+          {#each shared as h (h.id)}
+            <li>
+              <a href={`${base}/shared/${h.id}`}><strong>{h.title}</strong></a>
+              <span class="muted">{t('shared.from', { area: h.area.name })}</span>
+              {#if h.snippet.length}<p class="snippet"><Snippet parts={h.snippet} /></p>{/if}
+            </li>
+          {/each}
+        </ol>
+      </section>
+    {/if}
     {#if hits.length}
       <ol class="results">
         {#each hits as h (h.slug)}
@@ -180,7 +197,7 @@
         {/each}
       </ol>
       {#if more}<button type="button" class="link" disabled={loading} onclick={() => load(false)}>{t('search.more')}</button>{/if}
-    {:else if current.trim() && !loading}
+    {:else if current.trim() && !loading && !shared.length}
       <p class="muted">{t('search.no_results')}</p>
     {/if}
   </div>

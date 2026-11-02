@@ -29,6 +29,7 @@ func (a api) notifications(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal([]byte(n.Payload), &p)
 		out[i] = map[string]any{"id": n.ID, "kind": n.Kind, "area": map[string]string{"slug": n.AreaSlug, "name": n.AreaName},
 			"page": n.PageSlug, "proposal": n.ProposalID, "title": p["title"], "actor": p["actor"], "days": p["days"], "role": p["role"],
+			"from": p["from"], "target": p["target"], "share": p["share"],
 			"count": n.Count, "read": n.Read, "updated_at": n.UpdatedAt}
 	}
 	a.json(w, http.StatusOK, map[string]any{"items": out, "unread": unread})

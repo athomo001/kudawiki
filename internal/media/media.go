@@ -52,6 +52,7 @@ type store interface {
 	MediaList(ctx context.Context, s repo.Scope, q string, limit int) ([]repo.MediaItem, error)
 	MediaUsedBy(ctx context.Context, s repo.Scope, id string) ([]repo.PageRef, error)
 	TrashMedia(ctx context.Context, s repo.Scope, id string) error
+	SharedMedia(ctx context.Context, s repo.Scope, shareID, mediaID string) (repo.Media, string, error)
 }
 
 type Service struct {
@@ -169,6 +170,24 @@ func (s *Service) Open(ctx context.Context, sc repo.Scope, id string, thumb bool
 	f, err := os.Open(s.path(sc.WsID, m.ID, thumb))
 	if thumb && m.MimeType != "image/jpeg" {
 		m.MimeType = "image/png" // la miniatura es PNG salvo para fotos JPEG
+	}
+	return m, f, err
+}
+
+// OpenShared es la media de un artículo compartido con el área de sc (§4.19): solo la que usa la
+// versión vigente del artículo, leída del almacenamiento del área de origen. La autorización es
+// el vínculo (repo.SharedMedia); cualquier otra media del origen es el 404 uniforme.
+func (s *Service) OpenShared(ctx context.Context, sc repo.Scope, shareID, id string, thumb bool) (repo.Media, *os.File, error) {
+	m, wsID, err := s.store.SharedMedia(ctx, sc, shareID, id)
+	if err != nil {
+		return repo.Media{}, nil, err
+	}
+	if thumb && !m.HasThumbnail {
+		thumb = false
+	}
+	f, err := os.Open(s.path(wsID, m.ID, thumb))
+	if thumb && m.MimeType != "image/jpeg" {
+		m.MimeType = "image/png"
 	}
 	return m, f, err
 }

@@ -18,6 +18,9 @@ type notificationOut struct {
 	Title    string
 	Actor    string
 	Role     string
+	From     string
+	Target   string
+	Share    string
 	Count    int
 	Read     bool
 }

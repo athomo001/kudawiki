@@ -55,6 +55,11 @@ var templates = map[string]int{
 	"quiz_failed_out":     2,
 	"ownership_received":  2, // §8.4
 	"role_changed":        2, // §12.1: de la cuenta, no desactivable
+	"share_pending":       2, // §4.19
+	"share_approved":      2,
+	"share_rejected":      2,
+	"shared_received":     2,
+	"share_ended":         2,
 	"digest":              1,
 }
 
@@ -63,7 +68,7 @@ var lineTemplates = map[string]bool{
 	"proposal_pending": true, "proposal_reminder": true, "proposal_approved": true, "proposal_rejected": true,
 	"proposal_rebase": true, "page_changed": true, "page_deleted": true, "review_due": true, "review_reminder": true,
 	"read_request": true, "read_reminder": true, "quiz_assigned": true, "quiz_reminder": true, "quiz_extra_attempts": true, "quiz_failed_out": true,
-	"ownership_received": true,
+	"ownership_received": true, "share_pending": true, "share_approved": true, "share_rejected": true, "shared_received": true, "share_ended": true,
 }
 
 // content es la descripción de un correo: de ella salen el HTML y el texto plano, así nunca

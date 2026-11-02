@@ -35,6 +35,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/shares"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -124,6 +125,7 @@ type wikiService interface {
 // proposalService son las propuestas (§5.2).
 type proposalService interface {
 	Create(ctx context.Context, sc repo.Scope, authorID string, d proposals.Draft) (string, error)
+	Open(ctx context.Context, sc repo.Scope, userID, slug string) (string, error)
 	List(ctx context.Context, sc repo.Scope, userID, view string) ([]repo.Proposal, error)
 	Review(ctx context.Context, sc repo.Scope, userID, id string) (proposals.Detail, error)
 	Update(ctx context.Context, sc repo.Scope, userID, id string, d proposals.Draft) error
@@ -133,9 +135,26 @@ type proposalService interface {
 	Reject(ctx context.Context, sc repo.Scope, reviewerID, id, comment string) error
 }
 
+// shareService son los artículos compartidos entre áreas (§4.19).
+type shareService interface {
+	Targets(ctx context.Context, sc repo.Scope) ([]repo.ShareTarget, error)
+	Request(ctx context.Context, sc repo.Scope, actorID, slug string, targets []string) (bool, error)
+	List(ctx context.Context, sc repo.Scope, pageID string) ([]repo.Share, error)
+	Approve(ctx context.Context, sc repo.Scope, reviewerID, id string) error
+	Reject(ctx context.Context, sc repo.Scope, reviewerID, id, comment string) error
+	Unshare(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Shared(ctx context.Context, sc repo.Scope) ([]repo.SharedArticle, error)
+	Article(ctx context.Context, sc repo.Scope, id string) (repo.SharedArticle, error)
+	Remove(ctx context.Context, sc repo.Scope, actorID, id string) error
+	Search(ctx context.Context, sc repo.Scope, match string, limit int) ([]repo.SharedSearchHit, error)
+	Audience(ctx context.Context, sc repo.Scope, pageID string) ([]repo.ShareAudience, error)
+	Sweep(ctx context.Context, sc repo.Scope, actorID string)
+}
+
 type mediaService interface {
 	Upload(ctx context.Context, sc repo.Scope, actorID, filename string, body io.Reader) (repo.Media, error)
 	Open(ctx context.Context, sc repo.Scope, id string, thumb bool) (repo.Media, *os.File, error)
+	OpenShared(ctx context.Context, sc repo.Scope, shareID, id string, thumb bool) (repo.Media, *os.File, error)
 	List(ctx context.Context, sc repo.Scope, q string) ([]repo.MediaItem, error)
 	Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.PageRef, error)
 }
@@ -280,6 +299,7 @@ type Deps struct {
 	Workspaces workspaceService
 	Wiki       wikiService
 	Proposals  proposalService
+	Shares     shareService
 	Media      mediaService
 	Branding   brandingService
 	Mail       mailService
@@ -543,6 +563,10 @@ var domainErrors = map[error]int{
 	proposals.ErrClosed:               http.StatusConflict,
 	proposals.ErrSelfApproval:         http.StatusConflict,
 	proposals.ErrInvalid:              http.StatusBadRequest,
+	shares.ErrInvalid:                 http.StatusUnprocessableEntity,
+	shares.ErrCommentRequired:         http.StatusUnprocessableEntity,
+	shares.ErrClosed:                  http.StatusConflict,
+	repo.ErrNotShareable:              http.StatusUnprocessableEntity,
 	notify.ErrInvalidPrefs:            http.StatusUnprocessableEntity,
 	media.ErrTooLarge:                 http.StatusRequestEntityTooLarge,
 	media.ErrUnsupportedType:          http.StatusUnsupportedMediaType,

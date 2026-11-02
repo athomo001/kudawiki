@@ -21,6 +21,7 @@ type approvalStore interface {
 	ApprovalOverrides(ctx context.Context, s repo.Scope) ([]repo.ApprovalOverride, error)
 	SetApprovalOverride(ctx context.Context, s repo.Scope, o repo.ApprovalOverride) error
 	DeleteApprovalOverride(ctx context.Context, s repo.Scope, prefix string) error
+	PageShared(ctx context.Context, s repo.Scope, slug string) (bool, error)
 }
 
 // effectiveMode aplica §5.2.1: gana la excepción de la ruta más larga que contiene a slug; sin
@@ -36,13 +37,17 @@ func effectiveMode(area string, overrides []repo.ApprovalOverride, slug string) 
 }
 
 // MustPropose dice si quien tiene el Scope publica en slug solo por propuesta (§5.1): los admins
-// siempre publican directo; los lectores, nunca; los editores, salvo que la ruta sea `required`.
+// siempre publican directo; los lectores, nunca; los editores, salvo que la ruta sea `required` o
+// la página esté compartida con otras áreas (§4.19: lo que llega a otras áreas lo vio un admin).
 func (s *Service) MustPropose(ctx context.Context, sc repo.Scope, slug string) (bool, error) {
 	switch sc.MaxRank {
 	case 3:
 		return false, nil
 	case 1:
 		return true, nil
+	}
+	if shared, err := s.store.PageShared(ctx, sc, slug); err != nil || shared {
+		return shared, err
 	}
 	ws, err := s.store.WorkspaceByID(ctx, sc.WsID)
 	if err != nil {

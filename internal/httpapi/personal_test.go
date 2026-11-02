@@ -144,9 +144,20 @@ func TestPersonalSpace(t *testing.T) {
 		}
 	}
 	status("pending")
+	// Corregido y mandado otra vez, se suma a la misma propuesta con las copias nuevas de su media (§5.2).
+	f.expect(t, "editorTI", "PUT", base+"/pages/otro", `{"title":"Otro","markdown":"Otro, corregido ![x](`+up.URL+`)","base_revision":1}`, http.StatusNoContent)
+	var again struct{ Proposal string }
+	json.Unmarshal([]byte(f.expect(t, "editorTI", "POST", base+"/publish/otro", `{"area":"ti","to":"otro"}`, http.StatusAccepted)), &again)
+	if again.Proposal != sent.Proposal {
+		t.Errorf("sending again created %s, want %s", again.Proposal, sent.Proposal)
+	}
+	status("pending")
 	f.expect(t, "adminTI", "POST", "/api/w/ti/proposals/"+sent.Proposal+"/approve", `{}`, http.StatusOK)
 	status("merged")
 	json.Unmarshal([]byte(f.expect(t, "viewerTI", "GET", "/api/w/ti/pages/otro", "", http.StatusOK)), &page)
+	if !strings.Contains(page.Markdown, "corregido") {
+		t.Errorf("the approved page lacks the second send: %s", page.Markdown)
+	}
 	if strings.Contains(page.Markdown, own) {
 		t.Errorf("the approved page points to the personal space: %s", page.Markdown)
 	}

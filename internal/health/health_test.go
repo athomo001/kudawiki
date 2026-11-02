@@ -234,17 +234,23 @@ func TestProposalChecks(t *testing.T) {
 	if err := pages.Save(ctx, sc, "u1", 0, repo.PageWrite{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres\n"}); err != nil {
 		t.Fatal(err)
 	}
-	propose := func(d proposals.Draft) string {
+	// Las dos propuestas sobre guia son de personas distintas: las de una misma persona sobre una
+	// página se suman en una sola (§5.2).
+	if err := e.store.CreateUser(ctx, repo.User{ID: "u2", Email: "b@x.cl", FullName: "B", IsActive: true, Locale: "es"}); err != nil {
+		t.Fatal(err)
+	}
+	e.store.SetMember(ctx, repo.Scope{WsID: e.ti.ID}, "u2", "editor")
+	propose := func(author string, d proposals.Draft) string {
 		t.Helper()
-		id, err := props.Create(ctx, sc, "u1", d)
+		id, err := props.Create(ctx, sc, author, d)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return id
 	}
-	merges := propose(proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "UNO\n\ndos\n\ntres\n", Base: 1})
-	clash := propose(proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres, propuesta\n", Base: 1})
-	waiting := propose(proposals.Draft{Slug: "nueva", Title: "Nueva", Markdown: "Página nueva."})
+	merges := propose("u1", proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "UNO\n\ndos\n\ntres\n", Base: 1})
+	clash := propose("u2", proposals.Draft{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres, propuesta\n", Base: 1})
+	waiting := propose("u1", proposals.Draft{Slug: "nueva", Title: "Nueva", Markdown: "Página nueva."})
 	e.exec(t, `UPDATE proposals SET created_at = datetime('now', '-4 days') WHERE id = ?`, waiting)
 	// La página avanza en la última línea: choca con clash y no con merges.
 	if err := pages.Save(ctx, sc, "u1", 1, repo.PageWrite{Slug: "guia", Title: "Guía", Markdown: "uno\n\ndos\n\ntres, publicada\n"}); err != nil {

@@ -132,6 +132,12 @@ var (
 	ProposalApprove  = Action{"proposal.approve"}
 	ProposalReject   = Action{"proposal.reject"}
 	ProposalWithdraw = Action{"proposal.withdraw"}
+	// Artículos compartidos entre áreas (§4.19): van a la auditoría de las dos áreas. share.end
+	// lleva meta.reason: unshared (el origen), removed (el destino), level o deleted (la página).
+	ShareRequest = Action{"share.request"}
+	ShareApprove = Action{"share.approve"}
+	ShareReject  = Action{"share.reject"}
+	ShareEnd     = Action{"share.end"}
 	// Baja de usuarios (§8.4) y el panel de personas (B15). page.owner_transfer también sale al
 	// quitar a alguien de un área; user.pseudonymize es del job (B14, §13.10).
 	UserOffboardingStart    = Action{"user.offboarding_start"}
@@ -160,6 +166,7 @@ var All = []Action{
 	AuthPasswordResetRequest, AuthPasswordResetComplete,
 	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA, AuthReauth, SessionRevoke, AuthPasskeyAdd, AuthPasskeyRemove,
 	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,
+	ShareRequest, ShareApprove, ShareReject, ShareEnd,
 	UserOffboardingStart, UserOffboardingComplete, UserReactivate, UserSuperadminGrant, UserSuperadminRevoke, UserPseudonymize,
 	PageOwnerTransfer, PersonalPurge,
 }

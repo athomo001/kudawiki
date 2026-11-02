@@ -9,6 +9,7 @@
   import ReviewDialog from '../components/ReviewDialog.svelte';
   import PublishDialog from '../components/PublishDialog.svelte';
   import ReadRequestDialog from '../components/ReadRequestDialog.svelte';
+  import ShareDialog from '../components/ShareDialog.svelte';
   import QuizSection from '../components/QuizSection.svelte';
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import { navigate, route } from '../lib/router.svelte';
@@ -40,6 +41,7 @@
   let showPublish = $state(false);
   let showAsk = $state(false);
   let showNewQuiz = $state(false);
+  let showShare = $state(false);
   // Lo que falta confirmar de las solicitudes de lectura que quien lee tiene sobre la página (§4.14).
   const toConfirm = $derived(page?.reading.filter((r) => !r.confirmed_at) ?? []);
   // En el espacio personal (§7) no hay vigencia ni "quién puede ver esto": lo ve solo su dueño.
@@ -367,6 +369,10 @@
               <li><button type="button" class="menu-item" onclick={() => fromMenu(() => (showAsk = true))}>{t('reading.ask_title')}</button></li>
               <li><button type="button" class="menu-item" onclick={() => fromMenu(() => (showNewQuiz = true))}>{t('quiz.new')}</button></li>
             {/if}
+            <!-- Solo lo N1 se comparte con otras áreas (§4.19). -->
+            {#if inArea && page.level === 1}
+              <li><button type="button" class="menu-item" onclick={() => fromMenu(() => (showShare = true))}>{t('share.title')}</button></li>
+            {/if}
             {#if page.review.can_review && inArea}
               <li><button type="button" class="menu-item" onclick={() => fromMenu(() => (showReview = true))}>{t('review.title')}</button></li>
             {/if}
@@ -383,6 +389,7 @@
   {/if}
   {#if inArea && canEdit(area)}
     <ReadRequestDialog {area} slug={page.slug} bind:open={showAsk} />
+    <ShareDialog {area} slug={page.slug} bind:open={showShare} />
   {/if}
   {#if area.personal && canEdit(area)}
     <PublishDialog {area} {page} bind:open={showPublish} onsent={refresh} {onmoved} />
@@ -414,6 +421,15 @@
             </li>
           {/each}
         </ul>
+        {#if access.shared_with?.length}
+          <!-- Quien la lee desde otra área, por un artículo compartido (§4.19). -->
+          <h3 class="side-title">{t('access.shared_title')}</h3>
+          <ul class="access">
+            {#each access.shared_with as s (s.area)}
+              <li>{s.area} <span class="muted">· {t('access.shared_members', { n: String(s.members) })}</span></li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </Dialog>
   {/if}
