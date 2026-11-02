@@ -77,14 +77,9 @@
           <li><a href="/me/profile">{t('nav.profile')}</a></li>
         </ul>
         {#if me.is_global_admin}
+          <!-- Una sola entrada: lo demás está agrupado en el menú de la administración (§15). -->
           <ul>
             <li><a href="/admin">{t('nav.admin')}</a></li>
-            <li><a href="/admin/audit">{t('audit.title')}</a></li>
-            <li><a href="/admin/health">{t('health.short')}</a></li>
-            <li><a href="/admin/appearance">{t('appearance.title')}</a></li>
-            <li><a href="/admin/email">{t('smtp.title')}</a></li>
-            <li><a href="/admin/ldap">{t('ldap.title')}</a></li>
-            <li><a href="/admin/templates">{t('templates.global_title')}</a></li>
           </ul>
         {/if}
         <button type="button" class="menu-item" onclick={onlogout}>{t('auth.logout')}</button>

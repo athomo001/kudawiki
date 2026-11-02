@@ -175,27 +175,80 @@ func sqlTime(t time.Time) string { return t.UTC().Format(time.DateTime) }
 // Lo que sigue lo usa el job diario de purga (SPEC §4.5): son operaciones del sistema sobre
 // todas las áreas, sin Scope, como RebuildIndex. No devuelven contenido.
 
-// TrashOrphanMedia manda a la papelera la media que nadie usó desde antes de cutoff (§4.4). La
-// que usa una propuesta abierta no es huérfana: se asocia a la página cuando se aprueba (§5.2),
-// y una propuesta puede esperar más de una semana. Tampoco la de un borrador del autoguardado
-// (§4.11): la imagen pegada en una página que todavía no se publica.
-func (r *Repo) TrashOrphanMedia(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := r.db.Write.ExecContext(ctx,
-		`UPDATE media_assets SET deleted_at = CURRENT_TIMESTAMP WHERE page_id IS NULL AND deleted_at IS NULL AND created_at <= ?
-		   AND NOT EXISTS (SELECT 1 FROM proposals pr WHERE pr.workspace_id = media_assets.workspace_id
-		     AND pr.status IN ('pending','rejected') AND instr(pr.content_markdown, media_assets.id) > 0)
-		   AND NOT EXISTS (SELECT 1 FROM page_drafts d WHERE d.workspace_id = media_assets.workspace_id
-		     AND instr(d.content_markdown, media_assets.id) > 0)`,
-		sqlTime(cutoff))
+// PurgeUnusedMedia borra la media que nadie usa desde antes de cutoff (§4.4: un día), con su fila
+// y devolviendo los archivos para el disco. Está en uso la que muestra alguna revisión guardada de
+// cualquier página del área (la actual siempre se guarda; las viejas, según la retención de §4.3,
+// así el historial no queda con imágenes rotas), un borrador del autoguardado (§4.11), una
+// propuesta abierta (§5.2), una plantilla (§4.9), un anuncio (§4.15) o un cuestionario (§4.16).
+// La que alguien mandó a la papelera también se va pasado el día; la de una página en la papelera
+// sigue el plazo de la página (PurgeTrash). refs saca los ids del texto: la regla de qué es una
+// referencia es de wiki. Lee y borra en la misma transacción: nadie puede empezar a usar una
+// media entre que se decide que está libre y que se borra.
+func (r *Repo) PurgeUnusedMedia(ctx context.Context, cutoff time.Time, refs func(string) []string) ([]MediaFile, error) {
+	tx, err := r.db.Write.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return res.RowsAffected()
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx,
+		`SELECT content_markdown FROM page_revisions
+		 UNION ALL SELECT content_markdown FROM page_drafts
+		 UNION ALL SELECT content_markdown FROM proposals WHERE status IN ('pending','rejected')
+		 UNION ALL SELECT content_markdown FROM page_templates
+		 UNION ALL SELECT body_markdown FROM announcements
+		 UNION ALL SELECT draft_json FROM quizzes
+		 UNION ALL SELECT questions_json FROM quiz_versions`)
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		for _, id := range refs(text) {
+			used[id] = true
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	at := sqlTime(cutoff)
+	rows, err = tx.QueryContext(ctx,
+		`SELECT workspace_id, id, deleted_at IS NOT NULL FROM media_assets
+		 WHERE (deleted_at IS NULL AND created_at <= ?1) OR deleted_at <= ?1`, at)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		MediaFile
+		trashed bool // ya la borró alguien: se va aunque algo la nombre
+	}
+	candidates, err := collect(rows, func(row scanner) (candidate, error) {
+		var c candidate
+		return c, row.Scan(&c.WsID, &c.ID, &c.trashed)
+	})
+	if err != nil {
+		return nil, err
+	}
+	var files []MediaFile
+	for _, c := range candidates {
+		if !c.trashed && used[c.ID] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM media_assets WHERE id = ?`, c.ID); err != nil {
+			return nil, err
+		}
+		files = append(files, c.MediaFile)
+	}
+	return files, tx.Commit()
 }
 
 // PurgeTrash borra para siempre lo que está en la papelera desde antes de cutoff: las páginas
-// con sus revisiones, etiquetas, enlaces y alias (ON DELETE CASCADE), su fila en la búsqueda,
-// su media y la media huérfana vencida. Devuelve los archivos que hay que borrar del disco:
+// con sus revisiones, etiquetas, enlaces y alias (ON DELETE CASCADE), su fila en la búsqueda y
+// su media. La media que alguien borró suelta tiene su propio plazo (PurgeUnusedMedia). Devuelve los archivos que hay que borrar del disco:
 // se borran después de confirmar, para que nunca quede una fila apuntando a un archivo que no está.
 func (r *Repo) PurgeTrash(ctx context.Context, cutoff time.Time) ([]PurgedPage, []MediaFile, error) {
 	tx, err := r.db.Write.BeginTx(ctx, nil)
@@ -204,7 +257,7 @@ func (r *Repo) PurgeTrash(ctx context.Context, cutoff time.Time) ([]PurgedPage, 
 	}
 	defer tx.Rollback()
 	at := sqlTime(cutoff)
-	const expiredMedia = `FROM media_assets WHERE deleted_at <= ?1 OR page_id IN (SELECT id FROM pages WHERE deleted_at <= ?1)`
+	const expiredMedia = `FROM media_assets WHERE page_id IN (SELECT id FROM pages WHERE deleted_at <= ?1)`
 	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, id `+expiredMedia, at)
 	if err != nil {
 		return nil, nil, err

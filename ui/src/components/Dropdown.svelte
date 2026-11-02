@@ -3,7 +3,8 @@
   import { route } from '../lib/router.svelte';
 
   // Menú desplegable de la barra superior y de la columna de acciones: se cierra con Esc
-  // (devolviendo el foco al botón), con un clic afuera o al navegar.
+  // (devolviendo el foco al botón), con un clic afuera o al navegar. closeOnSelect: un menú de
+  // acciones (el ⋯ de una fila) se cierra al elegir una; el de preferencias de lectura no.
   let {
     label,
     trigger,
@@ -11,7 +12,16 @@
     class: cls = '',
     align = 'end',
     onopen,
-  }: { label: string; trigger: Snippet; children: Snippet; class?: string; align?: 'start' | 'end'; onopen?: () => void } = $props();
+    closeOnSelect = false,
+  }: {
+    label: string;
+    trigger: Snippet;
+    children: Snippet;
+    class?: string;
+    align?: 'start' | 'end';
+    onopen?: () => void;
+    closeOnSelect?: boolean;
+  } = $props();
 
   let open = $state(false);
   let root: HTMLElement;
@@ -45,6 +55,9 @@
     {@render trigger()}
   </button>
   {#if open}
-    <div class={`dropdown-panel align-${align}`}>{@render children()}</div>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (el clic llega de los botones y enlaces del menú, que ya tienen teclado) -->
+    <div class={`dropdown-panel align-${align}`} onclick={(e) => closeOnSelect && (e.target as Element).closest('a, button') && close()}>
+      {@render children()}
+    </div>
   {/if}
 </div>

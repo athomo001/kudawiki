@@ -16,7 +16,7 @@
   import QuizTake from './QuizTake.svelte';
   import QuizEditor from './QuizEditor.svelte';
   import Audit from './Audit.svelte';
-  import Icon from '../components/Icon.svelte';
+  import Icon, { type IconName } from '../components/Icon.svelte';
   import Settings from './Settings.svelte';
   import Health from './Health.svelte';
   import Proposals from './Proposals.svelte';
@@ -58,14 +58,51 @@
     quiz: 'quiz.title',
     quizzes: 'quiz.title',
     audit: 'audit.title',
-    members: 'admin.members_link',
-    settings: 'settings.title',
-    health: 'health.short',
     search: 'search.open',
     new: 'page.new',
     history: 'page.history',
     edit: 'page.edit',
   };
+  // Administrar área (diseño "Kudawiki — Administración", §15): la configuración del área se
+  // agrupa en su propio menú, que reemplaza al árbol mientras se está ahí. Archivos, papelera,
+  // revisión y lecturas son trabajo diario y siguen en la barra del área. El espacio personal
+  // no tiene miembros ni configuración (§7).
+  type AdminItem = { sub: string; label: Key; icon: IconName };
+  const adminGroups = $derived.by((): { label: Key; items: AdminItem[] }[] => {
+    if (area.role !== 'admin') return [];
+    const templates: AdminItem = { sub: 'templates', label: 'templates.title', icon: 'template' };
+    const supervision = {
+      label: 'area_admin.group_supervision' as Key,
+      items: [
+        { sub: 'health', label: 'health.short', icon: 'pulse' },
+        { sub: 'audit', label: 'audit.title', icon: 'list' },
+      ] satisfies AdminItem[],
+    };
+    if (area.personal) return [{ label: 'area_admin.group_area', items: [templates] }, supervision];
+    return [
+      {
+        label: 'area_admin.group_area',
+        items: [
+          { sub: 'settings', label: 'area_admin.general', icon: 'settings' },
+          { sub: 'settings/publishing', label: 'area_admin.publishing', icon: 'check' },
+          { sub: 'settings/content', label: 'area_admin.content', icon: 'history' },
+          templates,
+        ],
+      },
+      { label: 'area_admin.group_people', items: [{ sub: 'members', label: 'admin.members_link', icon: 'people' }] },
+      supervision,
+    ];
+  });
+  const adminHome = $derived(adminGroups[0]?.items[0]?.sub);
+  const adminMode = $derived(adminGroups.some((g) => g.items.some((i) => i.sub === sub)));
+  const adminContext = $derived(`${area.name} · ${t('area_admin.title')}`);
+  const sections = new Map([
+    ['settings', 'general'],
+    ['settings/publishing', 'publishing'],
+    ['settings/content', 'content'],
+  ] as const);
+  const settingsSection = $derived(sections.get(sub as 'settings'));
+
   const viewKey = $derived(proposalView ? 'proposals.title' : viewKeys[kind ?? sub]);
   const viewLabel = $derived(kind === 'tags' ? `#${decodeURIComponent(pageSlug)}` : viewKey ? t(viewKey) : '');
 
@@ -115,6 +152,24 @@
   {/await}
 {:else}
 <div class="area">
+  {#if adminMode}
+  <nav class="sidebar admin-nav" aria-label={t('area_admin.title')}>
+    <div class="admin-nav-head">
+      <span class="sidebar-title">{t('area_admin.title')}</span>
+      <a class="admin-nav-back" href={base}><Icon name="back" size={14} /> {t('area_admin.back', { area: area.name })}</a>
+    </div>
+    {#each adminGroups as g (g.label)}
+      <h2 class="admin-nav-group">{t(g.label)}</h2>
+      <ul class="admin-nav-list">
+        {#each g.items as i (i.sub)}
+          <li>
+            <a class="nav-item" href={`${base}/${i.sub}`} aria-current={sub === i.sub ? 'page' : undefined}><Icon name={i.icon} size={16} /> {t(i.label)}</a>
+          </li>
+        {/each}
+      </ul>
+    {/each}
+  </nav>
+  {:else}
   <nav class="sidebar" aria-label={t('nav.tree')}>
     <div class="sidebar-head">
       <span class="sidebar-title">{area.name}</span>
@@ -139,20 +194,15 @@
         <a class="nav-item" href={`${base}/review`} aria-current={sub === 'review' ? 'page' : undefined}><Icon name="check" size={16} /> {t('review.nav')}</a>
         <a class="nav-item" href={`${base}/reads`} aria-current={sub === 'reads' || kind === 'reads' ? 'page' : undefined}><Icon name="list" size={16} /> {t('reading.title')}</a>
       {/if}
-      {#if area.role === 'admin'}
-        <a class="nav-item" href={`${base}/templates`} aria-current={sub === 'templates' ? 'page' : undefined}><Icon name="template" size={16} /> {t('templates.title')}</a>
-        {#if !area.personal}
-          <a class="nav-item" href={`${base}/members`} aria-current={sub === 'members' ? 'page' : undefined}><Icon name="people" size={16} /> {t('admin.members_link')}</a>
-          <a class="nav-item" href={`${base}/settings`} aria-current={sub === 'settings' ? 'page' : undefined}><Icon name="settings" size={16} /> {t('settings.title')}</a>
-        {/if}
-        <a class="nav-item" href={`${base}/health`} aria-current={sub === 'health' ? 'page' : undefined}><Icon name="pulse" size={16} /> {t('health.short')}</a>
-        <a class="nav-item" href={`${base}/audit`} aria-current={sub === 'audit' ? 'page' : undefined}><Icon name="list" size={16} /> {t('audit.title')}</a>
+      {#if adminHome}
+        <a class="nav-item" href={`${base}/${adminHome}`}><Icon name="settings" size={16} /> {t('area_admin.title')}</a>
       {/if}
     {/if}
   </nav>
+  {/if}
 
   <main class="area-main">
-    {#if sub !== ''}
+    {#if sub !== '' && !adminMode}
       <nav class="crumbs" aria-label={t('nav.breadcrumbs')}>
         <ol>
           <li><a href={base}>{area.name}</a></li>
@@ -174,7 +224,7 @@
     {:else if proposalView && canWrite(area) && !area.personal}
       <Proposals {area} id={proposalView[1] ?? ''} {selfId} onchanged={changed} />
     {:else}
-      <div class="view">
+      <div class={['view', adminMode && 'admin-view']}>
         {#if sub === ''}
           <AreaHome {area} {tags} {misses} />
         {:else if sub === 'search'}
@@ -184,7 +234,7 @@
         {:else if kind === 'history'}
           <History {area} slug={pageSlug} onreverted={loadTree} />
         {:else if sub === 'templates' && area.role === 'admin'}
-          <Templates endpoint={`${base}/templates`} />
+          <Templates endpoint={`${base}/templates`} context={adminContext} />
         {:else if sub === 'files' && canEdit(area)}
           <Files {area} />
         {:else if kind === 'quiz' && !area.personal}
@@ -198,13 +248,13 @@
         {:else if sub === 'trash' && canEdit(area)}
           <Trash {area} onrestored={loadTree} />
         {:else if sub === 'audit' && area.role === 'admin'}
-          <Audit endpoint={`${base}/audit`} {base} />
+          <Audit endpoint={`${base}/audit`} context={adminContext} {base} />
         {:else if sub === 'health' && area.role === 'admin'}
-          <Health endpoint={`${base}/health`} />
-        {:else if sub === 'settings' && area.role === 'admin' && !area.personal}
-          <Settings {area} onchanged={onareachanged} />
+          <Health endpoint={`${base}/health`} context={adminContext} />
+        {:else if settingsSection && area.role === 'admin' && !area.personal}
+          <Settings {area} section={settingsSection} onchanged={onareachanged} />
         {:else if sub === 'members' && area.role === 'admin' && !area.personal}
-          <Members endpoint={`${base}/members`} areaName={area.name} canGrantAdmin={false} {selfId} />
+          <Members endpoint={`${base}/members`} context={adminContext} canGrantAdmin={false} {selfId} />
         {:else}
           <NotFound />
         {/if}

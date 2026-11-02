@@ -40,11 +40,12 @@ const (
 // y guiones, hasta 10 niveles. Nada de "..", espacios ni mayúsculas que dupliquen rutas.
 var slugRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*){0,9}$`)
 
-// mediaRefs encuentra la media que usa el contenido (![x](/api/w/ti/media/ID)). La de otra
-// área se descarta al asociar: repo solo toca media del Scope.
+// MediaRefs encuentra la media que usa el contenido (![x](/api/w/ti/media/ID)). La de otra
+// área se descarta al asociar: repo solo toca media del Scope. La purga diaria la usa para saber
+// qué media sigue en uso (§4.4).
 var mediaRe = regexp.MustCompile(`/api/w/[a-z0-9~-]+/media/([0-9A-HJKMNP-TV-Z]{26})`)
 
-func mediaRefs(markdown string) []string {
+func MediaRefs(markdown string) []string {
 	var ids []string
 	for _, m := range mediaRe.FindAllStringSubmatch(markdown, -1) {
 		ids = append(ids, m[1])
@@ -167,7 +168,7 @@ func (s *Service) Save(ctx context.Context, sc repo.Scope, actorID string, base 
 // save devuelve la página y su revisión nueva; 0 si no hubo cambios.
 func (s *Service) save(ctx context.Context, sc repo.Scope, actorID string, base int, w repo.PageWrite) (string, int, error) {
 	w.Title, w.Summary, w.AuthorID = strings.TrimSpace(w.Title), strings.TrimSpace(w.Summary), actorID
-	w.MediaIDs, w.Links = mediaRefs(w.Markdown), Links(w.Markdown)
+	w.MediaIDs, w.Links = MediaRefs(w.Markdown), Links(w.Markdown)
 	if err := CheckPage(w.Slug, w.Title, w.Markdown, w.Lang); err != nil {
 		return "", 0, err
 	}

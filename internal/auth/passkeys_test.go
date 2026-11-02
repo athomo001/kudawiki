@@ -18,7 +18,7 @@ const passkeyOrigin = "https://wiki.empresa.cl"
 func passkeyService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	t.Helper()
 	s, r, c := totpService(t)
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), BaseURL: passkeyOrigin})
+	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAdmins, BaseURL: passkeyOrigin})
 	return s, r, c
 }
 

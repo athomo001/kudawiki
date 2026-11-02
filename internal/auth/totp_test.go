@@ -23,11 +23,12 @@ func TestTOTPCodeRFC6238(t *testing.T) {
 	}
 }
 
-// totpService es newService con la llave del 2FA y una segunda persona sin rol de admin.
+// totpService es newService con la llave del 2FA, exigido a los admins (lo que prueban estos tests;
+// sin exigencia, TestTOTPEnforceNone), y una segunda persona sin rol de admin.
 func totpService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	t.Helper()
 	s, r, c := newService(t)
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32)})
+	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAdmins})
 	hash, _ := HashPassword(goodPassword)
 	if err := r.CreateUser(context.Background(), repo.User{ID: ulid.Make().String(), Email: "beto@empresa.cl", FullName: "Beto",
 		PasswordHash: hash, IsActive: true, Locale: "es"}); err != nil {
@@ -243,5 +244,26 @@ func TestTOTPEnforceAll(t *testing.T) {
 	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAll})
 	if need, _ := s.NeedsMFASetup(ctx, beto); !need {
 		t.Error("all policy: everybody needs it")
+	}
+}
+
+// Por defecto no se exige a nadie (§8.1, decidido el 2026-11-02): el superadmin entra sin
+// configurarlo y, si lo activó, lo puede apagar.
+func TestTOTPEnforceNone(t *testing.T) {
+	ctx := context.Background()
+	s, r, c := totpService(t)
+	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32)})
+	ana, _ := r.UserByEmail(ctx, "ana@empresa.cl")
+	if need, _ := s.NeedsMFASetup(ctx, ana); need {
+		t.Error("none policy: the superadmin does not need it")
+	}
+	secret, _ := enroll(t, s, r, "ana@empresa.cl")
+	ana, _ = r.UserByEmail(ctx, "ana@empresa.cl")
+	if st, _ := s.TOTPStatus(ctx, ana); !st.Enabled || st.Required {
+		t.Errorf("status = %+v", st)
+	}
+	c.t = c.t.Add(30 * time.Second)
+	if err := s.DisableTOTP(ctx, ana, "", goodPassword, totpCode(secret, c.t.Unix()/totpPeriod), false); err != nil {
+		t.Errorf("superadmin disables: %v", err)
 	}
 }

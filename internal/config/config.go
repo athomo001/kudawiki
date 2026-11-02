@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -76,8 +77,8 @@ type Config struct {
 			ResetTTL      string `yaml:"reset_ttl"`
 			InviteTTL     string `yaml:"invite_ttl"`
 		} `yaml:"local"`
-		// TOTP.EnforceFor: a quién se le exige el 2FA (§8.1). "admins" (superadmin y admins de
-		// área) o "all". No hay "nadie": para los admins es obligatorio.
+		// TOTP.EnforceFor: a quién se le exige el 2FA (§8.1). "none" (nadie, por defecto),
+		// "admins" (superadmin y admins de área) o "all".
 		TOTP struct {
 			EnforceFor string `yaml:"enforce_for"`
 		} `yaml:"totp"`
@@ -218,9 +219,9 @@ func Load(path string) (Config, error) {
 	c.Backup.KeepDaily, c.Backup.KeepWeekly, c.Backup.KeepMonthly = 7, 4, 6
 	c.Auth.Local.PasswordReset = true // SPEC §8.5.1
 	c.Auth.Local.ResetTTL, c.Auth.Local.InviteTTL = "30m", "168h"
-	c.Auth.TOTP.EnforceFor = "admins" // SPEC §8.1
-	c.Notify.EmailDelay = "10m"       // SPEC §12.1
-	c.Approval.RemindAfterDays = 3    // SPEC §5.3
+	c.Auth.TOTP.EnforceFor = "none" // SPEC §8.1, decidido el 2026-11-02
+	c.Notify.EmailDelay = "10m"     // SPEC §12.1
+	c.Approval.RemindAfterDays = 3  // SPEC §5.3
 
 	explicit := path != ""
 	if !explicit {
@@ -415,8 +416,8 @@ func (c Config) validate() error {
 	if d, err := time.ParseDuration(c.Auth.Local.InviteTTL); err != nil || d < time.Hour || d > 30*24*time.Hour {
 		return fmt.Errorf("auth.local.invite_ttl must be a duration between 1h and 720h, got %q", c.Auth.Local.InviteTTL)
 	}
-	if c.Auth.TOTP.EnforceFor != "admins" && c.Auth.TOTP.EnforceFor != "all" {
-		return fmt.Errorf(`auth.totp.enforce_for must be "admins" or "all", got %q`, c.Auth.TOTP.EnforceFor)
+	if !slices.Contains([]string{"none", "admins", "all"}, c.Auth.TOTP.EnforceFor) {
+		return fmt.Errorf(`auth.totp.enforce_for must be "none", "admins" or "all", got %q`, c.Auth.TOTP.EnforceFor)
 	}
 	// Sin ventana, cada guardado de una página seguida sería un correo; más de un día ya no es aviso.
 	if d, err := time.ParseDuration(c.Notify.EmailDelay); err != nil || d < time.Minute || d > 24*time.Hour {

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import PageHead from '../components/PageHead.svelte';
   import { api, codeOf, formatDate, type AuditEvent } from '../lib/api';
   import { t, has, errorText, locale } from '../lib/i18n/index.svelte';
 
   // Auditoría (SPEC §11). La del superadmin abarca todas las áreas y trae la IP; la del admin
   // de área, solo su área y la ruta de las páginas. Qué entra en cada una lo decide el servidor.
-  let { endpoint, base = '', global = false }: { endpoint: string; base?: string; global?: boolean } = $props();
+  let { endpoint, context, base = '', global = false }: { endpoint: string; context: string; base?: string; global?: boolean } = $props();
 
   let events = $state<AuditEvent[]>([]);
   let more = $state(false);
@@ -52,7 +53,7 @@
   });
 </script>
 
-<h1>{t('audit.title')}</h1>
+<PageHead {context} title={t('audit.title')} description={t('audit.intro')} />
 <form class="inline" onsubmit={(e) => (e.preventDefault(), load())}>
   {#if global}<label>{t('audit.area')} <input bind:value={filter.ws} placeholder="ti" /></label>{/if}
   <label>{t('audit.actor')} <input type="email" bind:value={filter.actor} /></label>

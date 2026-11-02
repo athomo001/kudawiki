@@ -131,7 +131,7 @@ func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolic
 		return nil, err
 	}
 	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{},
-		challenges: map[string]mfaChallenge{}, ceremonies: map[string]ceremony{}, mfa: SecondFactor{Enforce: MFAAdmins},
+		challenges: map[string]mfaChallenge{}, ceremonies: map[string]ceremony{},
 		resetTTL: defaultResetTTL, inviteTTL: defaultInviteTTL, async: func(f func()) { go f() }}, nil
 }
 

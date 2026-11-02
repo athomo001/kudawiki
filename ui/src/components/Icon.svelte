@@ -40,6 +40,11 @@
     lock: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3',
     // Campana del diseño aprobado: notificaciones en la barra y "Seguir página" en las acciones.
     bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0',
+    // Menú de administración (diseño aprobado "Kudawiki — Administración"): áreas, directorio, apariencia y correo.
+    grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+    server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
+    palette: 'M12 3a9 9 0 0 0 0 18c1.7 0 2-1.3 1.3-2.4-.7-1.1 0-2.6 1.4-2.6H17a4 4 0 0 0 4-4c0-5-4-9-9-9M7.5 11h.01M10 7h.01M15 7h.01',
+    mail: 'M3 5h18v14H3zM3.5 6l8.5 7 8.5-7',
   };
   export type IconName = keyof typeof paths | 'more';
 

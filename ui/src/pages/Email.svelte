@@ -1,10 +1,15 @@
 <script lang="ts">
   import { api, codeOf, ApiError } from '../lib/api';
   import { t, errorText } from '../lib/i18n/index.svelte';
+  import { countChanges } from '../lib/changes';
+  import PageHead from '../components/PageHead.svelte';
+  import Setting from '../components/Setting.svelte';
+  import SaveBar from '../components/SaveBar.svelte';
 
   // Administración → Correo (SPEC §12): el servidor SMTP con que la wiki manda sus correos y el
   // correo de prueba. La contraseña nunca llega al navegador: viene enmascarada y, si no se toca,
-  // se devuelve la máscara, que el servidor lee como "sin cambios" (§1).
+  // se devuelve la máscara, que el servidor lee como "sin cambios" (§1). Diseño "Kudawiki —
+  // Administración" (§15): secciones en dos columnas y barra de guardado.
 
   type Security = 'starttls' | 'tls' | 'none';
   type Settings = {
@@ -37,8 +42,12 @@
   const locked = (key: string) => form.locked.includes(key);
   const editable = () => Object.fromEntries(keys.filter((k) => !locked(k)).map((k) => [k, form[k]]));
   const dirty = $derived(loaded && JSON.stringify(editable()) !== saved);
+  const changes = $derived(loaded ? countChanges(JSON.parse(saved), editable()) : 0);
+  // original: lo último que vino del servidor, para Descartar.
+  let original = '';
 
   function show(s: Settings) {
+    original = JSON.stringify(s);
     form = s;
     saved = JSON.stringify(editable());
     loaded = true;
@@ -53,8 +62,7 @@
     form.security = next;
   }
 
-  async function save(e: SubmitEvent) {
-    e.preventDefault();
+  async function save() {
     busy = true;
     error = '';
     notice = '';
@@ -89,16 +97,26 @@
   <small class="muted">{locked(key) ? t('appearance.locked') : text}</small>
 {/snippet}
 
-<div class="email-settings">
-  <h1>{t('smtp.title')}</h1>
-  <p class="lead">{t('smtp.intro')}</p>
+<PageHead context={`${t('nav.admin')} · ${t('admin.group_site')}`} title={t('smtp.title')} description={t('smtp.intro')}>
+  {#snippet status()}
+    {#if loaded}<span class={`pill ${form.enabled ? 'ok' : 'neutral'}`}>{form.enabled ? t('smtp.state_on') : t('smtp.state_off')}</span>{/if}
+  {/snippet}
+  {#snippet actions()}
+    <button type="button" class="primary" disabled={busy || !loaded || !dirty} onclick={() => save()}>{busy ? t('common.saving') : t('common.save')}</button>
+  {/snippet}
+</PageHead>
 
-  {#if loaded}
-    <p class={form.enabled ? 'notice' : 'muted'} role="status">{form.enabled ? t('smtp.enabled') : t('smtp.disabled')}</p>
-  {/if}
+{#if error}<p class="error" role="alert">{error}</p>{/if}
+{#if notice && !dirty}<p class="notice" role="status">{notice}</p>{/if}
 
-  <form class="stack" onsubmit={save}>
-    <h2>{t('smtp.server')}</h2>
+<form
+  class="email-settings"
+  onsubmit={(e) => {
+    e.preventDefault();
+    save();
+  }}
+>
+  <Setting title={t('smtp.server')} description={t('smtp.server_desc')}>
     <label class="field">
       {t('smtp.host')}
       <input maxlength="253" spellcheck="false" autocomplete="off" placeholder="smtp.empresa.cl" disabled={locked('host')} bind:value={form.host} />
@@ -106,28 +124,31 @@
     </label>
     <fieldset class="field">
       <legend>{t('smtp.security')}</legend>
-      {#each securities as s (s)}
-        <label class="check">
-          <input
-            type="radio"
-            name="security"
-            value={s}
-            checked={form.security === s}
-            disabled={locked('security')}
-            onchange={() => changeSecurity(s)}
-          />
-          {t(`smtp.security.${s}`)}
-        </label>
-      {/each}
-      {@render hint('security', t(`smtp.security_hint.${form.security}`))}
+      <div class="choices">
+        {#each securities as s (s)}
+          <label class="choice">
+            <input
+              type="radio"
+              name="security"
+              value={s}
+              checked={form.security === s}
+              disabled={locked('security')}
+              onchange={() => changeSecurity(s)}
+            />
+            <span><strong>{t(`smtp.security.${s}`)}</strong><small>{t(`smtp.security_hint.${s}`)}</small></span>
+          </label>
+        {/each}
+      </div>
+      {#if locked('security')}<small class="muted">{t('appearance.locked')}</small>{/if}
     </fieldset>
     <label class="field">
       {t('smtp.port')}
       <input type="number" min="1" max="65535" class="port" disabled={locked('port')} bind:value={form.port} />
       {@render hint('port', t('smtp.port_hint'))}
     </label>
+  </Setting>
 
-    <h2>{t('smtp.account')}</h2>
+  <Setting title={t('smtp.account')} description={t('smtp.account_desc')}>
     <label class="field">
       {t('smtp.username')}
       <input maxlength="254" spellcheck="false" autocomplete="off" disabled={locked('username')} bind:value={form.username} />
@@ -144,27 +165,23 @@
       <input type="email" maxlength="254" spellcheck="false" placeholder="wiki@empresa.cl" disabled={locked('from')} bind:value={form.from} />
       {@render hint('from', t('smtp.from_hint'))}
     </label>
+  </Setting>
+</form>
 
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if notice && !dirty}<p class="notice" role="status">{notice}</p>{/if}
-    <div class="conflict-actions">
-      <button type="submit" class="primary" disabled={busy || !loaded || !dirty}>{busy ? t('common.saving') : t('common.save')}</button>
-    </div>
-  </form>
-
-  <section aria-labelledby="email-test-title">
-    <h2 id="email-test-title">{t('smtp.test')}</h2>
-    <p>{t('smtp.test_hint', { email })}</p>
+<Setting title={t('smtp.test')} description={t('smtp.test_hint', { email })}>
+  <div class="inline">
     <button type="button" class="secondary" disabled={!form.enabled || dirty || testState === 'sending'} onclick={sendTest}>
       {testState === 'sending' ? t('smtp.test_sending') : t('smtp.test_send')}
     </button>
     {#if dirty}<small class="muted">{t('smtp.test_save_first')}</small>{/if}
-    {#if testState === 'sent'}<p class="notice" role="status">{t('smtp.test_sent', { email })}</p>{/if}
-    {#if testState === 'failed'}
-      <div role="alert">
-        <p class="error">{testError}</p>
-        {#if testDetail}<pre class="smtp-detail"><code>{testDetail}</code></pre>{/if}
-      </div>
-    {/if}
-  </section>
-</div>
+  </div>
+  {#if testState === 'sent'}<p class="notice" role="status">{t('smtp.test_sent', { email })}</p>{/if}
+  {#if testState === 'failed'}
+    <div role="alert">
+      <p class="error">{testError}</p>
+      {#if testDetail}<pre class="smtp-detail"><code>{testDetail}</code></pre>{/if}
+    </div>
+  {/if}
+</Setting>
+
+<SaveBar count={changes} {busy} onsave={() => save()} ondiscard={() => show(JSON.parse(original))} />

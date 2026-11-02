@@ -86,13 +86,16 @@ type MediaRow struct {
 	ID, SHA256    string
 	Size          int64
 	HasThumbnail  bool
-	UnattachedOld bool // sin página, fuera de la papelera y más viejo que el corte
+	UnattachedOld bool // sin página, fuera de la papelera, sin borrador ni propuesta que la use y más viejo que el corte
 }
 
 func (r *Repo) MediaRows(ctx context.Context, s Scope, unattachedBefore time.Time) ([]MediaRow, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
 		`SELECT id, sha256, file_size_bytes, has_thumbnail, page_id IS NULL AND deleted_at IS NULL AND created_at < ?
-		 FROM media_assets WHERE workspace_id = ? ORDER BY id`, unattachedBefore.UTC(), s.WsID)
+		   AND NOT EXISTS (SELECT 1 FROM page_drafts d WHERE d.workspace_id = m.workspace_id AND instr(d.content_markdown, m.id) > 0)
+		   AND NOT EXISTS (SELECT 1 FROM proposals pr WHERE pr.workspace_id = m.workspace_id
+		     AND pr.status IN ('pending','rejected') AND instr(pr.content_markdown, m.id) > 0)
+		 FROM media_assets m WHERE workspace_id = ? ORDER BY id`, unattachedBefore.UTC(), s.WsID)
 	if err != nil {
 		return nil, err
 	}

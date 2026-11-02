@@ -10,10 +10,11 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/wiki"
 )
 
 const (
-	orphanAge     = 7 * 24 * time.Hour  // media sin página → papelera (§4.4)
+	unusedMedia   = 24 * time.Hour      // media que nadie usa, o que alguien borró (§4.4)
 	missRetention = 90 * 24 * time.Hour // búsquedas sin resultados (§9.6)
 	viewRetention = 90 * 24 * time.Hour // visitas por página (§4.17)
 	mailRetention = 30 * 24 * time.Hour // correos ya entregados o rendidos (§12)
@@ -22,7 +23,7 @@ const (
 )
 
 type store interface {
-	TrashOrphanMedia(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeUnusedMedia(ctx context.Context, cutoff time.Time, refs func(string) []string) ([]repo.MediaFile, error)
 	PurgeTrash(ctx context.Context, cutoff time.Time) ([]repo.PurgedPage, []repo.MediaFile, error)
 	PurgeSearchMisses(ctx context.Context, cutoff time.Time) error
 	PurgePageViews(ctx context.Context, cutoff time.Time) error
@@ -36,7 +37,7 @@ type files interface {
 	Remove(wsID, id string) error
 }
 
-// Purge es la purga diaria: la papelera (§4.5), las búsquedas sin resultados (§9.6), las
+// Purge es la purga diaria: la papelera (§4.5), la media que nadie usa (§4.4), las búsquedas sin resultados (§9.6), las
 // visitas por página (§4.17), los correos ya entregados (§12), los borradores abandonados
 // (§4.11), las revisiones fuera de la retención de cada área (§4.3) y la auditoría vencida (§11.1).
 type Purge struct {
@@ -52,10 +53,6 @@ type Purge struct {
 // Run hace una pasada. Si falla, lo vencido sigue vencido y la próxima pasada lo retoma.
 func (p Purge) Run(ctx context.Context) error {
 	now := p.Now()
-	orphans, err := p.Store.TrashOrphanMedia(ctx, now.Add(-orphanAge))
-	if err != nil {
-		return err
-	}
 	pages, purged, err := p.Store.PurgeTrash(ctx, now.Add(-p.Retention))
 	if err != nil {
 		return err
@@ -78,9 +75,15 @@ func (p Purge) Run(ctx context.Context) error {
 		p.Audit.Record(ctx, audit.Event{Action: audit.RevisionPurge, WsID: wsID, TargetType: "workspace", TargetID: wsID, System: system,
 			Meta: map[string]any{"count": n}})
 	}
+	// Después de las revisiones: la imagen que solo mostraba una revisión recién borrada ya está libre.
+	unused, err := p.Store.PurgeUnusedMedia(ctx, now.Add(-unusedMedia), wiki.MediaRefs)
+	errs = errors.Join(errs, err)
+	for _, f := range unused {
+		errs = errors.Join(errs, p.Files.Remove(f.WsID, f.ID))
+	}
 	events, err := p.Store.PurgeAudit(ctx, now.Add(-p.AuditRetention).UTC().Format(audit.TimeFormat))
 	errs = errors.Join(errs, err)
-	p.Log.Info("daily purge", "pages", len(pages), "media_files", len(purged), "orphans_trashed", orphans, "audit_events", events)
+	p.Log.Info("daily purge", "pages", len(pages), "media_files", len(purged), "unused_media", len(unused), "audit_events", events)
 	return errs
 }
 

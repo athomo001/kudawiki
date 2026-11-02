@@ -66,11 +66,24 @@ func (a api) listUsers(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// Las áreas de cada persona con su rol, para la tabla de Personas (§15).
+	memberships, err := a.Read.UserAreas(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	areas := map[string][]map[string]string{}
+	for _, u := range us {
+		areas[u.ID] = []map[string]string{} // [] y no null: la interfaz lo recorre sin preguntar
+	}
+	for _, m := range memberships {
+		areas[m.UserID] = append(areas[m.UserID], map[string]string{"name": m.Name, "role": m.Role})
+	}
 	out := make([]map[string]any, len(us))
 	for i, u := range us {
 		out[i] = map[string]any{"id": u.ID, "email": u.Email, "full_name": u.FullName,
 			"is_global_admin": u.IsGlobalAdmin, "is_active": u.IsActive, "invited": u.Invited, "totp_enabled": u.TOTPEnabled,
-			"auth_source": u.AuthSource}
+			"passkeys": u.Passkeys, "auth_source": u.AuthSource, "areas": areas[u.ID]}
 		// La baja (§8.4): en curso hasta offboarding_at, o completada en offboarded_at.
 		if !u.OffboardingAt.IsZero() {
 			out[i]["offboarding_at"] = u.OffboardingAt
@@ -131,9 +144,26 @@ func (a api) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	out := make([]map[string]string, len(ws))
+	// Miembros, admins, páginas y última edición, para la tabla de Áreas (§15).
+	stats, err := a.Read.PanelAreas(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	out := make([]map[string]any, len(ws))
 	for i, x := range ws {
-		out[i] = map[string]string{"id": x.ID, "slug": x.Slug, "name": x.Name, "description": x.Description}
+		st := stats[x.ID]
+		if st == nil {
+			st = &repo.PanelArea{}
+		}
+		if st.Admins == nil {
+			st.Admins = []string{}
+		}
+		out[i] = map[string]any{"id": x.ID, "slug": x.Slug, "name": x.Name, "description": x.Description,
+			"members": st.Members, "pages": st.Pages, "admins": st.Admins}
+		if !st.LastEdit.IsZero() {
+			out[i]["last_edit"] = st.LastEdit
+		}
 	}
 	a.json(w, http.StatusOK, out)
 }

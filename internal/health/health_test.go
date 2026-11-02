@@ -127,7 +127,11 @@ func TestEveryCheckFindsItsProblem(t *testing.T) {
 	e.file(t, e.ti, "M_STRAY", []byte("suelto"))
 	e.media(t, e.ti, "M_BADSHA", []byte("contenido"), "0000")
 	e.media(t, e.ti, "M_OLD", []byte("viejo"), "")
-	e.exec(t, `UPDATE media_assets SET created_at = datetime('now', '-30 days') WHERE id = 'M_OLD'`)
+	e.exec(t, `UPDATE media_assets SET created_at = datetime('now', '-3 days') WHERE id = 'M_OLD'`)
+	// La que usa un borrador espera a que se publique: no es la purga detenida (§4.4, §4.11).
+	e.media(t, e.ti, "M_DRAFT", []byte("en borrador"), "")
+	e.exec(t, `UPDATE media_assets SET created_at = datetime('now', '-3 days') WHERE id = 'M_DRAFT'`)
+	e.exec(t, `INSERT INTO page_drafts (user_id, workspace_id, target_slug, content_markdown) VALUES ('u1', ?, 'nueva', '![x](/api/w/ti/media/M_DRAFT)')`, e.ti.ID)
 	// Búsqueda: una página sin fila en el índice, y una fila del índice sin página.
 	e.exec(t, `DELETE FROM pages_fts WHERE rowid = (SELECT search_rowid FROM pages WHERE slug = 'red/vpn')`)
 	e.exec(t, `INSERT INTO pages_fts (rowid, title) VALUES (99999, 'purgada')`)
@@ -164,6 +168,9 @@ func TestEveryCheckFindsItsProblem(t *testing.T) {
 		if want.key != "search.orphan_index_rows  1" && p.Area != "ti" {
 			t.Errorf("%s: area %q, want ti", want.key, p.Area)
 		}
+	}
+	if _, ok := got["media.unattached  M_DRAFT"]; ok {
+		t.Error("media used by a draft reported as unattached")
 	}
 	// Finanzas está sana: nada suyo aparece.
 	for _, p := range ps {

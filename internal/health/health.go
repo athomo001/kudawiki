@@ -39,9 +39,9 @@ type Problem struct {
 	Detail   string   `json:"detail,omitempty"`
 }
 
-// unattachedGrace: la media sin página va sola a la papelera a los 7 días (§4.4); pasado un día
+// unattachedGrace: la media que nadie usa se borra sola pasado un día (§4.4); pasado otro día
 // más, es que la purga diaria no está corriendo.
-const unattachedGrace = 8 * 24 * time.Hour
+const unattachedGrace = 2 * 24 * time.Hour
 
 // store es lo que health usa de repo, declarado aquí (SPEC §16.2).
 type store interface {

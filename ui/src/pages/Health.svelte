@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import PageHead from '../components/PageHead.svelte';
   import { api, codeOf } from '../lib/api';
   import { t, has, errorText } from '../lib/i18n/index.svelte';
 
   // Salud del contenido (SPEC §13.7). La del admin de área trae su área; la del superadmin,
   // todas y lo que no es de ningún área. Qué entra lo decide el servidor.
-  let { endpoint, global = false }: { endpoint: string; global?: boolean } = $props();
+  let { endpoint, context, global = false }: { endpoint: string; context: string; global?: boolean } = $props();
 
   type Problem = { check: string; severity: 'error' | 'warning'; area?: string; page?: string; detail?: string };
   let problems = $state<Problem[] | null>(null);
@@ -33,8 +34,7 @@
   });
 </script>
 
-<h1>{t('health.title')}</h1>
-<p class="muted">{t('health.intro')}</p>
+<PageHead {context} title={t('health.title')} description={t('health.intro')} />
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 
 {#if problems}

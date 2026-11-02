@@ -40,10 +40,12 @@ var (
 	ErrMFAExpired     = errors.New("mfa_expired") // el segundo paso del login venció: se vuelve a empezar
 )
 
-// MFAPolicy es auth.totp.enforce_for (§8.1, §13.1): a quién se le exige el 2FA.
+// MFAPolicy es auth.totp.enforce_for (§8.1, §13.1): a quién se le exige el 2FA. El valor cero es
+// "none", el default que decidió el dueño: nadie está obligado.
 type MFAPolicy string
 
 const (
+	MFANone   MFAPolicy = "none"   // cada persona lo activa si quiere
 	MFAAdmins MFAPolicy = "admins" // superadmin y admins de área; el resto, si quiere
 	MFAAll    MFAPolicy = "all"
 )
@@ -58,9 +60,6 @@ type SecondFactor struct {
 }
 
 func (s *Service) SetSecondFactor(f SecondFactor) {
-	if f.Enforce == "" {
-		f.Enforce = MFAAdmins
-	}
 	s.mfa = f
 	s.rp = relyingParty(f.BaseURL)
 }
@@ -84,10 +83,16 @@ type TOTPStatus struct {
 // MFARequired dice si a esta persona se le exige el 2FA (§8.1). Se mira en cada pedido de quien no
 // lo tiene: un rol admin recién dado, también por un grupo de AD (§8.3.4), lo exige desde ya.
 func (s *Service) MFARequired(ctx context.Context, u repo.User) (bool, error) {
-	if s.mfa.Enforce == MFAAll || u.IsGlobalAdmin {
+	switch s.mfa.Enforce {
+	case MFAAll:
 		return true, nil
+	case MFAAdmins:
+		if u.IsGlobalAdmin {
+			return true, nil
+		}
+		return s.store.IsAreaAdmin(ctx, u.ID)
 	}
-	return s.store.IsAreaAdmin(ctx, u.ID)
+	return false, nil
 }
 
 // NeedsMFASetup: la persona tiene que configurar el 2FA antes de hacer cualquier otra cosa. Una

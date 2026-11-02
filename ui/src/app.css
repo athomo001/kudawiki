@@ -25,6 +25,10 @@
   --kw-state-warning: #9a5b00;
   --kw-state-success: #1a7f37;
   --kw-state-info: #1d4f91;
+  /* Fondos suaves de los estados: píldoras y la opción elegida (administración, §15). */
+  --kw-success-bg: #e8f5ec;
+  --kw-warning-bg: #fdf3e1;
+  --kw-info-bg: #eef4fc;
   --kw-level-n2: #9a4d00;
   --kw-level-n3: #9e1c3f;
   --kw-focus-ring: #1a5fb4;
@@ -91,6 +95,9 @@
     --kw-state-warning: #fdb022;
     --kw-state-success: #47cd89;
     --kw-state-info: #7fa7e0;
+    --kw-success-bg: rgb(71 205 137 / 0.12);
+    --kw-warning-bg: rgb(253 176 34 / 0.12);
+    --kw-info-bg: rgb(127 167 224 / 0.14);
     --kw-level-n2: #f5a65b;
     --kw-level-n3: #ff8fab;
     --kw-focus-ring: #7fa7e0;
@@ -870,18 +877,11 @@ mark { background: #fff1a8; color: inherit; }
 .results li { margin-bottom: 1.125rem; }
 .results .snippet { margin: 0.25rem 0 0; }
 .result-desc { margin: 0.125rem 0 0; color: var(--kw-text-soft); font-size: 0.9375rem; }
-.settings { max-width: 36rem; }
-.area-edit { max-width: 36rem; padding: 0.5rem 0 1rem; }
 /* Salud del contenido: la severidad con texto, no solo con color. */
 .health-summary { margin: 1rem 0; }
 .sev { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
 .sev-error { color: var(--kw-state-error); }
 .sev-warning { color: var(--kw-state-warning); }
-.settings textarea { width: 100%; resize: vertical; }
-.settings fieldset { margin: 0.5rem 0 0; padding: 0; border: 0; }
-.settings legend { padding: 0; margin-bottom: 0.25rem; font-weight: 600; font-size: 0.875rem; }
-.settings fieldset label { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.875rem; }
-section.settings { margin-top: 2.5rem; }
 .search-form input { flex: 1 1 24rem; }
 .search-section { margin-left: 0.375rem; color: var(--kw-text-soft); font-size: 0.875rem; }
 
@@ -919,8 +919,6 @@ section.settings { margin-top: 2.5rem; }
 .print-only { display: none; }
 
 /* Administración → Apariencia */
-.appearance { max-width: 44rem; }
-.appearance h2 { margin: 1.5rem 0 0; }
 .appearance fieldset { margin: 0; padding: 0; border: 0; }
 .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
 .color-field { display: flex; align-items: center; gap: 0.5rem; }
@@ -960,13 +958,8 @@ section.settings { margin-top: 2.5rem; }
 /* El logo para fondo oscuro se muestra sobre la barra oscura de Kudawiki. */
 .asset-view.dark { background: #15171c; color: #9aa0a6; }
 
-/* Administración → Correo: el mismo marco que Apariencia. */
-.email-settings { max-width: 44rem; }
-.email-settings h2 { margin: 1.5rem 0 0; }
-.email-settings fieldset { margin: 0; padding: 0; border: 0; }
-.email-settings legend { padding: 0; }
-.email-settings .port { width: 7rem; }
-.email-settings section > button { margin-right: 0.75rem; }
+/* Administración → Correo */
+.setting-fields input.port { width: 7rem; }
 /* Lo que contestó el servidor SMTP, tal cual: puede ser largo y sin espacios. */
 .smtp-detail {
   margin: 0.5rem 0 0; padding: 0.625rem 0.75rem; border-radius: 6px; background: var(--kw-bg-subtle);
@@ -1080,3 +1073,122 @@ button.picker-toggle:hover { background: var(--kw-hover); }
 .quiz-actions { position: sticky; bottom: 0; padding: 0.75rem 0; background: var(--kw-bg); border-top: 1px solid var(--kw-line); }
 .read-status-passed { color: var(--kw-state-success); }
 .read-status-failed_out { color: var(--kw-state-warning); font-weight: 600; }
+
+/* ===== Administración (diseño "Kudawiki — Administración", SPEC §15) =====
+   El menú agrupado ocupa el lugar del árbol; cada pantalla tiene una cabecera fija con el
+   título y la acción principal, ajustes en dos columnas (el porqué a la izquierda, los campos a
+   la derecha) y una barra al pie cuando hay cambios sin guardar. Sin cajas: líneas finas. */
+.admin-nav { padding-top: 1.25rem; }
+.admin-nav-head { display: grid; gap: 0.125rem; padding: 0 1rem 0.5rem; }
+.admin-nav-head .sidebar-title { font-size: 1.0625rem; letter-spacing: 0; text-transform: none; color: var(--kw-on-sidebar); }
+.admin-nav-back { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.375rem; color: var(--kw-sidebar-muted); font-size: 0.8125rem; }
+.sidebar a.admin-nav-back:hover { background: none; color: var(--kw-on-sidebar); }
+.admin-nav-group {
+  margin: 1rem 0 0; padding: 0 1rem 0.25rem; font-size: 0.6875rem; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--kw-sidebar-muted);
+}
+.admin-nav-list { list-style: none; margin: 0; padding: 0 0.5rem; }
+.admin-nav-list .nav-item { gap: 0.625rem; padding: 0.4375rem 0.5rem; border-radius: 6px; font-size: 0.90625rem; }
+
+.admin-view { padding-top: 0; }
+.page-head {
+  position: sticky; top: 0; z-index: 2; margin: 0 -3rem 1.5rem; padding: 1.25rem 3rem 0;
+  background: var(--kw-bg); border-bottom: 1px solid var(--kw-line);
+}
+.page-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; padding-bottom: 1rem; }
+.page-head-titles { flex: 1 1 24rem; min-width: 0; }
+.page-head-context { margin: 0 0 0.125rem; color: var(--kw-text-muted); font-size: 0.8125rem; }
+.page-head h1 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0; font-size: 1.625rem; letter-spacing: -0.01em; }
+.page-head-desc { margin: 0.25rem 0 0; max-width: 70ch; color: var(--kw-text-muted); }
+.page-head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.page-head-actions .primary, .savebar .primary { display: inline-flex; align-items: center; gap: 0.375rem; margin: 0; }
+.page-tabs { display: flex; gap: 1.5rem; overflow-x: auto; }
+.page-tabs a { padding: 0.5rem 0 0.625rem; border-bottom: 2px solid transparent; color: var(--kw-text-muted); font-weight: 500; white-space: nowrap; }
+.page-tabs a:hover { color: var(--kw-text); text-decoration: none; }
+.page-tabs a[aria-current='page'] { border-bottom-color: var(--kw-accent); color: var(--kw-text); font-weight: 600; }
+
+.setting {
+  display: grid; grid-template-columns: minmax(14rem, 20rem) minmax(0, 38rem); gap: 1rem 4rem;
+  margin: 0; padding: 1.75rem 0; border-bottom: 1px solid var(--kw-line);
+}
+.setting > header h2 { margin: 0; font-size: 1rem; }
+.setting > header p { margin: 0.375rem 0 0; color: var(--kw-text-muted); font-size: 0.875rem; }
+.setting-fields { display: grid; gap: 1.125rem; align-content: start; min-width: 0; }
+.setting-fields :is(input, select, textarea) { font-weight: 400; }
+.setting-fields :is(input:not([type]), input[type='text'], input[type='email'], input[type='url'], input[type='password'], textarea, select) { width: 100%; }
+.setting-fields textarea { resize: vertical; }
+.setting-fields fieldset { display: grid; gap: 0.375rem; margin: 0; padding: 0; border: 0; }
+.setting-fields legend { margin-bottom: 0.375rem; padding: 0; font-weight: 600; font-size: 0.875rem; }
+.setting-fields small { font-weight: 400; }
+.setting-fields .inline :is(input, select) { width: auto; }
+input[readonly] { background: var(--kw-bg-subtle); color: var(--kw-text-muted); }
+.mono { font-family: var(--kw-font-mono); }
+
+/* Opciones excluyentes como filas que se eligen enteras; el texto de ayuda va debajo. */
+.choices { display: grid; border: 1px solid var(--kw-border); border-radius: 8px; overflow: hidden; }
+label.choice { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.75rem 0.875rem; border-top: 1px solid var(--kw-line); cursor: pointer; font-weight: 400; }
+label.choice:first-child { border-top: 0; }
+label.choice:has(input:checked) { background: var(--kw-info-bg); }
+.choice input, .check-hint input { flex: none; margin-top: 0.25rem; accent-color: var(--kw-accent); }
+:is(.choice, .check-hint) strong { display: block; color: var(--kw-text); font-size: 0.9375rem; }
+:is(.choice, .check-hint) small { display: block; color: var(--kw-text-muted); font-size: 0.8125rem; }
+label.check-hint { align-items: flex-start; gap: 0.625rem; }
+.check-hint.warn strong { color: var(--kw-state-warning); }
+
+/* Estado con texto y un punto del mismo color: nunca solo color. */
+.pill {
+  display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.125rem 0.5rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0; white-space: nowrap;
+}
+.pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--kw-state-success); background: var(--kw-success-bg); }
+.pill.warn { color: var(--kw-state-warning); background: var(--kw-warning-bg); }
+.pill.neutral, .pill.plain { color: var(--kw-text-muted); background: var(--kw-bg-subtle); }
+.pill.plain::before { display: none; }
+
+/* Tablas de personas, áreas y miembros: a todo el ancho, con búsqueda y filtros arriba. */
+.table-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; margin-bottom: 1rem; }
+.table-toolbar input[type='search'] { flex: 0 1 22rem; font-weight: 400; }
+.toolbar-end { margin-left: auto; }
+.toolbar-end .primary { display: inline-flex; align-items: center; gap: 0.375rem; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.chip { padding: 0.25rem 0.75rem; border: 1px solid var(--kw-line); border-radius: 999px; background: var(--kw-bg); color: var(--kw-text-muted); font-size: 0.8125rem; }
+.chip:hover { color: var(--kw-text); }
+.chip[aria-pressed='true'] { border-color: var(--kw-accent); background: var(--kw-info-bg); color: var(--kw-text); font-weight: 600; }
+.chip-count { margin-left: 0.25rem; font-variant-numeric: tabular-nums; }
+/* El menú de cada fila se abre fuera de la tabla: sin desplazamiento propio que lo recorte. */
+.wide-table { overflow: visible; }
+.admin-table { max-width: none; font-size: 0.875rem; }
+.admin-table th { padding: 0.5rem 0.75rem; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+.admin-table td { padding: 0.625rem 0.75rem; vertical-align: middle; }
+.admin-table tbody tr:hover { background: var(--kw-bg-subtle); }
+.admin-table select { font-weight: 400; }
+:is(td, th).num { text-align: right; font-variant-numeric: tabular-nums; }
+.who { display: flex; align-items: center; gap: 0.625rem; }
+.who strong, .who small { display: block; }
+.who small { color: var(--kw-text-muted); font-size: 0.8125rem; }
+.who-initials {
+  display: grid; place-items: center; flex: none; width: 2rem; height: 2rem; border-radius: 50%;
+  background: var(--kw-info-bg); color: var(--kw-link); font-size: 0.75rem; font-weight: 600;
+}
+.row-actions { width: 2.75rem; text-align: right; }
+.row-actions .dropdown { display: inline-block; }
+.row-actions .dropdown-panel { text-align: left; }
+.row-actions .menu { min-width: 17rem; }
+.menu .menu-label { padding: 0.375rem 0.625rem 0.125rem; color: var(--kw-text-muted); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.menu-sep { height: 1px; margin: 0.375rem 0; background: var(--kw-line); }
+
+.savebar {
+  position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem;
+  margin: 1.5rem -3rem 0; padding: 0.75rem 3rem; background: var(--kw-bg);
+  border-top: 1px solid var(--kw-border); box-shadow: 0 -6px 16px rgb(0 0 0 / 0.06);
+}
+.savebar p { flex: 1; display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin: 0; font-size: 0.875rem; }
+
+@media (max-width: 75rem) {
+  .setting { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+}
+@media (max-width: 60rem) {
+  .page-head { position: static; margin-inline: -1.25rem; padding-inline: 1.25rem; }
+  .savebar { margin-inline: -1.25rem; padding-inline: 1.25rem; }
+}

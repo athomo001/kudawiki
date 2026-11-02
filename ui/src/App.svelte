@@ -10,9 +10,11 @@
   import Home from './pages/Home.svelte';
   import MyHome from './pages/MyHome.svelte';
   import Profile from './pages/Profile.svelte';
-  import Admin from './pages/Admin.svelte';
+  import AdminNav from './components/AdminNav.svelte';
+  import People from './pages/People.svelte';
+  import Areas from './pages/Areas.svelte';
+  import AdminArea from './pages/AdminArea.svelte';
   import Templates from './pages/Templates.svelte';
-  import Members from './pages/Members.svelte';
   import Audit from './pages/Audit.svelte';
   import Health from './pages/Health.svelte';
   import Appearance from './pages/Appearance.svelte';
@@ -81,7 +83,11 @@
 
   // Lo que no calza o no corresponde muestra el mismo "no encontrado" (SPEC §3.3).
   const areaPath = $derived(route.path.match(/^\/w\/(~?[a-z0-9-]+)(?:\/(.*))?$/));
-  const adminAreaId = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})$/)?.[1]);
+  // Administración (diseño "Kudawiki — Administración", §15): solo el superadmin; para el resto
+  // es una ruta más que no existe.
+  const admin = $derived(!!me?.is_global_admin && (route.path === '/admin' || route.path.startsWith('/admin/')));
+  const adminArea = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})(\/members)?$/));
+  const ldapTab = $derived(route.path.match(/^\/admin\/ldap(?:\/(rules|sync|test))?$/));
   // El espacio personal (§7) no viene entre las áreas: el propio se arma con el rol de su dueño
   // (admin) y uno ajeno, solo para el superadmin, como lector y en modo auditoría. Si no existe,
   // el servidor responde el 404 de siempre.
@@ -151,6 +157,39 @@
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if area}
       <Area {area} sub={areaPath?.[2] ?? ''} selfId={me.id} onareachanged={loadMe} />
+    {:else if admin}
+      {@const site = `${t('nav.admin')} · ${t('admin.group_site')}`}
+      {@const supervision = `${t('nav.admin')} · ${t('admin.group_supervision')}`}
+      <div class="area">
+        <AdminNav />
+        <main class="area-main">
+          <div class="view admin-view">
+            {#if route.path === '/admin' || route.path === '/admin/users'}
+              <People selfId={me.id} />
+            {:else if route.path === '/admin/areas'}
+              <Areas onchanged={loadMe} />
+            {:else if adminArea}
+              <AdminArea id={adminArea[1] ?? ''} tab={adminArea[2] ? 'members' : 'general'} selfId={me.id} onchanged={loadMe} />
+            {:else if ldapTab}
+              <!-- Una sola rama para las cuatro pestañas: el formulario sin guardar no se pierde al cambiar de pestaña. -->
+              <Directory tab={(ldapTab[1] as 'rules' | 'sync' | 'test' | undefined) ?? 'connection'} />
+            {:else if route.path === '/admin/appearance'}
+              <Appearance />
+            {:else if route.path === '/admin/email'}
+              <Email email={me.email} />
+            {:else if route.path === '/admin/templates'}
+              <Templates endpoint="/admin/templates" context={site} global />
+            {:else if route.path === '/admin/health'}
+              <Health endpoint="/admin/health" context={supervision} global />
+            {:else if route.path === '/admin/audit'}
+              <Audit endpoint="/admin/audit" context={supervision} global />
+            {:else}
+              <NotFound />
+            {/if}
+          </div>
+          <SiteFooter />
+        </main>
+      </div>
     {:else}
       <main class="view">
         {#if route.path === '/'}
@@ -159,22 +198,6 @@
           <MyHome {me} />
         {:else if route.path === '/me/profile'}
           <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
-        {:else if route.path === '/admin' && me.is_global_admin}
-          <Admin onchanged={loadMe} selfId={me.id} />
-        {:else if route.path === '/admin/audit' && me.is_global_admin}
-          <Audit endpoint="/admin/audit" global />
-        {:else if route.path === '/admin/health' && me.is_global_admin}
-          <Health endpoint="/admin/health" global />
-        {:else if route.path === '/admin/appearance' && me.is_global_admin}
-          <Appearance />
-        {:else if route.path === '/admin/templates' && me.is_global_admin}
-          <Templates endpoint="/admin/templates" global />
-        {:else if route.path === '/admin/email' && me.is_global_admin}
-          <Email email={me.email} />
-        {:else if route.path === '/admin/ldap' && me.is_global_admin}
-          <Directory />
-        {:else if adminAreaId && me.is_global_admin}
-          <Members endpoint={`/admin/workspaces/${adminAreaId}/members`} canGrantAdmin selfId={me.id} />
         {:else}
           <NotFound />
         {/if}

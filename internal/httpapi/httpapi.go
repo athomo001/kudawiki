@@ -181,6 +181,8 @@ type quizService interface {
 type reader interface {
 	ListUsers(ctx context.Context) ([]repo.User, error)
 	ListWorkspaces(ctx context.Context) ([]repo.Workspace, error)
+	UserAreas(ctx context.Context) ([]repo.UserArea, error)
+	PanelAreas(ctx context.Context) (map[string]*repo.PanelArea, error)
 	WorkspaceByID(ctx context.Context, id string) (repo.Workspace, error)
 	Memberships(ctx context.Context, userID string) ([]repo.Membership, error)
 	MembershipBySlug(ctx context.Context, slug, userID string) (repo.Membership, error)

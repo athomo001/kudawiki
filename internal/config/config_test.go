@@ -146,6 +146,15 @@ func TestAuthLocal(t *testing.T) {
 	if !c.Auth.Local.PasswordReset || c.ResetTTL() != 15*time.Minute || c.InviteTTL() != 7*24*time.Hour {
 		t.Errorf("auth.local = %+v", c.Auth.Local)
 	}
+	// El 2FA no se le exige a nadie salvo que se pida (§8.1, decidido el 2026-11-02).
+	if c.Auth.TOTP.EnforceFor != "none" {
+		t.Errorf("auth.totp.enforce_for = %q", c.Auth.TOTP.EnforceFor)
+	}
+	t.Setenv("KUDAWIKI_AUTH_TOTP_ENFORCE_FOR", "nobody")
+	if _, err := Load(path); err == nil {
+		t.Error("an unknown 2FA policy should be rejected")
+	}
+	t.Setenv("KUDAWIKI_AUTH_TOTP_ENFORCE_FOR", "admins")
 	t.Setenv("KUDAWIKI_AUTH_LOCAL_PASSWORD_RESET", "false")
 	if c, _ := Load(path); c.Auth.Local.PasswordReset {
 		t.Error("the variable should turn it off")

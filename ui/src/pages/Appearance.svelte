@@ -3,11 +3,16 @@
   import { t, errorText, has } from '../lib/i18n/index.svelte';
   import { site, logoURL } from '../lib/site.svelte';
   import Logo from '../components/Logo.svelte';
+  import PageHead from '../components/PageHead.svelte';
+  import Setting from '../components/Setting.svelte';
+  import SaveBar from '../components/SaveBar.svelte';
+  import { countChanges } from '../lib/changes';
 
   // Administración → Apariencia (SPEC §15.1): la marca de la empresa, una sola para todas las
   // áreas. Solo valores validados: texto plano, colores #RRGGBB e imágenes que el servidor
   // sanitiza (§15.1.5). Los colores se prueban en la vista previa; al guardar se recarga la
-  // página, que el servidor arma ya con la paleta nueva, en claro y en oscuro (§15.1.2).
+  // página, que el servidor arma ya con la paleta nueva, en claro y en oscuro (§15.1.2). Diseño
+  // "Kudawiki — Administración" (§15): secciones en dos columnas y barra de guardado.
 
   type Warning = { code: string; color?: string };
   type Palette = { light: Record<string, string>; warnings: Warning[]; header_dark: boolean };
@@ -63,6 +68,7 @@
       form = s;
       ownSidebar = !!s.color_sidebar;
       loaded = true;
+      original = values();
     })
     .catch((e) => (error = errorText(codeOf(e))));
 
@@ -113,8 +119,9 @@
     if (!locked('color_sidebar')) ownSidebar = false;
   }
 
-  async function save(e: SubmitEvent) {
-    e.preventDefault();
+  // values: lo que se guarda. Una clave fijada en el archivo no se manda: el servidor la
+  // rechazaría aunque no cambie.
+  function values(): Record<string, unknown> {
     const all = {
       title: form.title,
       company: form.company,
@@ -124,11 +131,22 @@
       login_message: form.login_message,
       show_powered_by: form.show_powered_by,
     };
+    return Object.fromEntries(Object.entries(all).filter(([k]) => !locked(k)));
+  }
+  // original: lo guardado, para contar los cambios y para Descartar.
+  let original = $state<Record<string, unknown>>({});
+  const changes = $derived(loaded ? countChanges(original, values()) : 0);
+
+  function discard() {
+    Object.assign(form, original);
+    if (!locked('color_sidebar')) ownSidebar = !!original.color_sidebar;
+  }
+
+  async function save() {
     busy = true;
     error = '';
     try {
-      // Una clave fijada en el archivo no se manda: el servidor la rechazaría aunque no cambie.
-      await api('PATCH', '/admin/site', Object.fromEntries(Object.entries(all).filter(([k]) => !locked(k))));
+      await api('PATCH', '/admin/site', values());
       location.reload();
     } catch (err) {
       error = errorText(codeOf(err));
@@ -210,12 +228,23 @@
   </div>
 {/snippet}
 
-<div class="appearance">
-  <h1>{t('appearance.title')}</h1>
-  <p class="lead">{t('appearance.intro')}</p>
+<PageHead context={`${t('nav.admin')} · ${t('admin.group_site')}`} title={t('appearance.title')} description={t('appearance.intro')}>
+  {#snippet actions()}
+    <button type="button" class="secondary" disabled={busy || !loaded} onclick={reset} title={t('appearance.reset_hint')}>{t('appearance.reset')}</button>
+    <button type="button" class="primary" disabled={busy || !loaded || !changes} onclick={() => save()}>{busy ? t('common.saving') : t('common.save')}</button>
+  {/snippet}
+</PageHead>
 
-  <form class="stack" onsubmit={save}>
-    <h2>{t('appearance.identity')}</h2>
+{#if error}<p class="error" role="alert">{error}</p>{/if}
+
+<form
+  class="appearance"
+  onsubmit={(e) => {
+    e.preventDefault();
+    save();
+  }}
+>
+  <Setting title={t('appearance.identity')} description={t('appearance.identity_desc')}>
     <label class="field">
       {t('appearance.site_title')}
       <input maxlength="40" placeholder="Kudawiki" disabled={locked('title')} bind:value={form.title} />
@@ -235,8 +264,9 @@
       <input type="checkbox" disabled={locked('show_powered_by')} bind:checked={form.show_powered_by} />
       {t('appearance.powered_by')}
     </label>
+  </Setting>
 
-    <h2>{t('appearance.colors')}</h2>
+  <Setting title={t('appearance.colors')} description={t('appearance.fixed_colors')}>
     <fieldset>
       <legend class="side-title">{t('appearance.suggested')}</legend>
       <ul class="palettes">
@@ -258,9 +288,9 @@
     </label>
     {#if ownSidebar}{@render colorField('color_sidebar', t('appearance.sidebar'), t('appearance.sidebar_hint'))}{/if}
     {#each palette?.warnings ?? [] as w (w.code)}<p class="notice" role="status">{warningText(w)}</p>{/each}
-    <p class="muted small">{t('appearance.fixed_colors')}</p>
+  </Setting>
 
-    <h2>{t('appearance.preview')}</h2>
+  <Setting title={t('appearance.preview')} description={t('appearance.preview_desc')}>
     <!-- Miniatura con las variables de la paleta; lo que dice para un lector de pantalla son los avisos de arriba. -->
     <div class="brand-preview" bind:this={preview} aria-hidden="true">
       <div class="brand-preview-bar">
@@ -284,46 +314,40 @@
         </div>
       </div>
     </div>
+  </Setting>
+</form>
 
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-    <div class="conflict-actions">
-      <button type="submit" class="primary" disabled={busy || !loaded}>{busy ? t('common.saving') : t('common.save')}</button>
-      <button type="button" class="secondary" disabled={busy || !loaded} onclick={reset}>{t('appearance.reset')}</button>
-    </div>
-    <small class="muted">{t('appearance.reset_hint')}</small>
-  </form>
-
-  <section aria-labelledby="logos-title">
-    <h2 id="logos-title">{t('appearance.logos')}</h2>
-    {#if assetError}<p class="error" role="alert">{assetError}</p>{/if}
-    {#each kinds as kind (kind)}
-      <div class="asset">
-        <div class={['asset-view', kind === 'logo_dark' && 'dark']}>
-          {#if assetSrc(kind)}<img src={assetSrc(kind)} alt="" />{:else}<span class="small">{t('appearance.kudawiki_asset')}</span>{/if}
-        </div>
-        <div class="field">
-          <label for={`file-${kind}`}>{t(`appearance.kind.${kind}`)}</label>
-          <input
-            id={`file-${kind}`}
-            type="file"
-            accept="image/svg+xml,image/png,image/webp"
-            aria-describedby={`hint-${kind}`}
-            disabled={busy || !loaded}
-            onchange={(e) => upload(kind, e.currentTarget)}
-          />
-          <small id={`hint-${kind}`} class="muted">{t(`appearance.kind_hint.${kind}`)}</small>
-          {#each notes[kind] ?? [] as w (w.code)}<p class="notice" role="status">{warningText(w)}</p>{/each}
-          {#if form.assets[kind]}
-            <button
-              type="button"
-              class="link"
-              aria-label={t('appearance.remove_label', { kind: t(`appearance.kind.${kind}`) })}
-              disabled={busy}
-              onclick={() => remove(kind)}>{t('appearance.remove')}</button
-            >
-          {/if}
-        </div>
+<Setting title={t('appearance.logos')} description={t('appearance.logos_desc')}>
+  {#if assetError}<p class="error" role="alert">{assetError}</p>{/if}
+  {#each kinds as kind (kind)}
+    <div class="asset">
+      <div class={['asset-view', kind === 'logo_dark' && 'dark']}>
+        {#if assetSrc(kind)}<img src={assetSrc(kind)} alt="" />{:else}<span class="small">{t('appearance.kudawiki_asset')}</span>{/if}
       </div>
-    {/each}
-  </section>
-</div>
+      <div class="field">
+        <label for={`file-${kind}`}>{t(`appearance.kind.${kind}`)}</label>
+        <input
+          id={`file-${kind}`}
+          type="file"
+          accept="image/svg+xml,image/png,image/webp"
+          aria-describedby={`hint-${kind}`}
+          disabled={busy || !loaded}
+          onchange={(e) => upload(kind, e.currentTarget)}
+        />
+        <small id={`hint-${kind}`} class="muted">{t(`appearance.kind_hint.${kind}`)}</small>
+        {#each notes[kind] ?? [] as w (w.code)}<p class="notice" role="status">{warningText(w)}</p>{/each}
+        {#if form.assets[kind]}
+          <button
+            type="button"
+            class="link"
+            aria-label={t('appearance.remove_label', { kind: t(`appearance.kind.${kind}`) })}
+            disabled={busy}
+            onclick={() => remove(kind)}>{t('appearance.remove')}</button
+          >
+        {/if}
+      </div>
+    </div>
+  {/each}
+</Setting>
+
+<SaveBar count={changes} {busy} note={t('appearance.save_note')} onsave={() => save()} ondiscard={discard} />

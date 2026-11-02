@@ -5,11 +5,13 @@
   import { t, errorText } from '../lib/i18n/index.svelte';
   import { createEditor } from '../lib/editor';
   import LevelBadge from '../components/LevelBadge.svelte';
+  import PageHead from '../components/PageHead.svelte';
 
   // Plantillas (SPEC §4.9): las del área las administra su admin; las globales, el superadmin, y
   // se copian a cada área nueva. Aquí no se suben imágenes: una imagen sin página va a la papelera
   // a los 7 días (§4.4) y la plantilla quedaría con el enlace roto.
-  let { endpoint, global = false }: { endpoint: string; global?: boolean } = $props();
+  // context: la línea sobre el título, "Administración · Sitio" o "{área} · Administrar área" (§15).
+  let { endpoint, context, global = false }: { endpoint: string; context: string; global?: boolean } = $props();
 
   type Form = { id: string; name: string; description: string; title: string; level: Level; tags: string; review: number };
   let list = $state<Template[]>([]);
@@ -104,8 +106,11 @@
   }
 </script>
 
-<h1>{global ? t('templates.global_title') : t('templates.title')}</h1>
-<p class="muted">{global ? t('templates.global_intro') : t('templates.intro')}</p>
+<PageHead {context} title={global ? t('templates.global_title') : t('templates.title')} description={global ? t('templates.global_intro') : t('templates.intro')}>
+  {#snippet actions()}
+    {#if !form}<button type="button" class="primary" onclick={() => open()}>{t('templates.new')}</button>{/if}
+  {/snippet}
+</PageHead>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 
 {#if form}
@@ -151,7 +156,6 @@
     </div>
   </form>
 {:else}
-  <button type="button" class="primary" onclick={() => open()}>{t('templates.new')}</button>
   {#if loaded && !list.length}<p class="muted">{t('templates.none')}</p>{/if}
   <ul class="template-list">
     {#each list as tpl (tpl.id)}

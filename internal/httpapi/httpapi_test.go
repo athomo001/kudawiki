@@ -96,7 +96,8 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
-	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), BaseURL: origin})
+	// El 2FA exigido a los admins: varias pruebas lo cubren. Sin exigencia es el default (§8.1).
+	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), Enforce: auth.MFAAdmins, BaseURL: origin})
 	svc.SetDirectory(directory)
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)

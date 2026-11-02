@@ -19,8 +19,8 @@ import (
 )
 
 // La purga borra de verdad (§4.5): la página vencida con sus revisiones, su fila en la
-// búsqueda y su media en disco; la media huérfana pasa a la papelera a los 7 días y se purga
-// después, salvo la que usa un borrador; las búsquedas sin resultados duran 90 días y los
+// búsqueda y su media en disco; la media huérfana se borra pasado un día, salvo la que usa un
+// borrador (el detalle, en TestUnusedMedia); las búsquedas sin resultados duran 90 días y los
 // borradores, 30 sin tocarlos. Lo que no venció no se toca.
 func TestPurge(t *testing.T) {
 	ctx := context.Background()
@@ -118,11 +118,14 @@ func TestPurge(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "ws_"+ws.ID, used.ID)); !os.IsNotExist(err) {
 		t.Error("media file of the purged page is still on disk")
 	}
-	if n := count(`SELECT COUNT(*) FROM media_assets WHERE id = '` + orphan.ID + `' AND deleted_at IS NOT NULL`); n != 1 {
-		t.Error("orphan media older than 7 days not moved to the trash")
+	if n := count(`SELECT COUNT(*) FROM media_assets WHERE id = '` + orphan.ID + `'`); n != 0 {
+		t.Error("orphan media older than a day not deleted")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ws_"+ws.ID, orphan.ID)); !os.IsNotExist(err) {
+		t.Error("orphan media file still on disk")
 	}
 	if n := count(`SELECT COUNT(*) FROM media_assets WHERE id = '` + drafted.ID + `' AND deleted_at IS NULL`); n != 1 {
-		t.Error("media used by a draft moved to the trash")
+		t.Error("media used by a draft deleted")
 	}
 	if n := count(`SELECT COUNT(*) FROM page_drafts WHERE target_slug = 'en-curso'`); n != 1 || count(`SELECT COUNT(*) FROM page_drafts`) != 1 {
 		t.Error("drafts: want only the one untouched for 30 days purged")
@@ -141,13 +144,115 @@ func TestPurge(t *testing.T) {
 		t.Errorf("%d page.purge events by the system, want 1", n)
 	}
 
-	// Pasado el plazo, la huérfana que está en la papelera también se va del disco.
-	purge.Now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+}
+
+// La media que nadie usa se borra al día (§4.4, decisión del dueño del 2026-11-02): la que nunca
+// llegó a una página y la que se sacó de una página cuando ya ninguna revisión guardada la
+// muestra. Usarla en el texto o en una revisión de cualquier página del área, en un borrador,
+// una propuesta abierta, una plantilla, un anuncio o un cuestionario la mantiene. La que alguien
+// borró también dura un día; la de una página en la papelera sigue el plazo de la página.
+func TestUnusedMedia(t *testing.T) {
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	store := repo.New(db)
+	dir := t.TempDir()
+	rec := audit.NewRecorder(store, time.Now, slog.New(slog.DiscardHandler))
+	files := media.NewService(store, rec, dir, 1<<20)
+	svc := wiki.NewService(store, rec)
+	uid := ulid.Make().String()
+	if err := store.CreateUser(ctx, repo.User{ID: uid, Email: "e@x.cl", FullName: "E", IsActive: true, Locale: "es"}); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// "corta" guarda solo la última revisión: lo que se sacó del texto deja de estar en uso.
+	scopes := map[string]repo.Scope{}
+	for _, slug := range []string{"ti", "corta"} {
+		ws := repo.Workspace{ID: ulid.Make().String(), Slug: slug, Name: slug}
+		if err := store.CreateWorkspace(ctx, ws); err != nil {
+			t.Fatal(err)
+		}
+		scopes[slug] = repo.Scope{WsID: ws.ID, MaxRank: 3}
+	}
+	exec(`UPDATE workspaces SET revisions_keep_last = 1 WHERE slug = 'corta'`)
+	ids := map[string]string{}
+	upload := func(area, name string) string {
+		t.Helper()
+		m, err := files.Upload(ctx, scopes[area], uid, name+".txt", strings.NewReader(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[name] = m.ID
+		return "![" + name + "](/api/w/" + area + "/media/" + m.ID + ")"
+	}
+	save := func(area, slug string, base int, md string) {
+		t.Helper()
+		if err := svc.Save(ctx, scopes[area], uid, base, repo.PageWrite{Slug: slug, Title: slug, Markdown: md}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ti := scopes["ti"].WsID
+
+	upload("ti", "nueva")   // de hace un rato: todavía no
+	upload("ti", "suelta")  // nunca se usó
+	upload("ti", "borrada") // alguien la borró hace dos días
+	upload("ti", "recien")  // alguien la borró hoy
+	save("ti", "actual", 0, upload("ti", "actual"))
+	save("ti", "historial", 0, upload("ti", "historial"))
+	save("ti", "historial", 1, "sin la imagen") // la revisión 1 la sigue mostrando
+	save("ti", "papelera", 0, upload("ti", "papelera"))
+	if err := svc.Delete(ctx, scopes["ti"], uid, "papelera"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveDraft(ctx, scopes["ti"], uid, "borrador", repo.Draft{Title: "b", Markdown: upload("ti", "borrador")}); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO proposals (id, workspace_id, page_id, target_slug, base_revision, title, content_markdown, lang, author_id, status)
+		  SELECT 'prop', workspace_id, id, slug, 1, 'P', ?, 'es', ?, 'pending' FROM pages WHERE slug = 'actual'`, upload("ti", "propuesta"), uid)
+	exec(`INSERT INTO page_templates (id, workspace_id, name, content_markdown, created_by) VALUES ('tpl', ?, 'T', ?, ?)`, ti, upload("ti", "plantilla"), uid)
+	exec(`INSERT INTO announcements (id, workspace_id, title, body_markdown, created_by) VALUES ('ann', ?, 'A', ?, ?)`, ti, upload("ti", "anuncio"), uid)
+	exec(`INSERT INTO quizzes (id, workspace_id, page_id, title, draft_json, created_by)
+		  SELECT 'quiz', workspace_id, id, 'Q', ?, ? FROM pages WHERE slug = 'actual'`, `{"questions":[{"prompt":"`+upload("ti", "cuestionario")+`"}]}`, uid)
+	// En "corta", la que se sacó del texto se va; la que otra página sigue mostrando, no.
+	save("corta", "a", 0, upload("corta", "sacada")+" "+upload("corta", "compartida"))
+	save("corta", "a", 1, "sin imágenes")
+	save("corta", "b", 0, "![c](/api/w/corta/media/"+ids["compartida"]+")")
+
+	for name, id := range ids {
+		if name != "nueva" {
+			exec(`UPDATE media_assets SET created_at = datetime('now', '-2 days') WHERE id = ?`, id)
+		}
+	}
+	exec(`UPDATE media_assets SET deleted_at = datetime('now', '-2 days') WHERE id = ?`, ids["borrada"])
+	exec(`UPDATE media_assets SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, ids["recien"])
+	exec(`UPDATE pages SET deleted_at = datetime('now', '-5 days') WHERE slug = 'papelera'`)
+
+	purge := Purge{Store: store, Files: files, Audit: rec, Retention: 30 * 24 * time.Hour, AuditRetention: 730 * 24 * time.Hour,
+		Now: time.Now, Log: slog.New(slog.DiscardHandler)}
 	if err := purge.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ws_"+ws.ID, orphan.ID)); !os.IsNotExist(err) {
-		t.Error("orphan media file not purged after the retention period")
+	gone := map[string]bool{"suelta": true, "borrada": true, "sacada": true}
+	for name, id := range ids {
+		var rows int
+		if err := db.Read.QueryRow(`SELECT COUNT(*) FROM media_assets WHERE id = ?`, id).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		area := "ti"
+		if name == "sacada" || name == "compartida" {
+			area = "corta"
+		}
+		_, err := os.Stat(filepath.Join(dir, "ws_"+scopes[area].WsID, id))
+		switch {
+		case gone[name] && (rows != 0 || !os.IsNotExist(err)):
+			t.Errorf("%s: unused media not deleted (rows %d, file err %v)", name, rows, err)
+		case !gone[name] && (rows != 1 || err != nil):
+			t.Errorf("%s: media in use deleted (rows %d, file err %v)", name, rows, err)
+		}
 	}
 }
 
