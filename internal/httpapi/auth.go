@@ -87,7 +87,8 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary}
 	}
 	a.json(w, http.StatusOK, map[string]any{
-		"id": u.ID, "email": u.Email, "full_name": u.FullName,
+		// auth_source: una cuenta del directorio no cambia aquí su nombre ni su contraseña (§8.6.3).
+		"id": u.ID, "email": u.Email, "full_name": u.FullName, "auth_source": u.AuthSource,
 		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
 		"has_avatar": u.HasAvatar, "personal": map[string]string{"slug": own.Slug},
 		// mfa_setup_required: la interfaz muestra solo la configuración del 2FA (§8.1); una passkey

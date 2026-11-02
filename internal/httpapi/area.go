@@ -139,9 +139,12 @@ func (a api) listMembers(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// manual_role y ldap_role dicen de dónde viene el rol (§8.3.2): lo que solo da un grupo del
+	// directorio no se cambia aquí, y ldap_group dice cuál.
 	out := make([]map[string]string, len(ms))
 	for i, m := range ms {
-		out[i] = map[string]string{"user_id": m.UserID, "email": m.Email, "full_name": m.FullName, "role": m.Role}
+		out[i] = map[string]string{"user_id": m.UserID, "email": m.Email, "full_name": m.FullName, "role": m.Role,
+			"manual_role": m.ManualRole, "ldap_role": m.LDAPRole, "ldap_group": m.Group}
 	}
 	a.json(w, http.StatusOK, out)
 }

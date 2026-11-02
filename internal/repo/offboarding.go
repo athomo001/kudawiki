@@ -117,7 +117,7 @@ func (r *Repo) StartOffboarding(ctx context.Context, o Offboarding) (int64, erro
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx,
-		`UPDATE users SET is_active = 0, offboarding_at = ?, offboarding_receiver_json = ?, offboarding_by = ?, updated_at = CURRENT_TIMESTAMP
+		`UPDATE users SET is_active = 0, offboarding_at = ?, offboarding_receiver_json = ?, offboarding_by = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ? AND offboarded_at IS NULL`, sqlTime(o.Until), string(receivers), o.By, o.UserID)
 	if err != nil {
 		return 0, err

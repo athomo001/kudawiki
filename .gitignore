@@ -21,3 +21,6 @@ Thumbs.db
 ui/node_modules/
 ui/dist/
 bin/
+
+# Certificados de prueba de los directorios de F6 (test/ldap/certs.sh los genera).
+test/ldap/.certs/

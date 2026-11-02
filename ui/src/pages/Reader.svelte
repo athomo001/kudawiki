@@ -405,7 +405,7 @@
         <ul class="access">
           {#each access.members as m (m.email)}
             <li class:denied={!(simulate ? m.can_read_simulated : m.can_read)}>
-              {m.name} <span class="muted">· {t(`role.${m.role}`)}</span>
+              {m.name} <span class="muted">· {t(`role.${m.role}`)}{#if m.group} · {t('access.by_group', { group: m.group })}{/if}</span>
               {#if simulate && m.can_read !== m.can_read_simulated}
                 <strong>{m.can_read_simulated ? t('access.gains') : t('access.loses')}</strong>
               {:else if !m.can_read}

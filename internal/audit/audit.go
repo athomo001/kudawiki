@@ -96,6 +96,18 @@ var (
 	// Directorio LDAP / AD (§8.6). La configuración guarda qué claves cambiaron, nunca sus valores.
 	LDAPConfigUpdate = Action{"ldap.config_update"}
 	LDAPTest         = Action{"ldap.test"}
+	// Reglas grupo → (área, rol) del directorio (§8.3.6).
+	LDAPMappingCreate = Action{"ldap.mapping_create"}
+	LDAPMappingUpdate = Action{"ldap.mapping_update"}
+	LDAPMappingDelete = Action{"ldap.mapping_delete"}
+	// Cuentas y membresías del directorio (§8.3.2, §8.6.3) y su sincronización (§8.3.3, §8.3.6).
+	// Lo que hace la sincronización periódica lleva meta.system = "ldap".
+	LDAPAccountLink       = Action{"ldap.account_link"}
+	LDAPMembershipDetach  = Action{"ldap.membership_detach"}
+	LDAPSyncStart         = Action{"ldap.sync_start"}
+	LDAPSyncDone          = Action{"ldap.sync_done"}
+	LDAPSyncAborted       = Action{"ldap.sync_aborted"}
+	UserDeactivatedByLDAP = Action{"user.deactivated_by_ldap"}
 	// Recuperación de contraseña (§8.5).
 	AuthPasswordResetRequest  = Action{"auth.password_reset_request"}
 	AuthPasswordResetComplete = Action{"auth.password_reset_complete"}
@@ -143,6 +155,8 @@ var All = []Action{
 	QuizExtraAttemptsGrant, QuizResultsExport,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
 	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend, LDAPConfigUpdate, LDAPTest,
+	LDAPMappingCreate, LDAPMappingUpdate, LDAPMappingDelete,
+	LDAPAccountLink, LDAPMembershipDetach, LDAPSyncStart, LDAPSyncDone, LDAPSyncAborted, UserDeactivatedByLDAP,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,
 	AuthTOTPEnable, AuthTOTPDisable, AuthTOTPReset, AuthTOTPFailed, AuthTOTPLockout, AuthTOTPRecoveryUsed, CLIReset2FA, AuthReauth, SessionRevoke, AuthPasskeyAdd, AuthPasskeyRemove,
 	ProposalSubmit, ProposalApprove, ProposalReject, ProposalWithdraw,

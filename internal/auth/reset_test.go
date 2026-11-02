@@ -227,3 +227,28 @@ func TestChangePasswordNotice(t *testing.T) {
 		t.Errorf("notice = %+v (no other superadmin: no report link)", n)
 	}
 }
+
+// Una cuenta del directorio no tiene contraseña que restablecer: recibe el enlace de la empresa
+// para cambiar la de la red (§8.5.1), o sin enlace si no está configurado.
+func TestDirectoryPasswordReset(t *testing.T) {
+	s, r, _, m := withMail(t)
+	ctx := context.Background()
+	s.SetDirectory(fakeDirectory{help: "https://clave.acme.cl"})
+	if err := r.CreateLDAPUser(ctx, repo.User{ID: "carla", Email: "carla@empresa.cl", FullName: "Carla", LDAPGUID: "carla-guid", Locale: "es"}, "CN=Carla"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequestPasswordReset(ctx, "10.0.0.9", "carla@empresa.cl"); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.of("password_reset_ldap"); len(n) != 1 || n[0].To != "carla@empresa.cl" || n[0].URL != "https://clave.acme.cl" || n[0].Vars["name"] != "Carla" {
+		t.Errorf("directory notice = %+v", n)
+	}
+	if n := m.of("password_reset"); len(n) != 0 {
+		t.Errorf("a reset link for a directory account: %+v", n)
+	}
+	s.SetDirectory(fakeDirectory{})
+	s.RequestPasswordReset(ctx, "10.0.0.9", "carla@empresa.cl")
+	if n := m.of("password_reset_ldap"); len(n) != 2 || n[1].URL != "" {
+		t.Errorf("without a help page = %+v", n)
+	}
+}

@@ -35,10 +35,15 @@ type Repo struct{ db *database.DB }
 func New(db *database.DB) *Repo { return &Repo{db: db} }
 
 type User struct {
-	ID            string
-	Email         string
-	FullName      string
-	PasswordHash  string // vacío si no tiene contraseña local
+	ID           string
+	Email        string
+	FullName     string
+	PasswordHash string // vacío si no tiene contraseña local
+	// AuthSource es local o ldap (§8.6.3); LDAPGUID, la identidad en el directorio de una cuenta
+	// ldap, y LDAPDN, dónde estaba la última vez que se la vio.
+	AuthSource    string
+	LDAPGUID      string
+	LDAPDN        string
 	IsGlobalAdmin bool
 	IsActive      bool
 	Locale        string
@@ -82,7 +87,7 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 
 const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
 	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled,
-	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at`
+	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at, auth_source, COALESCE(ldap_guid, ''), COALESCE(ldap_dn, '')`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -108,7 +113,7 @@ func scanUser(row scanner) (User, error) {
 	var prefs string
 	var offboarding, offboarded sql.NullTime
 	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled, &u.Passkeys,
-		&offboarding, &offboarded)
+		&offboarding, &offboarded, &u.AuthSource, &u.LDAPGUID, &u.LDAPDN)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

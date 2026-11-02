@@ -55,11 +55,13 @@ const Mask = "••••••"
 
 const passwordKey = "auth.ldap.bind_password"
 
-// Attrs son los atributos del directorio de donde salen el correo, el nombre y la identidad.
+// Attrs son los atributos del directorio de donde salen el correo, el nombre, la identidad y la
+// foto (opcional, §8.6.3).
 type Attrs struct {
 	Email string `json:"email"`
 	Name  string `json:"name"`
 	GUID  string `json:"guid"`
+	Photo string `json:"photo"`
 }
 
 // Settings es la configuración tal como la ve el panel. Un texto vacío en los campos que
@@ -80,17 +82,32 @@ type Settings struct {
 	GroupBaseDN        string   `json:"group_base_dn"`
 	Attrs              Attrs    `json:"attrs"`
 	DisabledFilter     string   `json:"disabled_filter"`
+	GroupMemberFilter  string   `json:"group_member_filter"`
 	Timeout            string   `json:"timeout"`
-	Locked             []string `json:"locked"` // claves fijadas en el archivo: el panel no las cambia
+	// PasswordHelpURL es adónde se cambia o recupera la contraseña de la red (§8.5.1): la wiki no
+	// la toca.
+	PasswordHelpURL string `json:"password_help_url"`
+	// La sincronización (§8.3.3, §8.3.4): crear de antemano a quienes están en un grupo con regla,
+	// cada cuánto corre y qué parte de las membresías del directorio puede quitar de una vez.
+	PrecreateUsers      bool     `json:"precreate_users"`
+	SyncInterval        string   `json:"sync_interval"`
+	SyncMaxRemovalRatio float64  `json:"sync_max_removal_ratio"`
+	Locked              []string `json:"locked"` // claves fijadas en el archivo: el panel no las cambia
 }
 
 // Defaults es lo que cada flavor pone donde el superadmin no escribió nada (§8.6.1).
+// GroupFilter no es una clave: reconoce un grupo y alcanza con el de cada flavor.
 type Defaults struct {
-	UserFilter     string   `json:"user_filter"`
-	LoginAttrs     []string `json:"login_attrs"`
-	Attrs          Attrs    `json:"attrs"`
-	DisabledFilter string   `json:"disabled_filter"`
+	UserFilter        string   `json:"user_filter"`
+	LoginAttrs        []string `json:"login_attrs"`
+	Attrs             Attrs    `json:"attrs"`
+	DisabledFilter    string   `json:"disabled_filter"`
+	GroupMemberFilter string   `json:"group_member_filter"`
+	GroupFilter       string   `json:"-"`
 }
+
+// posixGroups: los grupos de OpenLDAP, FreeIPA y 389 DS, y los de AD por si un generic es un AD.
+const posixGroups = "(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=posixGroup)(objectClass=group))"
 
 // Flavors: el flavor solo cambia estos valores; cualquiera se puede sobrescribir. En generic la
 // identidad queda vacía: sin un atributo estable se usa el DN, y el diagnóstico lo avisa.
@@ -98,23 +115,32 @@ var Flavors = map[string]Defaults{
 	"ad": {
 		UserFilter:     "(&(objectClass=user)(objectCategory=person))",
 		LoginAttrs:     []string{"sAMAccountName", "userPrincipalName", "mail"},
-		Attrs:          Attrs{Email: "mail", Name: "displayName", GUID: "objectGUID"},
+		Attrs:          Attrs{Email: "mail", Name: "displayName", GUID: "objectGUID", Photo: "thumbnailPhoto"},
 		DisabledFilter: "(userAccountControl:1.2.840.113556.1.4.803:=2)", // bit 0x2, cuenta deshabilitada
+		GroupFilter:    "(objectClass=group)",                            // en AD los grupos salen de tokenGroups
 	},
 	"openldap": {
-		UserFilter:     "(objectClass=inetOrgPerson)",
-		LoginAttrs:     []string{"uid", "mail"},
-		Attrs:          Attrs{Email: "mail", Name: "cn", GUID: "entryUUID"},
-		DisabledFilter: "(|(nsAccountLock=TRUE)(pwdAccountLockedTime=*))",
+		UserFilter:        "(objectClass=inetOrgPerson)",
+		LoginAttrs:        []string{"uid", "mail"},
+		Attrs:             Attrs{Email: "mail", Name: "cn", GUID: "entryUUID", Photo: "jpegPhoto"},
+		DisabledFilter:    "(|(nsAccountLock=TRUE)(pwdAccountLockedTime=*))",
+		GroupMemberFilter: "(|(member={dn})(uniqueMember={dn}))",
+		GroupFilter:       posixGroups,
 	},
 	"generic": {
-		UserFilter: "(objectClass=person)",
-		LoginAttrs: []string{"uid", "mail"},
-		Attrs:      Attrs{Email: "mail", Name: "cn"},
+		UserFilter:        "(objectClass=person)",
+		LoginAttrs:        []string{"uid", "mail"},
+		Attrs:             Attrs{Email: "mail", Name: "cn", Photo: "jpegPhoto"},
+		GroupMemberFilter: "(|(member={dn})(uniqueMember={dn}))",
+		GroupFilter:       posixGroups,
 	},
 }
 
-const defaultTimeout = 10 * time.Second
+const (
+	defaultTimeout       = 10 * time.Second
+	defaultSyncInterval  = time.Hour
+	defaultMaxRemovalPct = 0.10
+)
 
 // AttrsPatch y Patch cambian algunas claves: nil no la toca y "" (o una lista vacía, o false)
 // la vuelve al valor por defecto. En la contraseña, Mask tampoco la toca. Sirve igual para el
@@ -123,25 +149,31 @@ type AttrsPatch struct {
 	Email *string `json:"email"`
 	Name  *string `json:"name"`
 	GUID  *string `json:"guid"`
+	Photo *string `json:"photo"`
 }
 
 type Patch struct {
-	Enabled            *bool       `json:"enabled"`
-	Flavor             *string     `json:"flavor"`
-	URLs               *[]string   `json:"urls"`
-	StartTLS           *bool       `json:"start_tls"`
-	CAFile             *string     `json:"ca_file"`
-	InsecureSkipVerify *bool       `json:"insecure_skip_verify"`
-	BindDN             *string     `json:"bind_dn"`
-	BindPassword       *string     `json:"bind_password"`
-	DomainNetbios      *string     `json:"domain_netbios"`
-	UserBaseDN         *string     `json:"user_base_dn"`
-	UserFilter         *string     `json:"user_filter"`
-	LoginAttrs         *[]string   `json:"login_attrs"`
-	GroupBaseDN        *string     `json:"group_base_dn"`
-	Attrs              *AttrsPatch `json:"attrs"`
-	DisabledFilter     *string     `json:"disabled_filter"`
-	Timeout            *string     `json:"timeout"`
+	Enabled             *bool       `json:"enabled"`
+	Flavor              *string     `json:"flavor"`
+	URLs                *[]string   `json:"urls"`
+	StartTLS            *bool       `json:"start_tls"`
+	CAFile              *string     `json:"ca_file"`
+	InsecureSkipVerify  *bool       `json:"insecure_skip_verify"`
+	BindDN              *string     `json:"bind_dn"`
+	BindPassword        *string     `json:"bind_password"`
+	DomainNetbios       *string     `json:"domain_netbios"`
+	UserBaseDN          *string     `json:"user_base_dn"`
+	UserFilter          *string     `json:"user_filter"`
+	LoginAttrs          *[]string   `json:"login_attrs"`
+	GroupBaseDN         *string     `json:"group_base_dn"`
+	Attrs               *AttrsPatch `json:"attrs"`
+	DisabledFilter      *string     `json:"disabled_filter"`
+	GroupMemberFilter   *string     `json:"group_member_filter"`
+	Timeout             *string     `json:"timeout"`
+	PasswordHelpURL     *string     `json:"password_help_url"`
+	PrecreateUsers      *bool       `json:"precreate_users"`
+	SyncInterval        *string     `json:"sync_interval"`
+	SyncMaxRemovalRatio *float64    `json:"sync_max_removal_ratio"`
 }
 
 // values devuelve las claves que el Patch toca, validadas una por una y en JSON; nil borra la
@@ -158,9 +190,12 @@ func (p Patch) values() (vals map[string]*string, password string, changed bool,
 	}
 	strs := map[string]*string{"auth.ldap.flavor": p.Flavor, "auth.ldap.ca_file": p.CAFile, "auth.ldap.bind_dn": p.BindDN,
 		"auth.ldap.domain_netbios": p.DomainNetbios, "auth.ldap.user_base_dn": p.UserBaseDN, "auth.ldap.user_filter": p.UserFilter,
-		"auth.ldap.group_base_dn": p.GroupBaseDN, "auth.ldap.disabled_filter": p.DisabledFilter, "auth.ldap.timeout": p.Timeout}
+		"auth.ldap.group_base_dn": p.GroupBaseDN, "auth.ldap.disabled_filter": p.DisabledFilter, "auth.ldap.timeout": p.Timeout,
+		"auth.ldap.group_member_filter": p.GroupMemberFilter, "auth.ldap.password_help_url": p.PasswordHelpURL,
+		"auth.ldap.sync.interval": p.SyncInterval}
 	if p.Attrs != nil {
 		strs["auth.ldap.attrs.email"], strs["auth.ldap.attrs.name"], strs["auth.ldap.attrs.guid"] = p.Attrs.Email, p.Attrs.Name, p.Attrs.GUID
+		strs["auth.ldap.attrs.photo"] = p.Attrs.Photo
 	}
 	for key, v := range strs {
 		if v == nil {
@@ -186,6 +221,16 @@ func (p Patch) values() (vals map[string]*string, password string, changed bool,
 		if v != nil {
 			put(key, *v, !*v)
 		}
+	}
+	// precreate_users vale true por defecto: lo que se guarda es el false.
+	if p.PrecreateUsers != nil {
+		put("auth.ldap.precreate_users", *p.PrecreateUsers, *p.PrecreateUsers)
+	}
+	if v := p.SyncMaxRemovalRatio; v != nil {
+		if *v < 0 || *v > 1 {
+			return nil, "", false, fieldErr("auth.ldap.sync.max_removal_ratio", ErrInvalid)
+		}
+		put("auth.ldap.sync.max_removal_ratio", *v, *v == defaultMaxRemovalPct)
 	}
 	if p.BindPassword != nil && *p.BindPassword != Mask {
 		for _, r := range *p.BindPassword {
@@ -232,13 +277,34 @@ func validate(key, v string) (string, error) {
 		if _, err := goldap.CompileFilter(v); err != nil {
 			return "", ErrInvalid
 		}
+	case "auth.ldap.group_member_filter":
+		// {dn} es el DN de la persona (o del grupo, al subir por los anidados) y {uid} su uid.
+		if !strings.Contains(v, "{dn}") && !strings.Contains(v, "{uid}") {
+			return "", ErrInvalid
+		}
+		if _, err := goldap.CompileFilter(memberFilter(v, "x", "x")); err != nil {
+			return "", ErrInvalid
+		}
 	case "auth.ldap.domain_netbios":
 		if !netbiosName.MatchString(v) {
 			return "", ErrInvalid
 		}
 		return strings.ToUpper(v), nil
-	case "auth.ldap.attrs.email", "auth.ldap.attrs.name", "auth.ldap.attrs.guid":
+	case "auth.ldap.attrs.email", "auth.ldap.attrs.name", "auth.ldap.attrs.guid", "auth.ldap.attrs.photo":
 		if !attrName.MatchString(v) {
+			return "", ErrInvalid
+		}
+	case "auth.ldap.password_help_url":
+		// Se muestra como enlace en el login y en el perfil: solo http(s), nunca javascript:.
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+			return "", ErrInvalid
+		}
+	case "auth.ldap.sync.interval":
+		// Menos de 5 minutos carga al directorio sin ganar nada; más de un día deja una baja de AD
+		// demasiado tiempo con acceso a lo que ya tenía en caché.
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 5*time.Minute || d > 24*time.Hour {
 			return "", ErrInvalid
 		}
 	case "auth.ldap.timeout":
@@ -300,11 +366,34 @@ type store interface {
 	SiteSettings(ctx context.Context, prefix string) (map[string]string, error)
 	SiteSecret(ctx context.Context, key string) ([]byte, int, error)
 	SaveSiteSettings(ctx context.Context, values map[string]*string, secrets map[string]repo.SealedSetting, by string) error
+	WorkspaceByID(ctx context.Context, id string) (repo.Workspace, error)
+	LDAPMappings(ctx context.Context) ([]repo.LDAPMapping, error)
+	LDAPMappingByID(ctx context.Context, id string) (repo.LDAPMapping, error)
+	CreateLDAPMapping(ctx context.Context, m repo.LDAPMapping) (string, error)
+	SetLDAPMappingRole(ctx context.Context, id, role string) error
+	DeleteLDAPMapping(ctx context.Context, id string) error
+	LDAPAccounts(ctx context.Context, wsID string, guids []string) ([]repo.LDAPAccount, error)
+	// Cuentas del directorio (§8.6.3).
+	UserByID(ctx context.Context, id string) (repo.User, error)
+	UserByEmail(ctx context.Context, email string) (repo.User, error)
+	UserByLDAPGUID(ctx context.Context, guid string) (repo.User, error)
+	CreateLDAPUser(ctx context.Context, u repo.User, dn string) error
+	UpdateLDAPUser(ctx context.Context, id, email, fullName, dn string) error
+	Avatar(ctx context.Context, userID string) ([]byte, error)
+	SetAvatar(ctx context.Context, userID string, png []byte) error
+	LocalSuperadmins(ctx context.Context) (int, error)
+	LinkLDAPUser(ctx context.Context, id, guid, dn, email, fullName string) (int64, error)
+	// Sincronización (§8.3.3) y su estado (§8.6.5).
+	LDAPUsers(ctx context.Context) ([]repo.User, error)
+	LDAPMemberships(ctx context.Context) ([]repo.LDAPMembership, error)
+	ListUsers(ctx context.Context) ([]repo.User, error)
+	LastLDAPSync(ctx context.Context) (time.Time, string, error)
 }
 
 // Service es la conexión al directorio.
 type Service struct {
 	store         store
+	members       areaMembers
 	audit         *audit.Recorder
 	key           []byte
 	fixed         map[string]*string
@@ -313,21 +402,29 @@ type Service struct {
 	now           func() time.Time
 	log           *slog.Logger
 
-	// last es la URL que respondió la última vez: se prueba primero (failover sin balanceador, §8.6.2).
+	leavers leavers
+	mail    mailer
+	baseURL string
+
+	// last es la URL que respondió la última vez: se prueba primero (failover sin balanceador,
+	// §8.6.2). st es el estado que muestran el panel y /readyz.
 	mu   sync.Mutex
 	last string
+	st   status
+	// syncing: una sincronización a la vez en este proceso.
+	syncing sync.Mutex
 }
 
 // NewService arma el servicio con lo que viene del archivo, ya validado: un error ahí detiene
 // el arranque, como en el resto de la configuración.
-func NewService(s store, rec *audit.Recorder, masterKey []byte, fromConfig Patch, now func() time.Time, log *slog.Logger) (*Service, error) {
+func NewService(s store, m areaMembers, rec *audit.Recorder, masterKey []byte, fromConfig Patch, now func() time.Time, log *slog.Logger) (*Service, error) {
 	fixed, password, hasPassword, err := fromConfig.values()
 	if err != nil {
 		var fe *FieldError
 		errors.As(err, &fe)
 		return nil, errors.New("auth.ldap." + fe.Field + " in the configuration file is not valid")
 	}
-	svc := &Service{store: s, audit: rec, key: masterKey, fixed: fixed, locked: []string{}, now: now, log: log}
+	svc := &Service{store: s, members: m, audit: rec, key: masterKey, fixed: fixed, locked: []string{}, now: now, log: log}
 	if hasPassword {
 		svc.fixedPassword = &password
 		svc.locked = append(svc.locked, "bind_password")
@@ -352,7 +449,10 @@ func (st *Settings) fields() map[string]any {
 		"auth.ldap.bind_dn": &st.BindDN, "auth.ldap.domain_netbios": &st.DomainNetbios, "auth.ldap.user_base_dn": &st.UserBaseDN,
 		"auth.ldap.user_filter": &st.UserFilter, "auth.ldap.login_attrs": &st.LoginAttrs, "auth.ldap.group_base_dn": &st.GroupBaseDN,
 		"auth.ldap.attrs.email": &st.Attrs.Email, "auth.ldap.attrs.name": &st.Attrs.Name, "auth.ldap.attrs.guid": &st.Attrs.GUID,
-		"auth.ldap.disabled_filter": &st.DisabledFilter, "auth.ldap.timeout": &st.Timeout}
+		"auth.ldap.disabled_filter": &st.DisabledFilter, "auth.ldap.timeout": &st.Timeout, "auth.ldap.group_member_filter": &st.GroupMemberFilter,
+		"auth.ldap.attrs.photo": &st.Attrs.Photo, "auth.ldap.password_help_url": &st.PasswordHelpURL,
+		"auth.ldap.precreate_users": &st.PrecreateUsers, "auth.ldap.sync.interval": &st.SyncInterval,
+		"auth.ldap.sync.max_removal_ratio": &st.SyncMaxRemovalRatio}
 }
 
 // settings arma la configuración: lo guardado, encima lo que el panel está por cambiar
@@ -371,7 +471,8 @@ func (s *Service) settings(ctx context.Context, overlay map[string]*string, open
 			}
 		}
 	}
-	c := config{Settings: Settings{Flavor: "ad", URLs: []string{}, LoginAttrs: []string{}, Timeout: defaultTimeout.String()}}
+	c := config{Settings: Settings{Flavor: "ad", URLs: []string{}, LoginAttrs: []string{}, Timeout: defaultTimeout.String(),
+		PrecreateUsers: true, SyncInterval: "60m", SyncMaxRemovalRatio: defaultMaxRemovalPct}}
 	for key, dst := range c.fields() {
 		if raw, ok := rows[key]; ok {
 			if err := json.Unmarshal([]byte(raw), dst); err != nil {
@@ -513,7 +614,21 @@ func (c config) effective() config {
 	if c.DisabledFilter == "" {
 		c.DisabledFilter = d.DisabledFilter
 	}
+	if c.GroupMemberFilter == "" {
+		c.GroupMemberFilter = d.GroupMemberFilter
+	}
+	if c.Attrs.Photo == "" {
+		c.Attrs.Photo = d.Attrs.Photo
+	}
 	return c
+}
+
+func (c config) syncInterval() time.Duration {
+	d, err := time.ParseDuration(c.SyncInterval)
+	if err != nil {
+		return defaultSyncInterval
+	}
+	return d
 }
 
 func (c config) timeout() time.Duration {

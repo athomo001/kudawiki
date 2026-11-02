@@ -3,6 +3,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"regexp"
@@ -20,6 +21,8 @@ var (
 	ErrInvalidRole  = errors.New("invalid_role")
 	ErrUserNotFound = errors.New("user_not_found")
 	ErrForbidden    = errors.New("forbidden")
+	// ErrManagedByDirectory: el rol viene de un grupo del directorio y se cambia ahí (§8.3.2).
+	ErrManagedByDirectory = errors.New("managed_by_directory")
 )
 
 // El slug va en las URL (/w/{slug}/…): minúsculas, números y guiones, de 2 a 40 caracteres.
@@ -36,6 +39,13 @@ type store interface {
 	OldestAdmin(ctx context.Context, s repo.Scope, except string) (string, error)
 	UserByID(ctx context.Context, id string) (repo.User, error)
 	AddNotifications(ctx context.Context, wsID string, ns []repo.NewNotification) error
+	// Membresías que da el directorio (§8.3.2).
+	MemberSourceOf(ctx context.Context, s repo.Scope, userID string) (repo.MemberSource, error)
+	MemberSources(ctx context.Context, userID string) ([]repo.MemberSource, error)
+	SetLDAPRole(ctx context.Context, s repo.Scope, userID, role, mappingID string) error
+	DropLDAPRole(ctx context.Context, s repo.Scope, userID string) error
+	DropManualRole(ctx context.Context, s repo.Scope, userID string) error
+	DetachLDAPRole(ctx context.Context, s repo.Scope, userID string) error
 }
 
 // Actor es quien hace el cambio.
@@ -159,32 +169,85 @@ func (s *Service) SetMember(ctx context.Context, a Actor, sc repo.Scope, email, 
 	if err := s.authorize(ctx, a, sc, u.ID, role); err != nil {
 		return err
 	}
-	before, err := s.store.MemberRole(ctx, sc, u.ID)
+	src, err := s.store.MemberSourceOf(ctx, sc, u.ID)
 	if err != nil {
 		return err
+	}
+	// Una membresía que solo da el directorio es de solo lectura para el admin del área: se
+	// cambia el grupo en el directorio. El superadmin sí puede sumarle un rol a mano (§8.3.2).
+	if src.ManualRole == "" && src.LDAPRole != "" && !a.Superadmin {
+		return ErrManagedByDirectory
 	}
 	if err := s.store.SetMember(ctx, sc, u.ID, role); err != nil {
 		return err
 	}
-	e := audit.Event{Action: audit.WsMemberAdd, WsID: sc.WsID, TargetType: "user", TargetID: u.ID, Meta: map[string]any{"role": role}}
-	switch before {
-	case role:
+	after := higher(role, src.LDAPRole)
+	e := audit.Event{Action: audit.WsMemberAdd, WsID: sc.WsID, TargetType: "user", TargetID: u.ID, Meta: map[string]any{"role": after}}
+	switch src.Role {
+	case after:
 		return nil // no cambió nada
 	case "":
 	default:
-		e.Action, e.Meta["from"] = audit.WsMemberRole, before
+		e.Action, e.Meta["from"] = audit.WsMemberRole, src.Role
 	}
 	s.audit.Record(ctx, e)
+	s.roleNotice(ctx, sc.WsID, a.UserID, u.ID, after)
 	return nil
+}
+
+// roleNotice avisa a quien recibió un rol, o uno distinto, en el área (§12.1, de la cuenta: no se
+// apaga). Solo los cambios que hace una persona: lo que da el directorio se ve en el área como
+// "Gestionado por AD". Salir del área no avisa: la bandeja solo muestra avisos de áreas donde la
+// persona está. Un cambio nuevo sin leer reemplaza al anterior (group_key por área).
+func (s *Service) roleNotice(ctx context.Context, wsID, actorID, userID, role string) {
+	if userID == actorID {
+		return
+	}
+	var name string
+	if u, err := s.store.UserByID(ctx, actorID); err == nil {
+		name = u.FullName
+	}
+	p, _ := json.Marshal(map[string]string{"actor": name, "role": role})
+	err := s.store.AddNotifications(ctx, wsID, []repo.NewNotification{{UserID: userID, Kind: "role_changed", Category: "account",
+		GroupKey: "role:" + wsID, Payload: string(p)}})
+	if err != nil {
+		// El rol ya cambió y quedó en la auditoría; sin el aviso, la persona lo ve igual en el área.
+		s.log.Error("role notice failed", "workspace", wsID, "err", err)
+	}
+}
+
+// higher es el rol más alto de los dos; "" cuenta como ninguno.
+func higher(a, b string) string {
+	if repo.RoleRank(b) > repo.RoleRank(a) {
+		return b
+	}
+	return a
 }
 
 func (s *Service) RemoveMember(ctx context.Context, a Actor, sc repo.Scope, userID string) error {
 	if err := s.authorize(ctx, a, sc, userID, ""); err != nil {
 		return err
 	}
-	before, err := s.store.MemberRole(ctx, sc, userID)
-	if err != nil || before == "" {
+	src, err := s.store.MemberSourceOf(ctx, sc, userID)
+	if err != nil || src.Role == "" {
 		return err // quitar a alguien que no es miembro no hace nada y no se registra
+	}
+	before := src.Role
+	// Quien está por un grupo del directorio sigue en el área: se le quita solo lo que se le dio a
+	// mano. Si no tiene nada manual, no hay qué quitar aquí; se cambia el grupo en el directorio.
+	if src.LDAPRole != "" {
+		if src.ManualRole == "" {
+			return ErrManagedByDirectory
+		}
+		if err := s.store.DropManualRole(ctx, sc, userID); err != nil {
+			return err
+		}
+		if src.LDAPRole != before {
+			s.audit.Record(ctx, audit.Event{Action: audit.WsMemberRole, WsID: sc.WsID, TargetType: "user", TargetID: userID,
+				Meta: map[string]any{"from": before, "role": src.LDAPRole, "source": "ldap_group"}})
+			s.roleNotice(ctx, sc.WsID, a.UserID, userID, src.LDAPRole)
+		}
+		return nil
 	}
 	// Lo suyo en esta área pasa al admin más antiguo que queda; si no queda ninguno, a quien lo
 	// sacó, que entonces es el superadmin (§8.4).
@@ -202,6 +265,29 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, sc repo.Scope, user
 	s.audit.Record(ctx, audit.Event{Action: audit.WsMemberRemove, WsID: sc.WsID, TargetType: "user", TargetID: userID,
 		Meta: map[string]any{"role": before}})
 	s.transferred(ctx, t, userID, a.UserID)
+	return nil
+}
+
+// Detach desancla una membresía del directorio (§8.3.2): lo que daba un grupo pasa a ser manual,
+// como excepción que sobrevive a que la persona salga del grupo. Solo el superadmin: el admin
+// del área no decide sobre lo que viene del directorio. Si sigue en el grupo, el directorio vuelve
+// a marcar su parte en la próxima sincronización; el rol manual queda.
+func (s *Service) Detach(ctx context.Context, a Actor, sc repo.Scope, userID string) error {
+	if !a.Superadmin {
+		return ErrForbidden
+	}
+	src, err := s.store.MemberSourceOf(ctx, sc, userID)
+	if err != nil {
+		return err
+	}
+	if src.LDAPRole == "" {
+		return nil // no hay nada del directorio que desanclar
+	}
+	if err := s.store.DetachLDAPRole(ctx, sc, userID); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Event{Action: audit.LDAPMembershipDetach, WsID: sc.WsID, TargetType: "user", TargetID: userID,
+		Meta: map[string]any{"role": src.Role, "mapping_id": src.MappingID}})
 	return nil
 }
 
@@ -240,6 +326,72 @@ func (s *Service) authorize(ctx context.Context, a Actor, sc repo.Scope, target,
 	}
 	if current == "admin" {
 		return ErrForbidden
+	}
+	return nil
+}
+
+// SyncDirectory deja las membresías de una persona como las dan las reglas de grupos del
+// directorio (§8.3.2, §8.3.3): suma o cambia el rol del directorio en las áreas de grants y lo
+// quita en las demás. Nunca toca lo que se dio a mano. Quien sale de un área que solo tenía por
+// un grupo deja lo suyo al admin más antiguo, como al quitarlo a mano (§8.4); si el área no tiene
+// admin, lo suyo queda donde está. Lo hace el directorio: la auditoría no tiene actor.
+func (s *Service) SyncDirectory(ctx context.Context, userID string, grants []repo.DirectoryGrant) error {
+	current, err := s.store.MemberSources(ctx, userID)
+	if err != nil {
+		return err
+	}
+	have := map[string]repo.MemberSource{}
+	for _, m := range current {
+		have[m.WsID] = m
+	}
+	granted := map[string]bool{}
+	for _, g := range grants {
+		granted[g.WsID] = true
+		before := have[g.WsID]
+		if before.LDAPRole == g.Role && before.MappingID == g.MappingID {
+			continue
+		}
+		if err := s.store.SetLDAPRole(ctx, repo.Scope{WsID: g.WsID}, userID, g.Role, g.MappingID); err != nil {
+			return err
+		}
+		after := higher(before.ManualRole, g.Role)
+		e := audit.Event{Action: audit.WsMemberAdd, WsID: g.WsID, TargetType: "user", TargetID: userID, System: "ldap",
+			Meta: map[string]any{"role": after, "source": "ldap_group", "group": g.Group}}
+		switch before.Role {
+		case after:
+			continue // cambió la regla que lo da, no el rol
+		case "":
+		default:
+			e.Action, e.Meta["from"] = audit.WsMemberRole, before.Role
+		}
+		s.audit.Record(ctx, e)
+	}
+	for _, m := range current {
+		if m.LDAPRole == "" || granted[m.WsID] {
+			continue
+		}
+		sc := repo.Scope{WsID: m.WsID}
+		if m.ManualRole != "" {
+			if err := s.store.DropLDAPRole(ctx, sc, userID); err != nil {
+				return err
+			}
+			if m.ManualRole != m.Role {
+				s.audit.Record(ctx, audit.Event{Action: audit.WsMemberRole, WsID: m.WsID, TargetType: "user", TargetID: userID, System: "ldap",
+					Meta: map[string]any{"from": m.Role, "role": m.ManualRole, "source": "ldap_group"}})
+			}
+			continue
+		}
+		receiver, err := s.store.OldestAdmin(ctx, sc, userID)
+		if err != nil {
+			return err
+		}
+		t, err := s.store.RemoveMember(ctx, sc, userID, receiver)
+		if err != nil {
+			return err
+		}
+		s.audit.Record(ctx, audit.Event{Action: audit.WsMemberRemove, WsID: m.WsID, TargetType: "user", TargetID: userID, System: "ldap",
+			Meta: map[string]any{"role": m.Role, "source": "ldap_group"}})
+		s.transferred(ctx, t, userID, "")
 	}
 	return nil
 }

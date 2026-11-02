@@ -201,6 +201,25 @@ func TestLDAP(t *testing.T) {
 	if pw, err := c.LDAPBindPassword(); err != nil || *pw != "clave-svc" {
 		t.Errorf("bind password = %v, %v", pw, err)
 	}
+	// La sincronización (§8.3.3, §8.3.4) y la foto (§8.6.3) también se fijan desde el entorno.
+	t.Setenv("KUDAWIKI_AUTH_LDAP_ATTRS_PHOTO", "jpegPhoto")
+	t.Setenv("KUDAWIKI_AUTH_LDAP_PASSWORD_HELP_URL", "https://cuenta.acme.cl")
+	t.Setenv("KUDAWIKI_AUTH_LDAP_SYNC_INTERVAL", "30m")
+	t.Setenv("KUDAWIKI_AUTH_LDAP_PRECREATE_USERS", "false")
+	t.Setenv("KUDAWIKI_AUTH_LDAP_SYNC_MAX_REMOVAL_RATIO", "0.25")
+	if c, err = Load(path); err != nil {
+		t.Fatal(err)
+	}
+	l = c.Auth.LDAP
+	if *l.Attrs.Photo != "jpegPhoto" || *l.PasswordHelpURL != "https://cuenta.acme.cl" || *l.Sync.Interval != "30m" ||
+		*l.PrecreateUsers || *l.Sync.MaxRemovalRatio != 0.25 {
+		t.Errorf("ldap sync = %+v", l)
+	}
+	t.Setenv("KUDAWIKI_AUTH_LDAP_SYNC_MAX_REMOVAL_RATIO", "mucho")
+	if _, err := Load(path); err == nil {
+		t.Error("a bad removal ratio was accepted")
+	}
+	os.Unsetenv("KUDAWIKI_AUTH_LDAP_SYNC_MAX_REMOVAL_RATIO")
 	t.Setenv("KUDAWIKI_AUTH_LDAP_BIND_PASSWORD_FILE", filepath.Join(dir, "no-existe"))
 	c, _ = Load(path)
 	if _, err := c.LDAPBindPassword(); err == nil {

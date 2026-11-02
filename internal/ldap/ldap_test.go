@@ -16,6 +16,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/ldap/ldaptest"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/workspace"
 )
 
 var key = bytes.Repeat([]byte{7}, 32)
@@ -41,7 +42,8 @@ func newFixture(t *testing.T, fromConfig Patch) fixture {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.DiscardHandler)
-	svc, err := NewService(r, audit.NewRecorder(r, time.Now, log), key, fromConfig, time.Now, log)
+	rec := audit.NewRecorder(r, time.Now, log)
+	svc, err := NewService(r, workspace.NewService(r, rec, log), rec, key, fromConfig, time.Now, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +159,11 @@ func TestValidation(t *testing.T) {
 		"timeout largo":         {Patch{Timeout: new("5m")}, "timeout", ErrInvalid},
 		"flavor desconocido":    {Patch{Flavor: new("novell")}, "flavor", ErrInvalid},
 		"activar sin datos":     {Patch{Enabled: new(true), URLs: &[]string{"ldaps://dc01"}}, "bind_dn", ErrIncomplete},
+		"ayuda sin https":       {Patch{PasswordHelpURL: new("javascript:alert(1)")}, "password_help_url", ErrInvalid},
+		"ayuda con usuario":     {Patch{PasswordHelpURL: new("https://x:y@cuenta.acme.cl")}, "password_help_url", ErrInvalid},
+		"sincronizar seguido":   {Patch{SyncInterval: new("1m")}, "sync.interval", ErrInvalid},
+		"tope mayor que 1":      {Patch{SyncMaxRemovalRatio: new(1.5)}, "sync.max_removal_ratio", ErrInvalid},
+		"foto rota":             {Patch{Attrs: &AttrsPatch{Photo: new("jpeg photo")}}, "attrs.photo", ErrInvalid},
 	} {
 		_, _, err := f.svc.Update(ctx, "super", tc.p, false)
 		var fe *FieldError
@@ -182,7 +189,7 @@ func TestFixedFromFile(t *testing.T) {
 			t.Errorf("update %+v = %v", p, err)
 		}
 	}
-	if _, err := NewService(f.repo, nil, key, Patch{URLs: &[]string{"http://x"}}, time.Now, slog.New(slog.DiscardHandler)); err == nil ||
+	if _, err := NewService(f.repo, nil, nil, key, Patch{URLs: &[]string{"http://x"}}, time.Now, slog.New(slog.DiscardHandler)); err == nil ||
 		!strings.Contains(err.Error(), "auth.ldap.urls") {
 		t.Errorf("invalid file config = %v", err)
 	}
@@ -398,7 +405,7 @@ func TestUserWithoutGUID(t *testing.T) {
 	p := form(d, d.CAFile(t))
 	p.Flavor = new("generic")
 	r, err := f.svc.TestUser(context.Background(), p, "carla")
-	if err != nil || r.Status != "found" || !slices.Equal(r.Warnings, []string{"guid_from_dn"}) || !slices.Equal(r.Missing, []string{"mail"}) || r.Name != "Carla" {
+	if err != nil || r.Status != "found" || !slices.Equal(r.Warnings, []string{"guid_from_dn", "no_mapped_group"}) || !slices.Equal(r.Missing, []string{"mail"}) || r.Name != "Carla" {
 		t.Errorf("report = %+v, %v", r, err)
 	}
 }

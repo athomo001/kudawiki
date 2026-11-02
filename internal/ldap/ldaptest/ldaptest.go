@@ -2,7 +2,8 @@
 // §8.6): bind simple, búsqueda con los filtros que usa Kudawiki, StartTLS y ldaps://, con un
 // certificado de una CA propia. Se porta como los directorios reales donde importa a la
 // seguridad: un bind con contraseña vacía es un bind anónimo exitoso (RFC 4513 §5.1.2) y sin
-// bind solo se lee el Root DSE. Solo lo importan los tests: no llega al binario. Las pruebas
+// bind solo se lee el Root DSE. De AD imita la *matching rule in chain* (grupos anidados); el
+// tokenGroups lo escribe cada test en la entrada, como atributo operativo. Solo lo importan los tests: no llega al binario. Las pruebas
 // contra directorios reales (Samba AD, OpenLDAP, FreeIPA, 389 DS) van en contenedores (§17).
 package ldaptest
 
@@ -14,6 +15,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"maps"
 	"math/big"
 	"net"
 	"os"
@@ -24,6 +26,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	goldap "github.com/go-ldap/ldap/v3"
@@ -108,6 +111,35 @@ func (s *Server) Add(e Entry, password string) {
 	}
 }
 
+// Set reemplaza los valores de un atributo de una entrada: así un test mueve a alguien de grupo
+// o la deshabilita. Sin valores, borra el atributo.
+func (s *Server) Set(dn, attr string, vals ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.entries {
+		if !strings.EqualFold(e.DN, dn) {
+			continue
+		}
+		attrs := maps.Clone(e.Attrs)
+		for n := range attrs {
+			if strings.EqualFold(n, attr) {
+				delete(attrs, n)
+			}
+		}
+		if len(vals) > 0 {
+			attrs[attr] = vals
+		}
+		s.entries[i].Attrs = attrs
+	}
+}
+
+// SetPassword le da (o le cambia) la contraseña a una entrada.
+func (s *Server) SetPassword(dn, password string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.passwords[strings.ToLower(dn)] = password
+}
+
 // Binds cuenta los bind recibidos, exitosos o no.
 func (s *Server) Binds() int {
 	s.mu.Lock()
@@ -169,7 +201,8 @@ const (
 	appExtendedRequest  = 23
 	appExtendedResponse = 24
 	startTLSOID         = "1.3.6.1.4.1.1466.20037"
-	bitAndRule          = "1.2.840.113556.1.4.803" // LDAP_MATCHING_RULE_BIT_AND de AD
+	bitAndRule          = "1.2.840.113556.1.4.803"  // LDAP_MATCHING_RULE_BIT_AND de AD
+	inChainRule         = "1.2.840.113556.1.4.1941" // LDAP_MATCHING_RULE_IN_CHAIN de AD
 )
 
 func (s *Server) serve(c net.Conn) {
@@ -267,6 +300,10 @@ func (s *Server) search(c net.Conn, id int64, op *ber.Packet, bound string) {
 	s.mu.Lock()
 	entries := slices.Clone(s.entries)
 	s.mu.Unlock()
+	d := directory{}
+	for _, e := range entries {
+		d[strings.ToLower(e.DN)] = e
+	}
 	found := false
 	var out []Entry
 	for _, e := range entries {
@@ -281,7 +318,7 @@ func (s *Server) search(c net.Conn, id int64, op *ber.Packet, bound string) {
 		case goldap.ScopeWholeSubtree:
 			in = in || baseDN.AncestorOfFold(dn)
 		}
-		if in && match(filter, e) {
+		if in && d.match(filter, e) {
 			out = append(out, e)
 		}
 	}
@@ -345,37 +382,38 @@ func (s *Server) write(c net.Conn, id int64, op *ber.Packet) {
 	c.Write(p.Bytes())
 }
 
-// match evalúa los filtros que arma Kudawiki: and, or, not, igualdad, presencia y el AND de
-// bits de AD. La igualdad no distingue mayúsculas, como en los atributos de texto de AD.
-func match(f *ber.Packet, e Entry) bool {
-	get := func(name string) []string {
-		for n, v := range e.Attrs {
-			if strings.EqualFold(n, name) {
-				return v
-			}
-		}
-		return nil
-	}
+// directory son las entradas por DN en minúsculas, para seguir las cadenas de grupos.
+type directory map[string]Entry
+
+// match evalúa los filtros que arma Kudawiki: and, or, not, igualdad, subcadenas, presencia, el
+// AND de bits y la cadena de grupos de AD. La igualdad no distingue mayúsculas, como en los
+// atributos de texto de AD, salvo en los binarios (objectGUID, objectSid), que van byte a byte.
+func (d directory) match(f *ber.Packet, e Entry) bool {
 	switch f.Tag {
 	case 0:
 		for _, c := range f.Children {
-			if !match(c, e) {
+			if !d.match(c, e) {
 				return false
 			}
 		}
 		return true
 	case 1:
-		return slices.ContainsFunc(f.Children, func(c *ber.Packet) bool { return match(c, e) })
+		return slices.ContainsFunc(f.Children, func(c *ber.Packet) bool { return d.match(c, e) })
 	case 2:
-		return len(f.Children) == 1 && !match(f.Children[0], e)
+		return len(f.Children) == 1 && !d.match(f.Children[0], e)
 	case 3:
 		if len(f.Children) != 2 {
 			return false
 		}
 		want := f.Children[1].Data.String()
-		return slices.ContainsFunc(get(f.Children[0].Data.String()), func(v string) bool { return strings.EqualFold(v, want) })
+		return slices.ContainsFunc(get(e, f.Children[0].Data.String()), func(v string) bool { return equal(v, want) })
+	case 4:
+		if len(f.Children) != 2 {
+			return false
+		}
+		return slices.ContainsFunc(get(e, f.Children[0].Data.String()), func(v string) bool { return substrings(f.Children[1], v) })
 	case 7:
-		return len(get(f.Data.String())) > 0
+		return len(get(e, f.Data.String())) > 0
 	case 9:
 		var rule, attr, value string
 		for _, c := range f.Children {
@@ -388,14 +426,77 @@ func match(f *ber.Packet, e Entry) bool {
 				value = c.Data.String()
 			}
 		}
-		want, err := strconv.ParseInt(value, 10, 64)
-		if rule != bitAndRule || err != nil {
-			return false
+		switch rule {
+		case bitAndRule:
+			want, err := strconv.ParseInt(value, 10, 64)
+			return err == nil && slices.ContainsFunc(get(e, attr), func(v string) bool {
+				n, err := strconv.ParseInt(v, 10, 64)
+				return err == nil && n&want == want
+			})
+		case inChainRule:
+			return d.chain(e, attr, strings.ToLower(value), map[string]bool{})
 		}
-		return slices.ContainsFunc(get(attr), func(v string) bool {
-			n, err := strconv.ParseInt(v, 10, 64)
-			return err == nil && n&want == want
-		})
 	}
 	return false
+}
+
+// chain sigue los DN de attr (memberOf o member) hasta encontrar target, como AD: la entrada
+// cumple si target está en attr o en el attr de alguna entrada a la que apunta. seen corta ciclos.
+func (d directory) chain(e Entry, attr, target string, seen map[string]bool) bool {
+	for _, v := range get(e, attr) {
+		v = strings.ToLower(v)
+		if v == target {
+			return true
+		}
+		if next, ok := d[v]; ok && !seen[v] {
+			seen[v] = true
+			if d.chain(next, attr, target, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func get(e Entry, name string) []string {
+	for n, v := range e.Attrs {
+		if strings.EqualFold(n, name) {
+			return v
+		}
+	}
+	return nil
+}
+
+func equal(v, want string) bool {
+	if !utf8.ValidString(v) || !utf8.ValidString(want) {
+		return v == want
+	}
+	return strings.EqualFold(v, want)
+}
+
+// substrings evalúa (attr=ini*medio*fin) sin distinguir mayúsculas (RFC 4511 §4.5.1.7.2).
+func substrings(parts *ber.Packet, v string) bool {
+	v = strings.ToLower(v)
+	for _, p := range parts.Children {
+		s := strings.ToLower(p.Data.String())
+		switch p.Tag {
+		case 0:
+			if !strings.HasPrefix(v, s) {
+				return false
+			}
+			v = v[len(s):]
+		case 1:
+			i := strings.Index(v, s)
+			if i < 0 {
+				return false
+			}
+			v = v[i+len(s):]
+		case 2:
+			if !strings.HasSuffix(v, s) {
+				return false
+			}
+			v = ""
+		}
+	}
+	return true
 }

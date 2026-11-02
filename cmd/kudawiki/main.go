@@ -61,6 +61,8 @@ commands:
                (serve applies them, after a backup)
   backup       make a backup now into <data_dir>/backups (the master key is not included)
   restore      "restore <file>": verify a backup and put it in place; the server must be stopped
+  ldap         "ldap sync [--dry-run]": sync accounts and area memberships with the directory now
+               (--dry-run lists what it would do). Exit 1 if a safeguard aborted it
   doctor       check the content health (broken links, tree, media, search index);
                --ws <slug> for one area, --fix to rebuild the index and remove stray files
                (with the server stopped). Exit 1 if there are errors
@@ -80,7 +82,7 @@ func main() {
 
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	configPath := fs.String("config", "", "path to kudawiki.yaml (default "+config.DefaultPath+" if present)")
-	dryRun := fs.Bool("dry-run", false, "migrate: only list what would be applied")
+	dryRun := fs.Bool("dry-run", false, "migrate, ldap sync: only list what would be applied")
 	wsSlug := fs.String("ws", "", "doctor: only this area")
 	fix := fs.Bool("fix", false, "doctor: apply the automatic fixes")
 	_ = fs.Parse(os.Args[2:])
@@ -108,6 +110,8 @@ func main() {
 			err = runDoctor(ctx, cfg, *wsSlug, *fix)
 		case "admin":
 			err = runAdmin(ctx, cfg, fs.Args())
+		case "ldap":
+			err = runLDAPSync(ctx, cfg, fs.Args(), *dryRun)
 		default:
 			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
@@ -246,20 +250,16 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	l := cfg.Auth.LDAP
-	bindPassword, err := cfg.LDAPBindPassword()
-	if err != nil {
-		return err
-	}
-	directory, err := ldap.NewService(store, rec, masterKey, ldap.Patch{Enabled: l.Enabled, Flavor: l.Flavor, URLs: l.URLs,
-		StartTLS: l.StartTLS, CAFile: l.CAFile, InsecureSkipVerify: l.InsecureSkipVerify, BindDN: l.BindDN, BindPassword: bindPassword,
-		DomainNetbios: l.DomainNetbios, UserBaseDN: l.UserBaseDN, UserFilter: l.UserFilter, LoginAttrs: l.LoginAttrs, GroupBaseDN: l.GroupBaseDN,
-		Attrs: &ldap.AttrsPatch{Email: l.Attrs.Email, Name: l.Attrs.Name, GUID: l.Attrs.GUID}, DisabledFilter: l.DisabledFilter, Timeout: l.Timeout},
-		time.Now, logger)
+	areas := workspace.NewService(store, rec, logger)
+	// La baja de usuarios (§8.4): la usan el panel, el job diario y la sincronización del directorio.
+	leaving := offboarding.NewService(store, files, rec, masterKey,
+		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
+	directory, err := newDirectory(cfg, store, rec, masterKey, directoryDeps{areas: areas, leaving: leaving, mailer: mailer, log: logger})
 	if err != nil {
 		return err
 	}
 	directory.LogInsecure(ctx)
+	svc.SetDirectory(directory)
 	svc.SetSecondFactor(auth.SecondFactor{Key: masterKey, Enforce: auth.MFAPolicy(cfg.Auth.TOTP.EnforceFor), BaseURL: cfg.BaseURL})
 	if !svc.PasskeysAvailable() {
 		logger.Warn("passkeys disabled: base_url needs https and a domain name (or http://localhost)", "base_url", cfg.BaseURL)
@@ -279,10 +279,9 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, masterKey, cfg.BaseURL, cfg.EmailDelay(), cfg.RemindAfter(), time.Now)
 	jobsDone.Go(func() { notes.Run(jobCtx, logger) })
-	// La baja de usuarios: completa las que vencieron y seudonimiza la auditoría (§8.4, §13.10).
-	leaving := offboarding.NewService(store, files, rec, masterKey,
-		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
+	// Completa las bajas que vencieron y seudonimiza la auditoría (§8.4, §13.10).
 	jobsDone.Go(func() { leaving.Daily(jobCtx) })
+	jobsDone.Go(func() { directory.Run(jobCtx) })
 	hour, minute := cfg.BackupAt()
 	jobsDone.Go(func() {
 		jobs.Backup{DB: db.Read, StorageDir: cfg.StorageDir(), Dir: cfg.BackupDir(), Hour: hour, Minute: minute, Audit: rec, Now: time.Now, Log: logger,
@@ -293,7 +292,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	editing := presence.NewHub()
 	srv := &http.Server{
 		Addr: cfg.Listen,
-		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, logger), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
+		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
 			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
 			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -316,6 +315,121 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+// newDirectory arma el servicio del directorio con la configuración del archivo y lo que la
+// sincronización necesita: la baja de §8.4 y el aviso a los superadmins (§8.3.4). Lo usan serve
+// y `kudawiki ldap sync`.
+func newDirectory(cfg config.Config, store *repo.Repo, rec *audit.Recorder, masterKey []byte, deps directoryDeps) (*ldap.Service, error) {
+	areas, leaving, mailer, logger := deps.areas, deps.leaving, deps.mailer, deps.log
+	l := cfg.Auth.LDAP
+	bindPassword, err := cfg.LDAPBindPassword()
+	if err != nil {
+		return nil, err
+	}
+	directory, err := ldap.NewService(store, areas, rec, masterKey, ldap.Patch{Enabled: l.Enabled, Flavor: l.Flavor, URLs: l.URLs,
+		StartTLS: l.StartTLS, CAFile: l.CAFile, InsecureSkipVerify: l.InsecureSkipVerify, BindDN: l.BindDN, BindPassword: bindPassword,
+		DomainNetbios: l.DomainNetbios, UserBaseDN: l.UserBaseDN, UserFilter: l.UserFilter, LoginAttrs: l.LoginAttrs, GroupBaseDN: l.GroupBaseDN,
+		Attrs: &ldap.AttrsPatch{Email: l.Attrs.Email, Name: l.Attrs.Name, GUID: l.Attrs.GUID, Photo: l.Attrs.Photo}, DisabledFilter: l.DisabledFilter,
+		GroupMemberFilter: l.GroupMemberFilter, Timeout: l.Timeout, PasswordHelpURL: l.PasswordHelpURL, PrecreateUsers: l.PrecreateUsers,
+		SyncInterval: l.Sync.Interval, SyncMaxRemovalRatio: l.Sync.MaxRemovalRatio},
+		time.Now, logger)
+	if err != nil {
+		return nil, err
+	}
+	directory.SetOffboarding(leaving)
+	directory.SetMail(mailer, cfg.BaseURL)
+	return directory, nil
+}
+
+type directoryDeps struct {
+	areas   *workspace.Service
+	leaving *offboarding.Service
+	mailer  *mail.Service
+	log     *slog.Logger
+}
+
+// runLDAPSync sincroniza con el directorio desde la consola (§8.3.3), con el servidor corriendo
+// o no: SQLite serializa a los dos escritores. Con --dry-run solo muestra lo que haría. Las
+// salvaguardas (§8.3.4) no se pueden forzar desde acá: forzar pide reautenticarse en el panel.
+func runLDAPSync(ctx context.Context, cfg config.Config, args []string, dryRun bool) error {
+	if len(args) != 1 || args[0] != "sync" {
+		return errors.New("usage: kudawiki ldap sync [--dry-run]")
+	}
+	masterKey, err := crypto.LoadMasterKey(cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(cfg.DBPath()); err != nil {
+		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if pending, err := db.Pending(ctx); err != nil {
+		return err
+	} else if len(pending) > 0 {
+		return errors.New("the database has pending migrations: start the server once to apply them")
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	store := repo.New(db)
+	rec := audit.NewRecorder(store, time.Now, logger)
+	b := cfg.Branding
+	brand, err := branding.NewService(store, rec, branding.Patch{Title: b.Title, Company: b.Company, ColorPrimary: b.ColorPrimary,
+		ColorHeader: b.ColorHeader, ColorSidebar: b.ColorSidebar, LoginMessage: b.LoginMessage, ShowPoweredBy: b.ShowPoweredBy})
+	if err != nil {
+		return err
+	}
+	m := cfg.SMTP
+	// El correo queda en la cola; lo envía el servidor.
+	mailer, err := mail.NewService(store, brand, rec, masterKey, mail.Patch{Host: m.Host, Port: m.Port, Security: m.Security,
+		Username: m.Username, Password: m.Password, From: m.From}, kudawiki.I18n(), cfg.BaseURL, time.Now)
+	if err != nil {
+		return err
+	}
+	files := media.NewService(store, rec, cfg.StorageDir(), cfg.Upload.MaxBytes)
+	leaving := offboarding.NewService(store, files, rec, masterKey,
+		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
+	directory, err := newDirectory(cfg, store, rec, masterKey,
+		directoryDeps{areas: workspace.NewService(store, rec, logger), leaving: leaving, mailer: mailer, log: logger})
+	if err != nil {
+		return err
+	}
+	rep, err := directory.Sync(ctx, ldap.SyncOptions{Trigger: "cli", DryRun: dryRun})
+	if err != nil {
+		return err
+	}
+	printSyncReport(rep)
+	if rep.Aborted != "" {
+		return errors.New("the sync was aborted and nothing was applied; review it in the panel, where it can be forced")
+	}
+	return nil
+}
+
+func printSyncReport(r ldap.SyncReport) {
+	if r.DryRun {
+		fmt.Println("dry run: nothing was applied")
+	}
+	fmt.Printf("groups: %d, people in mapped groups: %d\n", r.Groups, r.People)
+	fmt.Printf("accounts created: %d, updated: %d\n", r.Created, r.Updated)
+	fmt.Printf("memberships added: %d, changed: %d, removed: %d of %d (%.0f%%, limit %.0f%%)\n",
+		r.Added, r.Changed, r.Removed, r.Managed, r.Ratio*100, r.MaxRatio*100)
+	for _, l := range r.Deactivated {
+		fmt.Printf("deactivated: %s <%s> (%s)\n", l.Name, l.Email, l.Reason)
+	}
+	for _, c := range r.Conflicts {
+		fmt.Println("not created, the email belongs to another account:", c)
+	}
+	switch r.Aborted {
+	case "removal_ratio":
+		fmt.Println("aborted: it would remove more memberships than allowed")
+	case "empty_group":
+		fmt.Println("aborted: the group came back empty:", r.Group)
+	case "truncated":
+		fmt.Println("aborted: the group is too large to read whole:", r.Group)
+	}
 }
 
 // runSearchRebuild regenera el índice de búsqueda (SPEC §9.7).

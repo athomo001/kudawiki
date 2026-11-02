@@ -361,9 +361,14 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// La reautenticación es de la sesión de quien la pide: TestReauth. Mis sesiones son de cada persona: TestSessions.
 	// Las passkeys son de cada persona y su login va sin sesión: TestPasskeys. La baja de usuarios y
 	// el superadmin desde el panel son del superadmin: TestOffboarding, TestOffboardingNow y TestSuperadminToggle.
-	// La conexión al directorio es del superadmin: TestLDAPAdmin.
+	// La conexión al directorio y las reglas de mapeo son del superadmin: TestLDAPAdmin y TestLDAPMappings.
+	// Vincular, desanclar, sincronizar, el estado y la depuración también: TestLDAPLinkAndDetach y TestLDAPSync.
 	elsewhere := []string{
+		"POST /api/admin/users/{id}/link-ldap", "POST /api/admin/workspaces/{id}/members/{user_id}/detach",
+		"GET /api/admin/ldap/status", "POST /api/admin/ldap/sync", "POST /api/admin/ldap/sync/preview", "PUT /api/admin/ldap/debug",
 		"GET /api/admin/ldap/config", "PUT /api/admin/ldap/config", "POST /api/admin/ldap/test",
+		"GET /api/admin/ldap/groups", "GET /api/admin/ldap/mappings", "POST /api/admin/ldap/mappings/preview",
+		"POST /api/admin/ldap/mappings", "PATCH /api/admin/ldap/mappings/{id}", "DELETE /api/admin/ldap/mappings/{id}",
 		"GET /api/admin/users/{id}/offboarding", "POST /api/admin/users/{id}/offboarding",
 		"POST /api/auth/totp", "POST /api/me/totp", "POST /api/me/totp/confirm", "DELETE /api/me/totp", "PATCH /api/admin/users/{id}",
 		"POST /api/auth/reauth",

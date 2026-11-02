@@ -32,6 +32,8 @@ export type Me = {
   id: string;
   email: string;
   full_name: string;
+  // Una cuenta del directorio no cambia en la wiki su nombre ni su contraseña (§8.6.3).
+  auth_source: 'local' | 'ldap';
   locale: 'es' | 'en';
   reading_prefs: ReadingPrefs;
   is_global_admin: boolean;
@@ -62,7 +64,8 @@ export type TOTPStatus = { enabled: boolean; required: boolean; recovery_codes_l
 // El alta del 2FA: qr son las filas del código QR, '1' es un módulo negro.
 export type TOTPSetup = { secret: string; uri: string; qr: string[] };
 
-export type Member = { user_id: string; email: string; full_name: string; role: Role };
+// role es el efectivo: el más alto entre el manual y el que da un grupo del directorio (§8.3.2).
+export type Member = { user_id: string; email: string; full_name: string; role: Role; manual_role?: Role; ldap_role?: Role; ldap_group?: string };
 export type Level = 1 | 2 | 3;
 export type PageRef = { slug: string; title: string; level?: Level; description?: string; icon?: string };
 export type Heading = { level: number; id: string; text: string };
@@ -281,7 +284,8 @@ export type NotificationKind =
   | 'quiz_reminder'
   | 'quiz_extra_attempts'
   | 'quiz_failed_out'
-  | 'ownership_received';
+  | 'ownership_received'
+  | 'role_changed';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -291,6 +295,7 @@ export type Notification = {
   title: string;
   actor: string;
   days: number | null;
+  role?: Role; // role_changed: el rol que tiene ahora
   count: number;
   read: boolean;
   updated_at: string;
@@ -407,7 +412,7 @@ export type AreaStats = {
 };
 export type Access = {
   level: Level;
-  members: { name: string; email: string; role: Role; can_read: boolean; can_read_simulated?: boolean }[];
+  members: { name: string; email: string; role: Role; group?: string; can_read: boolean; can_read_simulated?: boolean }[];
 };
 
 // Rango de cada rol: el nivel más alto que puede leer y asignar (SPEC §3.2).

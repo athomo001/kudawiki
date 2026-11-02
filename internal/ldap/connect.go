@@ -178,7 +178,8 @@ func (s *Service) connect(ctx context.Context, c config) (*goldap.Conn, string, 
 	}
 	var lastErr error
 	for _, u := range urls {
-		conn, err := c.dial(ctx, u, &peer{})
+		p := &peer{}
+		conn, err := c.dial(ctx, u, p)
 		if err == nil {
 			if err = conn.Bind(c.BindDN, c.password); err != nil {
 				conn.Close()
@@ -192,6 +193,9 @@ func (s *Service) connect(ctx context.Context, c config) (*goldap.Conn, string, 
 		}
 		s.mu.Lock()
 		s.last = u
+		if p.cert != nil {
+			s.st.certAfter = p.cert.NotAfter
+		}
 		s.mu.Unlock()
 		return conn, u, nil
 	}

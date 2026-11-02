@@ -147,6 +147,7 @@ type payload struct {
 	Title string `json:"title"`
 	Actor string `json:"actor,omitempty"`
 	Days  int    `json:"days,omitempty"`
+	Role  string `json:"role,omitempty"` // role_changed: el rol que tiene ahora
 }
 
 func (p payload) json() string {
@@ -436,8 +437,11 @@ func (s *Service) email(ctx context.Context) error {
 	done := make([]string, 0, len(due))
 	for _, n := range due {
 		if enabled && n.Pref == "immediate" {
-			m := mail.Message{To: n.Email, Lang: n.Locale, Template: n.Kind, Vars: s.vars(n), URL: s.link(n.Notification),
-				Unsubscribe: s.unsubscribeURL(n.UserID, n.Category)}
+			m := mail.Message{To: n.Email, Lang: n.Locale, Template: n.Kind, Vars: s.vars(n), URL: s.link(n.Notification)}
+			// Los avisos de la cuenta no se apagan (§12.1): sin enlace de baja.
+			if slices.Contains(repo.NotificationCategories, n.Category) {
+				m.Unsubscribe = s.unsubscribeURL(n.UserID, n.Category)
+			}
 			if err := s.mail.Enqueue(ctx, m); err != nil {
 				return err
 			}
@@ -499,7 +503,7 @@ func (s *Service) vars(n repo.NotificationEmail) map[string]string {
 	var p payload
 	_ = json.Unmarshal([]byte(n.Payload), &p)
 	return map[string]string{"name": n.FullName, "title": p.Title, "actor": p.Actor, "area": n.AreaName,
-		"days": strconv.Itoa(p.Days), "count": strconv.Itoa(n.Count)}
+		"days": strconv.Itoa(p.Days), "count": strconv.Itoa(n.Count), "role": p.Role}
 }
 
 // link es a dónde lleva un aviso: la página, la propuesta o la bandeja del área. Las mismas

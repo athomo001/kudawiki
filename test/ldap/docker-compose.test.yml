@@ -1,0 +1,154 @@
+# Directorios de prueba de F6 (SPEC §8.6, §17; skills/DevSecOps/docker.md §2). Solo para pruebas:
+# nada de esto va a producción. Se usa con test/ldap/run.sh, que levanta todo, siembra lo que no
+# se siembra solo y corre los tests de Go con -tags ldap_integration dentro de esta red.
+#
+# Sin puertos publicados: los tests corren en el servicio `go`, en la misma red, y llegan a cada
+# servidor por su nombre (el que va en su certificado).
+name: kudawiki-ldap-test
+
+x-passwords: &passwords
+  ADMIN_PASSWORD: Kudawiki-Admin-2026
+  USER_PASSWORD: Kudawiki-Prueba-2026
+
+services:
+  # Genera la CA de prueba y los certificados en test/ldap/.certs (ignorada por git).
+  certs:
+    build: ./openldap
+    image: kudawiki-test-openldap
+    entrypoint: ["/bin/sh", "/scripts/certs.sh"]
+    volumes:
+      - ./.certs:/certs
+      - ./certs.sh:/scripts/certs.sh:ro
+
+  # flavor ad: grupos anidados, tokenGroups, cuenta deshabilitada y "tiene que cambiar la contraseña".
+  samba:
+    build: ./samba
+    image: kudawiki-test-samba
+    hostname: dc1
+    # Provisionar el dominio escribe ACL de Windows como atributos extendidos security.*.
+    cap_add: [SYS_ADMIN]
+    environment: *passwords
+    volumes:
+      - samba-lib:/var/lib/samba
+      - samba-etc:/etc/samba
+      - ./.certs:/certs:ro
+    networks:
+      default:
+        aliases: [samba.kudawiki.test]
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,socket; assert os.path.exists('/var/lib/samba/seeded'); socket.create_connection(('127.0.0.1', 636), 2)"]
+      interval: 5s
+      retries: 60
+
+  # flavor openldap, con el overlay memberOf.
+  openldap:
+    image: kudawiki-test-openldap
+    environment:
+      <<: *passwords
+      MEMBEROF: "yes"
+      CERT_NAME: openldap
+    volumes:
+      - ./.certs:/certs:ro
+    networks:
+      default:
+        aliases: [openldap.kudawiki.test]
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "test", "-f", "/run/slapd/seeded"]
+      interval: 2s
+      retries: 30
+
+  # flavor generic: el mismo OpenLDAP sin memberOf.
+  openldap-plain:
+    image: kudawiki-test-openldap
+    environment:
+      <<: *passwords
+      MEMBEROF: "no"
+      CERT_NAME: openldap-plain
+    volumes:
+      - ./.certs:/certs:ro
+    networks:
+      default:
+        aliases: [openldap-plain.kudawiki.test]
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "test", "-f", "/run/slapd/seeded"]
+      interval: 2s
+      retries: 30
+
+  # 389 Directory Server; lo siembra run.sh (dirsrv/seed.sh).
+  dirsrv:
+    image: quay.io/389ds/dirsrv:c9s@sha256:40b6cd8370de9ed2856262c5f8a675aeb84c17cf9f7f6957fe7cc8d88988004a
+    hostname: dirsrv.kudawiki.test
+    environment:
+      DS_DM_PASSWORD: Kudawiki-Admin-2026
+      USER_PASSWORD: Kudawiki-Prueba-2026
+    volumes:
+      - dirsrv-data:/data
+      - ./.certs/dirsrv:/data/tls:ro
+      - ./dirsrv/seed.sh:/seed.sh:ro
+    networks:
+      default:
+        aliases: [dirsrv.kudawiki.test]
+    depends_on:
+      certs: { condition: service_completed_successfully }
+
+  # FreeIPA (389 DS con su esquema); emite su propio certificado con su CA, que seed.sh deja en
+  # .certs/freeipa-ca.crt. La primera instalación tarda varios minutos.
+  freeipa:
+    image: quay.io/freeipa/freeipa-server:almalinux-10@sha256:257a0f016a5ec4962e32c78185abe6ceb8db384f6cff206b9ec9ac4dc0ad224e
+    hostname: ipa.kudawiki.test
+    # --skip-mem-check: con el árbol de cgroups del host, el instalador no ve el límite de memoria.
+    command: ["-U", "-r", "KUDAWIKI.TEST", "--no-ntp", "--no-host-dns", "--skip-mem-check"]
+    environment:
+      PASSWORD: Kudawiki-Admin-2026
+      ADMIN_PASSWORD: Kudawiki-Admin-2026
+      USER_PASSWORD: Kudawiki-Prueba-2026
+    read_only: true
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+    # FreeIPA corre systemd: necesita su propio árbol de cgroups con escritura.
+    cgroup: host
+    tmpfs: [/run, /tmp]
+    volumes:
+      - freeipa-data:/data
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./.certs:/certs-out
+      - ./freeipa/seed.sh:/seed.sh:ro
+    networks:
+      default:
+        aliases: [ipa.kudawiki.test]
+    healthcheck:
+      test: ["CMD", "systemctl", "is-active", "ipa"]
+      interval: 15s
+      retries: 80
+      start_period: 60s
+
+  # Los tests de Go (-tags ldap_integration), con la misma imagen de Go que el Dockerfile.
+  go:
+    image: golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+    profiles: [test]
+    working_dir: /src
+    environment:
+      <<: *passwords
+      CGO_ENABLED: "0"
+      GOFLAGS: -buildvcs=false
+      KUDAWIKI_IT_CERTS: /certs
+    volumes:
+      - ../..:/src:ro
+      - ./.certs:/certs:ro
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+    command: ["go", "test", "-tags", "ldap_integration", "-count=1", "-run", "Integration", "-v", "./internal/httpapi/"]
+
+volumes:
+  samba-lib:
+  samba-etc:
+  dirsrv-data:
+  freeipa-data:
+  go-mod:
+  go-build:

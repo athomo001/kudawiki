@@ -39,7 +39,7 @@ func (r *Repo) EnsurePersonal(ctx context.Context, userID string) (Workspace, er
 		}
 		return Workspace{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')`, id, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, manual_role) VALUES (?, ?, 'admin', 'admin')`, id, userID); err != nil {
 		return Workspace{}, err
 	}
 	if err := copyGlobalTemplates(ctx, tx, id); err != nil {

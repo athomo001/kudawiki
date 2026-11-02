@@ -89,13 +89,15 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, err := ldap.NewService(store, rec, bytes.Repeat([]byte{1}, 32), ldap.Patch{}, time.Now, slog.New(slog.DiscardHandler))
+	areas := workspace.NewService(store, rec, slog.Default())
+	directory, err := ldap.NewService(store, areas, rec, bytes.Repeat([]byte{1}, 32), ldap.Patch{}, time.Now, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
 	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), BaseURL: origin})
+	svc.SetDirectory(directory)
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
 	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
@@ -103,7 +105,9 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	clock := time.Now()
 	leaving := offboarding.NewService(store, files, rec, bytes.Repeat([]byte{1}, 32),
 		offboarding.Config{Grace: 30 * 24 * time.Hour, PseudonymizeAfter: 365 * 24 * time.Hour}, func() time.Time { return clock }, slog.New(slog.DiscardHandler))
-	h := New(Deps{Auth: svc, Workspaces: workspace.NewService(store, rec, slog.Default()), Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
+	directory.SetOffboarding(leaving)
+	directory.SetMail(mailer, origin)
+	h := New(Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
 		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})

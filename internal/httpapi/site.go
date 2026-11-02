@@ -165,7 +165,8 @@ func brandPage(page []byte, site branding.Site, login loginOptions, nonce string
 		"title": site.Title, "company": site.Company, "login_message": site.LoginMessage, "show_powered_by": site.ShowPoweredBy,
 		"header_dark": site.Palette.HeaderDark,
 		"logo":        site.Assets["logo"], "logo_dark": site.Assets["logo_dark"],
-		"password_reset": login.PasswordReset, "passkeys": login.Passkeys,
+		"password_reset": login.PasswordReset, "passkeys": login.Passkeys, "directory": login.Directory,
+		"password_help_url": login.PasswordHelpURL,
 	})
 	tail := `<script type="application/json" id="kw-site">` + string(public) + `</script>`
 	if css := site.Palette.CSS(); css != "" {
@@ -175,8 +176,12 @@ func brandPage(page []byte, site branding.Site, login loginOptions, nonce string
 }
 
 // loginOptions: "¿Olvidaste tu contraseña?" si hay correo (§8.5.1) y "Entrar con una passkey" si
-// base_url las admite (§8.1).
-type loginOptions struct{ PasswordReset, Passkeys bool }
+// base_url las admite (§8.1); con el directorio activo, el campo acepta un usuario (§8.6.2) y
+// PasswordHelpURL lleva a la página de la empresa para la contraseña del directorio (§8.6.3).
+type loginOptions struct {
+	PasswordReset, Passkeys, Directory bool
+	PasswordHelpURL                    string
+}
 
 func brandHead(site branding.Site) string {
 	var b strings.Builder

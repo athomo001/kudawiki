@@ -29,8 +29,8 @@ func (s *Service) UnlockLogin(ctx context.Context, email string) error {
 }
 
 // SetPassword fija una contraseña con la misma política que el resto (§8.1), cierra las
-// sesiones de la persona y anula sus enlaces sin usar. Mientras no haya LDAP (F6) todas las
-// cuentas son locales.
+// sesiones de la persona y anula sus enlaces sin usar. A una cuenta del directorio no: su
+// contraseña es la de la red, y una local la convertiría en dos cuentas en una (§8.6.3).
 func (s *Service) SetPassword(ctx context.Context, email, password string) error {
 	if err := CheckPolicy(password, s.relaxed); err != nil {
 		return err
@@ -38,6 +38,9 @@ func (s *Service) SetPassword(ctx context.Context, email, password string) error
 	u, err := s.store.UserByEmail(ctx, strings.TrimSpace(email))
 	if err != nil {
 		return err
+	}
+	if isDirectory(u) {
+		return ErrDirectoryManaged
 	}
 	hash, err := HashPassword(password)
 	if err != nil {

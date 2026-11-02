@@ -10,6 +10,8 @@ export type Site = {
   logo_dark: string;
   password_reset: boolean; // el login ofrece "¿Olvidaste tu contraseña?" (§8.5.1): hay correo
   passkeys: boolean; // el login ofrece "Entrar con una passkey" (§8.1): base_url las admite
+  directory: boolean; // el login acepta un usuario del directorio, no solo un correo (§8.6.2)
+  password_help_url: string; // la página de la empresa para la contraseña del directorio (§8.6.3)
 };
 
 const fallback: Site = {
@@ -22,6 +24,8 @@ const fallback: Site = {
   logo_dark: '',
   password_reset: false,
   passkeys: false,
+  directory: false,
+  password_help_url: '',
 };
 
 function embedded(): Site {

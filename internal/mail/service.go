@@ -66,7 +66,8 @@ func NewService(s store, b brand, rec *audit.Recorder, masterKey []byte, fromCon
 		}
 		svc.texts[lang] = map[string]string{}
 		for k, v := range all {
-			if strings.HasPrefix(k, "email.") {
+			// Los nombres de los roles van en el aviso de cambio de rol (§12.1).
+			if strings.HasPrefix(k, "email.") || strings.HasPrefix(k, "role.") {
 				svc.texts[lang][k] = v
 			}
 		}

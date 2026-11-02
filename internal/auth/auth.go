@@ -98,6 +98,7 @@ type Service struct {
 	async     func(func()) // lo que corre fuera de la petición; los tests lo hacen sincrónico
 	mfa       SecondFactor
 	rp        *webauthn.WebAuthn // nil si base_url no admite passkeys (§8.1)
+	directory Directory          // nil sin LDAP (§8.6)
 
 	mu         sync.Mutex
 	attempts   map[string]attempt
@@ -151,6 +152,9 @@ func (s *Service) CreateSuperadmin(ctx context.Context, email, fullName, passwor
 
 // Login devuelve la sesión, o el desafío del segundo paso si la persona tiene 2FA. Email
 // inexistente, cuenta desactivada o contraseña incorrecta dan el mismo error y tardan lo mismo.
+// Si no es una cuenta local con esa contraseña, se prueba el directorio (§8.6.2), siempre después
+// del tope de intentos: cada bind fallido suma a la política de bloqueo de AD, y sin el tope
+// cualquiera podría bloquear cuentas de la empresa a través de la wiki.
 func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginResult, error) {
 	key := ip + "|" + strings.ToLower(strings.TrimSpace(email))
 	n, err := s.allow(key)
@@ -181,7 +185,18 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !ok || u.ID == "" || u.PasswordHash == "" || !u.IsActive {
+	ok = ok && u.ID != "" && u.PasswordHash != "" && u.IsActive
+	var meta map[string]any
+	if !ok && s.directory != nil {
+		du, err := s.directory.Login(ctx, strings.TrimSpace(email), password)
+		switch {
+		case err == nil:
+			u, ok, meta = du, true, map[string]any{"method": "ldap"}
+		case !errors.Is(err, ErrInvalidCredentials):
+			return LoginResult{}, err
+		}
+	}
+	if !ok {
 		s.auditFailure(ctx, u, n)
 		return LoginResult{}, ErrInvalidCredentials
 	}
@@ -190,7 +205,7 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 	if u.TOTPEnabled || u.Passkeys > 0 {
 		return s.challenge(u)
 	}
-	token, err := s.startSession(ctx, u, nil)
+	token, err := s.startSession(ctx, u, meta)
 	return LoginResult{Session: token}, err
 }
 

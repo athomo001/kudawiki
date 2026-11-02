@@ -18,8 +18,11 @@ const reauthTTL = 10 * time.Minute
 //
 // Los intentos comparten el contador del segundo paso del login (por persona): con una sesión
 // robada, la reautenticación no da una ventana más para adivinar la contraseña o el código.
+//
+// Una cuenta del directorio no tiene contraseña local: la suya se prueba con un bind (§8.6.2),
+// después del mismo tope.
 func (s *Service) Reauth(ctx context.Context, u repo.User, sessionToken, password, code string) error {
-	if u.PasswordHash == "" { // LDAP (F6) no tiene contraseña local: su reauth llega con el bind
+	if u.PasswordHash == "" && (!isDirectory(u) || s.directory == nil) {
 		return ErrNoLocalPassword
 	}
 	key := "totp|" + u.ID
@@ -27,12 +30,8 @@ func (s *Service) Reauth(ctx context.Context, u repo.User, sessionToken, passwor
 	if err != nil {
 		return err
 	}
-	ok, err := VerifyPassword(u.PasswordHash, password)
-	if err != nil {
+	if err := s.checkPassword(ctx, u, password); err != nil {
 		return err
-	}
-	if !ok {
-		return ErrWrongPassword
 	}
 	factor := ""
 	if u.TOTPEnabled {
@@ -68,4 +67,26 @@ func (s *Service) Reauthenticated(ctx context.Context, sessionToken string) (boo
 		return false, err
 	}
 	return s.now().Before(sess.ReauthUntil), nil
+}
+
+// checkPassword prueba la contraseña de una persona con sesión: la local o, si la cuenta es del
+// directorio, con un bind. Quien la llama ya aplicó el tope de intentos.
+func (s *Service) checkPassword(ctx context.Context, u repo.User, password string) error {
+	if isDirectory(u) {
+		if s.directory == nil {
+			return ErrNoLocalPassword
+		}
+		return s.directory.VerifyPassword(ctx, u, password)
+	}
+	if u.PasswordHash == "" {
+		return ErrNoLocalPassword
+	}
+	ok, err := VerifyPassword(u.PasswordHash, password)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrWrongPassword
+	}
+	return nil
 }

@@ -116,9 +116,18 @@ type LDAP struct {
 		Email *string `yaml:"email"`
 		Name  *string `yaml:"name"`
 		GUID  *string `yaml:"guid"`
+		Photo *string `yaml:"photo"`
 	} `yaml:"attrs"`
 	DisabledFilter *string `yaml:"disabled_filter"`
-	Timeout        *string `yaml:"timeout"`
+	// GroupMemberFilter: en openldap y generic, cómo se buscan los grupos de una persona.
+	GroupMemberFilter *string `yaml:"group_member_filter"`
+	Timeout           *string `yaml:"timeout"`
+	PasswordHelpURL   *string `yaml:"password_help_url"`
+	PrecreateUsers    *bool   `yaml:"precreate_users"`
+	Sync              struct {
+		Interval        *string  `yaml:"interval"`
+		MaxRemovalRatio *float64 `yaml:"max_removal_ratio"`
+	} `yaml:"sync"`
 }
 
 // LDAPBindPassword lee la contraseña de la cuenta de servicio de bind_password_file; nil si no
@@ -243,30 +252,34 @@ func Load(path string) (Config, error) {
 		}
 	}
 	for env, dst := range map[string]**string{
-		"KUDAWIKI_BRANDING_TITLE":               &c.Branding.Title,
-		"KUDAWIKI_BRANDING_COMPANY":             &c.Branding.Company,
-		"KUDAWIKI_BRANDING_COLOR_PRIMARY":       &c.Branding.ColorPrimary,
-		"KUDAWIKI_BRANDING_COLOR_HEADER":        &c.Branding.ColorHeader,
-		"KUDAWIKI_BRANDING_COLOR_SIDEBAR":       &c.Branding.ColorSidebar,
-		"KUDAWIKI_BRANDING_LOGIN_MESSAGE":       &c.Branding.LoginMessage,
-		"KUDAWIKI_SMTP_HOST":                    &c.SMTP.Host,
-		"KUDAWIKI_SMTP_SECURITY":                &c.SMTP.Security,
-		"KUDAWIKI_SMTP_USERNAME":                &c.SMTP.Username,
-		"KUDAWIKI_SMTP_PASSWORD":                &c.SMTP.Password,
-		"KUDAWIKI_SMTP_FROM":                    &c.SMTP.From,
-		"KUDAWIKI_AUTH_LDAP_FLAVOR":             &c.Auth.LDAP.Flavor,
-		"KUDAWIKI_AUTH_LDAP_CA_FILE":            &c.Auth.LDAP.CAFile,
-		"KUDAWIKI_AUTH_LDAP_BIND_DN":            &c.Auth.LDAP.BindDN,
-		"KUDAWIKI_AUTH_LDAP_BIND_PASSWORD_FILE": &c.Auth.LDAP.BindPasswordFile,
-		"KUDAWIKI_AUTH_LDAP_DOMAIN_NETBIOS":     &c.Auth.LDAP.DomainNetbios,
-		"KUDAWIKI_AUTH_LDAP_USER_BASE_DN":       &c.Auth.LDAP.UserBaseDN,
-		"KUDAWIKI_AUTH_LDAP_USER_FILTER":        &c.Auth.LDAP.UserFilter,
-		"KUDAWIKI_AUTH_LDAP_GROUP_BASE_DN":      &c.Auth.LDAP.GroupBaseDN,
-		"KUDAWIKI_AUTH_LDAP_ATTRS_EMAIL":        &c.Auth.LDAP.Attrs.Email,
-		"KUDAWIKI_AUTH_LDAP_ATTRS_NAME":         &c.Auth.LDAP.Attrs.Name,
-		"KUDAWIKI_AUTH_LDAP_ATTRS_GUID":         &c.Auth.LDAP.Attrs.GUID,
-		"KUDAWIKI_AUTH_LDAP_DISABLED_FILTER":    &c.Auth.LDAP.DisabledFilter,
-		"KUDAWIKI_AUTH_LDAP_TIMEOUT":            &c.Auth.LDAP.Timeout,
+		"KUDAWIKI_BRANDING_TITLE":                &c.Branding.Title,
+		"KUDAWIKI_BRANDING_COMPANY":              &c.Branding.Company,
+		"KUDAWIKI_BRANDING_COLOR_PRIMARY":        &c.Branding.ColorPrimary,
+		"KUDAWIKI_BRANDING_COLOR_HEADER":         &c.Branding.ColorHeader,
+		"KUDAWIKI_BRANDING_COLOR_SIDEBAR":        &c.Branding.ColorSidebar,
+		"KUDAWIKI_BRANDING_LOGIN_MESSAGE":        &c.Branding.LoginMessage,
+		"KUDAWIKI_SMTP_HOST":                     &c.SMTP.Host,
+		"KUDAWIKI_SMTP_SECURITY":                 &c.SMTP.Security,
+		"KUDAWIKI_SMTP_USERNAME":                 &c.SMTP.Username,
+		"KUDAWIKI_SMTP_PASSWORD":                 &c.SMTP.Password,
+		"KUDAWIKI_SMTP_FROM":                     &c.SMTP.From,
+		"KUDAWIKI_AUTH_LDAP_FLAVOR":              &c.Auth.LDAP.Flavor,
+		"KUDAWIKI_AUTH_LDAP_CA_FILE":             &c.Auth.LDAP.CAFile,
+		"KUDAWIKI_AUTH_LDAP_BIND_DN":             &c.Auth.LDAP.BindDN,
+		"KUDAWIKI_AUTH_LDAP_BIND_PASSWORD_FILE":  &c.Auth.LDAP.BindPasswordFile,
+		"KUDAWIKI_AUTH_LDAP_DOMAIN_NETBIOS":      &c.Auth.LDAP.DomainNetbios,
+		"KUDAWIKI_AUTH_LDAP_USER_BASE_DN":        &c.Auth.LDAP.UserBaseDN,
+		"KUDAWIKI_AUTH_LDAP_USER_FILTER":         &c.Auth.LDAP.UserFilter,
+		"KUDAWIKI_AUTH_LDAP_GROUP_BASE_DN":       &c.Auth.LDAP.GroupBaseDN,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_EMAIL":         &c.Auth.LDAP.Attrs.Email,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_NAME":          &c.Auth.LDAP.Attrs.Name,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_GUID":          &c.Auth.LDAP.Attrs.GUID,
+		"KUDAWIKI_AUTH_LDAP_DISABLED_FILTER":     &c.Auth.LDAP.DisabledFilter,
+		"KUDAWIKI_AUTH_LDAP_GROUP_MEMBER_FILTER": &c.Auth.LDAP.GroupMemberFilter,
+		"KUDAWIKI_AUTH_LDAP_TIMEOUT":             &c.Auth.LDAP.Timeout,
+		"KUDAWIKI_AUTH_LDAP_ATTRS_PHOTO":         &c.Auth.LDAP.Attrs.Photo,
+		"KUDAWIKI_AUTH_LDAP_PASSWORD_HELP_URL":   &c.Auth.LDAP.PasswordHelpURL,
+		"KUDAWIKI_AUTH_LDAP_SYNC_INTERVAL":       &c.Auth.LDAP.Sync.Interval,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = &v
@@ -283,6 +296,7 @@ func Load(path string) (Config, error) {
 		"KUDAWIKI_AUTH_LDAP_ENABLED":              &c.Auth.LDAP.Enabled,
 		"KUDAWIKI_AUTH_LDAP_START_TLS":            &c.Auth.LDAP.StartTLS,
 		"KUDAWIKI_AUTH_LDAP_INSECURE_SKIP_VERIFY": &c.Auth.LDAP.InsecureSkipVerify,
+		"KUDAWIKI_AUTH_LDAP_PRECREATE_USERS":      &c.Auth.LDAP.PrecreateUsers,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			b, err := strconv.ParseBool(v)
@@ -301,6 +315,13 @@ func Load(path string) (Config, error) {
 			list := strings.Split(v, ",")
 			*dst = &list
 		}
+	}
+	if v, ok := os.LookupEnv("KUDAWIKI_AUTH_LDAP_SYNC_MAX_REMOVAL_RATIO"); ok {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_AUTH_LDAP_SYNC_MAX_REMOVAL_RATIO: %w", err)
+		}
+		c.Auth.LDAP.Sync.MaxRemovalRatio = &f
 	}
 	if v, ok := os.LookupEnv("KUDAWIKI_AUTH_LOCAL_PASSWORD_RESET"); ok {
 		b, err := strconv.ParseBool(v)

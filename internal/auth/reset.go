@@ -27,7 +27,7 @@ const (
 var (
 	ErrInvalidReset     = errors.New("invalid_reset")     // vencido, usado o inexistente
 	ErrSamePassword     = errors.New("same_password")     // §8.5.1: no puede ser la actual
-	ErrNoLocalPassword  = errors.New("no_local_password") // invitada sin aceptar (o de LDAP, F6)
+	ErrNoLocalPassword  = errors.New("no_local_password") // invitada sin aceptar o del directorio
 	ErrResetUnavailable = errors.New("reset_unavailable") // sin correo o apagado por configuración
 )
 
@@ -102,6 +102,10 @@ func (s *Service) RequestPasswordReset(ctx context.Context, ip, email string) er
 		}
 		if err != nil {
 			s.logError("password reset lookup", err)
+			return
+		}
+		if u.IsActive && isDirectory(u) {
+			s.sendDirectoryHelp(ctx, u)
 			return
 		}
 		if !u.IsActive || u.PasswordHash == "" {
@@ -199,10 +203,30 @@ func (s *Service) CompletePasswordReset(ctx context.Context, token, password str
 	return nil
 }
 
-// notifyPasswordChanged manda "Tu contraseña cambió" (§12.1, no desactivable), con un enlace
-// para escribirles a los superadmins si no fue la persona. La contraseña ya cambió: si el aviso
-// no se puede encolar, se registra en el log y nada más.
+// sendDirectoryHelp es la respuesta a una cuenta del directorio (§8.5.1): aquí no hay contraseña
+// que restablecer, y el correo lleva a la página de la empresa para la de la red, si la hay. No
+// crea enlace ni queda en la auditoría: no cambia nada.
+func (s *Service) sendDirectoryHelp(ctx context.Context, u repo.User) {
+	var help string
+	if s.directory != nil {
+		help = s.directory.PasswordHelpURL(ctx)
+	}
+	err := s.email.Mail.Enqueue(ctx, mail.Message{To: u.Email, Lang: u.Locale, Template: "password_reset_ldap", URL: help,
+		Vars: map[string]string{"name": u.FullName}})
+	if err != nil {
+		s.logError("directory password notice", err)
+	}
+}
+
+// notifyPasswordChanged manda "Tu contraseña cambió" (§12.1, no desactivable).
 func (s *Service) notifyPasswordChanged(ctx context.Context, u repo.User) {
+	s.notifySecurity(ctx, u, "password_changed")
+}
+
+// notifySecurity manda un aviso de seguridad de la cuenta (§12.1, no desactivable), con un enlace
+// para escribirles a los superadmins si no fue la persona. El cambio ya está hecho: si el aviso
+// no se puede encolar, se registra en el log y nada más.
+func (s *Service) notifySecurity(ctx context.Context, u repo.User, template string) {
 	if !s.mailOn(ctx) {
 		return
 	}
@@ -210,10 +234,10 @@ func (s *Service) notifyPasswordChanged(ctx context.Context, u repo.User) {
 	if admins := s.superadminEmails(ctx, u.ID); len(admins) > 0 {
 		report = "mailto:" + strings.Join(admins, ",")
 	}
-	err := s.email.Mail.Enqueue(ctx, mail.Message{To: u.Email, Lang: u.Locale, Template: "password_changed", URL: report,
+	err := s.email.Mail.Enqueue(ctx, mail.Message{To: u.Email, Lang: u.Locale, Template: template, URL: report,
 		Vars: map[string]string{"name": u.FullName, "when": s.when()}})
 	if err != nil {
-		s.logError("password changed notice", err)
+		s.logError(template+" notice", err)
 	}
 }
 

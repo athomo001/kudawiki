@@ -989,8 +989,17 @@ section.settings { margin-top: 2.5rem; }
 .ldap-user-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; }
 .ldap-user-form .field { flex: 1 1 16rem; margin: 0; }
 .ldap-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.75rem 0; }
+/* "Gestionado por AD: grupo" debajo del rol (§8.3.2). */
+td .managed { display: block; }
+.ldap-sync .conflict-actions { margin-bottom: 0.75rem; }
 .ldap-facts dt { color: var(--kw-text-muted); }
 .ldap-facts dd { margin: 0; overflow-wrap: anywhere; }
+.ldap-access { margin: 0; padding-left: 1.25rem; }
+.ldap-dn { display: block; font-family: var(--kw-font-mono); font-size: 0.75rem; overflow-wrap: anywhere; }
+.ldap-rules table { width: 100%; }
+.ldap-rules td { vertical-align: top; }
+.ldap-groups .check { align-items: flex-start; }
+.ldap-preview p { margin: 0.25rem 0; }
 
 /* Mi perfil (SPEC §8.5.2): una columna sin cajas, como Apariencia. */
 .profile { max-width: 36rem; }

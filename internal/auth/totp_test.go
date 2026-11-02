@@ -193,6 +193,45 @@ func TestTOTPDisableAndReset(t *testing.T) {
 	}
 }
 
+// fakeDirectory acepta una sola contraseña para todas sus cuentas.
+type fakeDirectory struct{ password, help string }
+
+func (d fakeDirectory) PasswordHelpURL(context.Context) string { return d.help }
+
+func (d fakeDirectory) Login(context.Context, string, string) (repo.User, error) {
+	return repo.User{}, ErrInvalidCredentials
+}
+
+func (d fakeDirectory) VerifyPassword(_ context.Context, _ repo.User, password string) error {
+	if password != d.password {
+		return ErrWrongPassword
+	}
+	return nil
+}
+
+// Una cuenta del directorio no tiene contraseña local, pero apagar el 2FA igual pide la suya
+// (con un bind): una sesión robada y el código no alcanzan.
+func TestTOTPDisableDirectory(t *testing.T) {
+	ctx := context.Background()
+	s, r, c := totpService(t)
+	s.SetDirectory(fakeDirectory{password: "clave-de-red"})
+	if err := r.CreateLDAPUser(ctx, repo.User{ID: ulid.Make().String(), Email: "carla@empresa.cl", FullName: "Carla", LDAPGUID: "carla-guid", Locale: "es"}, "CN=Carla"); err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := enroll(t, s, r, "carla@empresa.cl")
+	carla, _ := r.UserByEmail(ctx, "carla@empresa.cl")
+	c.t = c.t.Add(30 * time.Second)
+	code := totpCode(secret, c.t.Unix()/totpPeriod)
+	for _, pw := range []string{"", "otra-clave"} {
+		if err := s.DisableTOTP(ctx, carla, "", pw, code, false); !errors.Is(err, ErrWrongPassword) {
+			t.Errorf("password %q: %v", pw, err)
+		}
+	}
+	if err := s.DisableTOTP(ctx, carla, "", "clave-de-red", code, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Con enforce_for = all, también a quien no es admin.
 func TestTOTPEnforceAll(t *testing.T) {
 	ctx := context.Background()

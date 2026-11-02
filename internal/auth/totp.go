@@ -197,6 +197,7 @@ func (s *Service) ConfirmTOTP(ctx context.Context, u repo.User, sessionToken, co
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPEnable, TargetType: "user", TargetID: u.ID,
 		Meta: map[string]any{"other_sessions_closed": closed}})
+	s.notifySecurity(ctx, u, "two_factor_changed")
 	return codes, nil
 }
 
@@ -219,14 +220,8 @@ func (s *Service) DisableTOTP(ctx context.Context, u repo.User, sessionToken, pa
 	if err != nil {
 		return err
 	}
-	if u.PasswordHash != "" { // de LDAP (F6) no hay contraseña local: basta el código
-		ok, err := VerifyPassword(u.PasswordHash, password)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return ErrWrongPassword
-		}
+	if err := s.checkPassword(ctx, u, password); err != nil { // de una cuenta del directorio, con un bind
+		return err
 	}
 	if _, err := s.checkCode(ctx, u, code, n); err != nil {
 		return err
@@ -243,6 +238,7 @@ func (s *Service) DisableTOTP(ctx context.Context, u repo.User, sessionToken, pa
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPDisable, TargetType: "user", TargetID: u.ID,
 		Meta: map[string]any{"other_sessions_closed": closed}})
+	s.notifySecurity(ctx, u, "two_factor_changed")
 	return nil
 }
 
@@ -255,6 +251,9 @@ func (s *Service) ResetTOTP(ctx context.Context, userID string) error {
 		return err
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthTOTPReset, TargetType: "user", TargetID: userID, Meta: map[string]any{"passkeys": n}})
+	if u, err := s.store.UserByID(ctx, userID); err == nil {
+		s.notifySecurity(ctx, u, "two_factor_changed")
+	}
 	return nil
 }
 

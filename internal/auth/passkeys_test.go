@@ -292,3 +292,45 @@ func TestPasskeyRemoveAndReset(t *testing.T) {
 		}
 	}
 }
+
+// Cada cambio del 2FA avisa a la persona por correo (§12.1, no desactivable): activar o apagar
+// el TOTP, sumar o quitar una passkey y el restablecimiento del superadmin.
+func TestTwoFactorChangedNotice(t *testing.T) {
+	ctx := context.Background()
+	s, r, c := passkeyService(t)
+	m := &fakeMail{on: true}
+	s.SetEmail(Email{Mail: m, BaseURL: "https://wiki.acme.cl/"})
+	notices := func() int {
+		n := 0
+		for _, msg := range m.of("two_factor_changed") {
+			if msg.To != "beto@empresa.cl" || msg.URL != "mailto:ana@empresa.cl" || msg.Vars["name"] != "Beto" {
+				t.Errorf("notice = %+v", msg)
+			}
+			n++
+		}
+		return n
+	}
+	secret, _ := enroll(t, s, r, "beto@empresa.cl")
+	if n := notices(); n != 1 {
+		t.Fatalf("after enabling TOTP: %d", n)
+	}
+	beto, _ := r.UserByEmail(ctx, "beto@empresa.cl")
+	key := addPasskey(t, s, beto, "sesion-b", "Teléfono")
+	beto, _ = r.UserByEmail(ctx, "beto@empresa.cl")
+	if err := s.DeletePasskey(ctx, beto, key.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if n := notices(); n != 3 {
+		t.Fatalf("after adding and removing a passkey: %d", n)
+	}
+	c.t = c.t.Add(time.Minute)
+	if err := s.DisableTOTP(ctx, beto, "", goodPassword, totpCode(secret, c.t.Unix()/totpPeriod), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetTOTP(ctx, beto.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := notices(); n != 5 {
+		t.Errorf("after disabling and the superadmin's reset: %d", n)
+	}
+}

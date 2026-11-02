@@ -17,6 +17,7 @@ type notificationOut struct {
 	Proposal string
 	Title    string
 	Actor    string
+	Role     string
 	Count    int
 	Read     bool
 }
@@ -235,5 +236,29 @@ func TestUnsubscribeRoute(t *testing.T) {
 	w = f.do("", "GET", "/unsubscribe?t=x", "")
 	if w.Code != http.StatusOK || w.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("unsubscribe page: %d %v", w.Code, w.Header())
+	}
+}
+
+// Quien recibe un rol, o un rol distinto, en un área se entera (§12.1, no desactivable); quien
+// hizo el cambio no recibe aviso de lo suyo, y nadie lo recibe del área de la que salió.
+func TestRoleChangedNotice(t *testing.T) {
+	f := newFixture(t)
+	f.reauth(t, "adminTI")
+	f.expect(t, "adminTI", "POST", "/api/w/ti/members", `{"email":"viewerTI@empresa.cl","role":"editor"}`, http.StatusNoContent)
+	ns, _ := f.inbox(t, "viewerTI")
+	if len(ns) != 1 || ns[0].Kind != "role_changed" || ns[0].Role != "editor" || ns[0].Area.Slug != "ti" || ns[0].Actor == "" {
+		t.Fatalf("viewer inbox = %+v", ns)
+	}
+	if ns, _ := f.inbox(t, "adminTI"); kinds(ns) != "" {
+		t.Errorf("the actor got %q", kinds(ns))
+	}
+	// Un segundo cambio sin leer el primero reemplaza al anterior: un solo aviso con el rol actual.
+	f.expect(t, "adminTI", "POST", "/api/w/ti/members", `{"email":"viewerTI@empresa.cl","role":"viewer"}`, http.StatusNoContent)
+	if ns, unread := f.inbox(t, "viewerTI"); unread != 1 || ns[0].Role != "viewer" {
+		t.Errorf("second change = %d %+v", unread, ns)
+	}
+	f.expect(t, "adminTI", "DELETE", "/api/w/ti/members/"+f.users["editorTI"], "", http.StatusNoContent)
+	if ns, _ := f.inbox(t, "editorTI"); kinds(ns) != "" {
+		t.Errorf("removed member got %q", kinds(ns))
 	}
 }

@@ -331,10 +331,11 @@ func (r *Repo) MarkEmailed(ctx context.Context, ids []string, at time.Time) erro
 	return err
 }
 
-// NotificationCategories son las categorías hasta F5; las demás de §12.1 llegan con su función.
-// review: vigencia vencida (§4.8); reading: solicitud de lectura o cuestionario asignado y su
-// recordatorio (§4.14, §4.16); quiz_extra: intentos extra recibidos; quiz_failed: alguien agotó
-// los intentos sin aprobar, a quien asignó.
+// NotificationCategories son las categorías que la persona elige cómo recibir; las demás de §12.1
+// llegan con su función. review: vigencia vencida (§4.8); reading: solicitud de lectura o
+// cuestionario asignado y su recordatorio (§4.14, §4.16); quiz_extra: intentos extra recibidos;
+// quiz_failed: alguien agotó los intentos sin aprobar, a quien asignó. account (el cambio de rol)
+// no está: no se puede apagar, y su correo sale siempre.
 var NotificationCategories = []string{"proposals", "my_proposals", "watched", "review", "reading", "quiz_extra", "quiz_failed"}
 
 // NotificationPrefs: si sigue lo que crea o edita, y el correo de cada categoría.

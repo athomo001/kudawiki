@@ -47,7 +47,17 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Route("/workspaces/{id}/members", func(r chi.Router) {
 		r.Use(a.adminScope)
 		a.memberRoutes(r)
+		// Desanclar lo que da el directorio es solo del superadmin (§8.3.2): no está en /w/{ws}.
+		r.With(a.requireReauth).Post("/{user_id}/detach", a.detachMember)
 	})
+}
+
+func (a api) detachMember(w http.ResponseWriter, r *http.Request) {
+	if err := a.Workspaces.Detach(r.Context(), actor(r), scopeOf(r), chi.URLParam(r, "user_id")); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a api) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +69,8 @@ func (a api) listUsers(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, len(us))
 	for i, u := range us {
 		out[i] = map[string]any{"id": u.ID, "email": u.Email, "full_name": u.FullName,
-			"is_global_admin": u.IsGlobalAdmin, "is_active": u.IsActive, "invited": u.Invited, "totp_enabled": u.TOTPEnabled}
+			"is_global_admin": u.IsGlobalAdmin, "is_active": u.IsActive, "invited": u.Invited, "totp_enabled": u.TOTPEnabled,
+			"auth_source": u.AuthSource}
 		// La baja (§8.4): en curso hasta offboarding_at, o completada en offboarded_at.
 		if !u.OffboardingAt.IsZero() {
 			out[i]["offboarding_at"] = u.OffboardingAt

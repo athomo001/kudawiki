@@ -398,3 +398,29 @@ func TestReadNotices(t *testing.T) {
 		t.Fatalf("the notice stayed unread after confirming: %d", unread)
 	}
 }
+
+// Los avisos de la cuenta (el cambio de rol, §12.1) no se pueden apagar: el correo sale aunque
+// la persona apagó todo con la baja en un clic, y no trae enlace para darse de baja.
+func TestAccountNotices(t *testing.T) {
+	e := newEnv(t, time.Now())
+	if err := e.svc.Unsubscribe(e.ctx, strings.TrimPrefix(e.svc.unsubscribeURL(e.ben, "all"), "https://wiki.x.cl/unsubscribe?t=")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.AddNotifications(e.ctx, e.sc.WsID, []repo.NewNotification{{UserID: e.ben, Kind: "role_changed", Category: "account",
+		GroupKey: "role:" + e.sc.WsID, Payload: `{"actor":"Ana","role":"editor"}`}}); err != nil {
+		t.Fatal(err)
+	}
+	e.clock = time.Now().Add(11 * time.Minute)
+	e.pass(t)
+	if len(e.mail.sent) != 1 {
+		t.Fatalf("sent = %+v", e.mail.sent)
+	}
+	m := e.mail.sent[0]
+	if m.Template != "role_changed" || m.To != "ben@x.cl" || m.Unsubscribe != "" || m.Vars["role"] != "editor" || m.Vars["actor"] != "Ana" ||
+		m.URL != "https://wiki.x.cl/w/ti" {
+		t.Errorf("role notice = %+v", m)
+	}
+	if e.svc.Unsubscribe(e.ctx, "x.account."+e.svc.sign("x", "account")) == nil {
+		t.Error("the account category accepted an unsubscribe")
+	}
+}

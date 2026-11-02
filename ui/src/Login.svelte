@@ -108,8 +108,9 @@
   {:else}
     <h1>{t('auth.login')}</h1>
     <form onsubmit={submit} aria-describedby={error ? 'login-error' : undefined}>
-      <label for="email">{t('auth.email')}</label>
-      <input id="email" type="email" autocomplete="username" required bind:value={email} />
+      <!-- Con el directorio activo se entra también con el usuario de la red (ana, EMPRESAna). -->
+      <label for="email">{site.directory ? t('auth.email_or_user') : t('auth.email')}</label>
+      <input id="email" type={site.directory ? 'text' : 'email'} autocomplete="username" autocapitalize="none" spellcheck="false" required bind:value={email} />
 
       <label for="password">{t('auth.password')}</label>
       <input id="password" type="password" autocomplete="current-password" required bind:value={password} />
@@ -124,6 +125,10 @@
       <button type="button" class="login-passkey" disabled={busy} onclick={withPasskey}>{t('passkeys.login')}</button>
     {/if}
     {#if site.password_reset}<p class="login-alt"><a href="/forgot">{t('reset.forgot_link')}</a></p>{/if}
+    <!-- La contraseña del directorio no se recupera en la wiki: se manda a la página de la empresa (§8.6.3). -->
+    {#if site.password_help_url}
+      <p class="login-alt"><a href={site.password_help_url} rel="noopener noreferrer" target="_blank">{t('auth.password_help')}</a></p>
+    {/if}
   {/if}
   <!-- Aviso de uso de la empresa (§15.1.1): texto plano, nunca HTML. -->
   {#if site.login_message}<p class="login-message">{site.login_message}</p>{/if}

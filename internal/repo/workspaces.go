@@ -51,11 +51,16 @@ type Membership struct {
 	Role string
 }
 
+// Member es una fila de la lista de miembros. Role es el efectivo; ManualRole y LDAPRole, de
+// dónde viene (§8.3.2), y Group el grupo del directorio que lo da.
 type Member struct {
-	UserID   string
-	Email    string
-	FullName string
-	Role     string
+	UserID     string
+	Email      string
+	FullName   string
+	Role       string
+	ManualRole string
+	LDAPRole   string
+	Group      string
 }
 
 // CreateWorkspace crea el área con una copia de las plantillas globales (§4.9).
@@ -144,15 +149,17 @@ func scanMembership(row scanner) (Membership, error) {
 
 func (r *Repo) Members(ctx context.Context, s Scope) ([]Member, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT u.id, u.email, u.full_name, m.role FROM workspace_members m
+		`SELECT u.id, u.email, u.full_name, m.role, COALESCE(m.manual_role, ''), COALESCE(m.ldap_role, ''), COALESCE(g.group_name, '')
+		 FROM workspace_members m
 		 JOIN users u ON u.id = m.user_id
+		 LEFT JOIN ldap_group_mappings g ON g.id = m.ldap_mapping_id
 		 WHERE m.workspace_id = ? ORDER BY u.full_name`, s.WsID)
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows, func(row scanner) (Member, error) {
 		var m Member
-		return m, row.Scan(&m.UserID, &m.Email, &m.FullName, &m.Role)
+		return m, row.Scan(&m.UserID, &m.Email, &m.FullName, &m.Role, &m.ManualRole, &m.LDAPRole, &m.Group)
 	})
 }
 
@@ -167,10 +174,20 @@ func (r *Repo) MemberRole(ctx context.Context, s Scope, userID string) (string, 
 	return role, err
 }
 
-// SetMember agrega o cambia el rol (upsert).
+// SetMember agrega o cambia el rol que da una persona (upsert). Si el directorio da uno más alto,
+// ese sigue siendo el efectivo (§8.3.2).
 func (r *Repo) SetMember(ctx context.Context, s Scope, userID, role string) error {
 	_, err := r.db.Write.ExecContext(ctx,
-		`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)
-		 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`, s.WsID, userID, role)
+		`INSERT INTO workspace_members (workspace_id, user_id, role, manual_role) VALUES (?, ?, ?, ?)
+		 ON CONFLICT (workspace_id, user_id) DO UPDATE SET manual_role = excluded.manual_role,
+		   role = `+higherRole("excluded.manual_role", "ldap_role"), s.WsID, userID, role, role)
 	return err
+}
+
+// higherRole es el SQL del rol más alto entre dos columnas que pueden ser NULL.
+func higherRole(a, b string) string {
+	rank := func(c string) string {
+		return `(CASE ` + c + ` WHEN 'admin' THEN 3 WHEN 'editor' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END)`
+	}
+	return `CASE WHEN ` + rank(b) + ` > ` + rank(a) + ` THEN ` + b + ` ELSE ` + a + ` END`
 }

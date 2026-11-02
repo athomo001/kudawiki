@@ -224,7 +224,12 @@ func (s *Service) Start(ctx context.Context, actorID, userID string, chosen map[
 		if err != nil {
 			return Outcome{}, err
 		}
-		s.audit.Record(ctx, audit.Event{Action: audit.UserOffboardingStart, TargetType: "user", TargetID: u.ID,
+		// Sin persona detrás, la baja la detectó el directorio (§8.3.3): es la única que inicia el sistema.
+		sys := ""
+		if actorID == "" {
+			sys = "ldap"
+		}
+		s.audit.Record(ctx, audit.Event{Action: audit.UserOffboardingStart, TargetType: "user", TargetID: u.ID, System: sys,
 			Meta: map[string]any{"until": until.UTC().Format(time.DateOnly), "sessions_closed": closed, "now": now}})
 		if !now {
 			return Outcome{Until: until}, nil

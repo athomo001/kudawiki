@@ -20,6 +20,13 @@ const maxFullName = 120
 // SetFullName cambia el nombre con que la persona aparece en la wiki. Queda en la auditoría: un
 // nombre ajeno ("Jefe CDC") confundiría en el historial y en lo que firma.
 func (s *Service) SetFullName(ctx context.Context, userID, name string) error {
+	u, err := s.store.UserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if isDirectory(u) { // el nombre viene del directorio en cada login (§8.6.3)
+		return ErrDirectoryManaged
+	}
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > maxFullName || strings.ContainsFunc(name, unicode.IsControl) {
 		return ErrInvalidUser
@@ -46,8 +53,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID, sessionToken, curr
 	if err != nil {
 		return err
 	}
+	if isDirectory(u) { // la contraseña es la de la red: se cambia en el directorio
+		return ErrDirectoryManaged
+	}
 	ok := false
-	if u.PasswordHash != "" { // sin contraseña local (LDAP, F6) no hay nada que cambiar aquí
+	if u.PasswordHash != "" { // invitada sin aceptar: no hay nada que cambiar aquí
 		if ok, err = VerifyPassword(u.PasswordHash, current); err != nil {
 			return err
 		}
@@ -79,7 +89,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID, sessionToken, curr
 
 // SetAvatar guarda la foto ya re-codificada: nunca se sirve el archivo que subió la persona.
 func (s *Service) SetAvatar(ctx context.Context, userID string, data []byte) error {
-	png, err := avatarPNG(data)
+	png, err := AvatarPNG(data)
 	if err != nil {
 		return err
 	}

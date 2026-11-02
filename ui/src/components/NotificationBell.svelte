@@ -36,7 +36,8 @@
   function text(n: Notification): string {
     const many = n.count > 1 && (n.kind === 'page_changed' || n.kind === 'proposal_pending' || n.kind === 'review_reminder');
     const key = `notif.kind.${n.kind}${many ? '_many' : ''}` as Key;
-    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? ''), area: n.area.name || t('personal.title') });
+    const role = n.role ? t(`role.${n.role}`) : '';
+    return t(key, { actor: n.actor, title: n.title, count: String(n.count), days: String(n.days ?? ''), area: n.area.name || t('personal.title'), role });
   }
 
   async function read(ids: string[]) {

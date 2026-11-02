@@ -9,6 +9,7 @@ import (
 	"errors"
 	"html/template"
 	"image/png"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -30,9 +31,12 @@ var templates = map[string]int{
 	"test":                      2,
 	"invite":                    2, // §8.5.3
 	"password_reset":            3, // §8.5.1
+	"password_reset_ldap":       2, // §8.5.1: la cuenta usa la contraseña de la red
 	"password_changed":          3, // §8.5.1, §8.5.2: aviso de seguridad, no desactivable
 	"superadmin_password_reset": 2, // §8.5.3: a los demás superadmins
 	"new_login":                 3, // §8.2: IP o navegador nuevo; de seguridad, no desactivable
+	"two_factor_changed":        3, // §8.1: de seguridad, no desactivable
+	"ldap_sync_aborted":         2, // §8.3.4: a los superadmins; la sincronización no aplicó nada
 	// Avisos (§5.3, §12.1): nunca llevan contenido de la página, solo su título.
 	"proposal_pending":    2,
 	"proposal_reminder":   2,
@@ -50,6 +54,7 @@ var templates = map[string]int{
 	"quiz_extra_attempts": 1,
 	"quiz_failed_out":     2,
 	"ownership_received":  2, // §8.4
+	"role_changed":        2, // §12.1: de la cuenta, no desactivable
 	"digest":              1,
 }
 
@@ -82,6 +87,7 @@ func (s *Service) text(lang, key string, vars map[string]string) string {
 
 func (s *Service) compose(m Message, lang string, vars map[string]string) content {
 	name := m.Template
+	vars = s.roleName(lang, vars)
 	c := content{Lang: lang, URL: m.URL, Unsubscribe: m.Unsubscribe}
 	c.Subject = s.text(lang, "email."+name+".subject", vars)
 	c.Title = s.text(lang, "email."+name+".title", vars)
@@ -96,7 +102,7 @@ func (s *Service) compose(m Message, lang string, vars map[string]string) conten
 		for k, v := range l.Vars {
 			lv[k] = v
 		}
-		c.Lines = append(c.Lines, s.text(lang, "email.line."+l.Template, lv))
+		c.Lines = append(c.Lines, s.text(lang, "email.line."+l.Template, s.roleName(lang, lv)))
 	}
 	if m.URL != "" {
 		c.Action = s.text(lang, "email."+name+".action", vars)
@@ -105,6 +111,17 @@ func (s *Service) compose(m Message, lang string, vars map[string]string) conten
 		c.UnsubscribeText = s.text(lang, "email.unsubscribe", vars)
 	}
 	return c
+}
+
+// roleName pone en el idioma del correo la variable role, que llega como el rol de §3.2.
+func (s *Service) roleName(lang string, vars map[string]string) map[string]string {
+	name, ok := s.texts[lang]["role."+vars["role"]]
+	if vars["role"] == "" || !ok {
+		return vars
+	}
+	out := maps.Clone(vars)
+	out["role"] = name
+	return out
 }
 
 // frame es el marco común con la marca de la empresa, a prueba de Outlook (§12): tablas,

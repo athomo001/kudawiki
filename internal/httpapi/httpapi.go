@@ -23,6 +23,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/middleware"
@@ -92,6 +93,7 @@ type workspaceService interface {
 	Update(ctx context.Context, sc repo.Scope, in workspace.Settings) error
 	SetMember(ctx context.Context, a workspace.Actor, sc repo.Scope, email, role string) error
 	RemoveMember(ctx context.Context, a workspace.Actor, sc repo.Scope, userID string) error
+	Detach(ctx context.Context, a workspace.Actor, sc repo.Scope, userID string) error
 }
 
 type wikiService interface {
@@ -366,12 +368,21 @@ func New(d Deps) http.Handler {
 	return root
 }
 
+// readyz dice si la base responde. Con el directorio activo, suma su estado (§8.6.5): último
+// login, última sincronización, último error (solo el código) y días al vencimiento del
+// certificado. Un directorio caído no deja el servicio "no listo": las cuentas locales siguen
+// entrando.
 func (a api) readyz(w http.ResponseWriter, r *http.Request) {
 	if err := a.DB.Ready(r.Context()); err != nil {
 		a.error(w, r, http.StatusServiceUnavailable, "not_ready", err)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	out := map[string]any{"status": "ok"}
+	if st := a.LDAP.Status(r.Context(), false); st.Enabled {
+		st.DebugUntil = nil // es del panel
+		out["ldap"] = st
+	}
+	a.json(w, http.StatusOK, out)
 }
 
 // spa sirve el frontend embebido; cualquier ruta que no sea un archivo devuelve index.html
@@ -427,7 +438,8 @@ func (a api) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/reset" || r.URL.Path == "/invite" || r.URL.Path == "/unsubscribe" {
 		h.Set("Referrer-Policy", "no-referrer") // las páginas que abren un enlace con token (§8.5.1, §12.1)
 	}
-	page = brandPage(page, site, loginOptions{PasswordReset: a.Auth.ResetAvailable(r.Context()), Passkeys: a.Auth.PasskeysAvailable()}, nonce)
+	page = brandPage(page, site, loginOptions{PasswordReset: a.Auth.ResetAvailable(r.Context()), Passkeys: a.Auth.PasskeysAvailable(), Directory: a.LDAP.Available(r.Context()),
+		PasswordHelpURL: a.LDAP.PasswordHelpURL(r.Context())}, nonce)
 	w.Write(bytes.Replace(page, []byte("<head>"), []byte(`<head><meta name="csp-nonce" content="`+nonce+`">`), 1))
 }
 
@@ -465,6 +477,12 @@ func (a api) error(w http.ResponseWriter, r *http.Request, status int, code stri
 // domainErrors: el texto de cada error de dominio es su código estable.
 var domainErrors = map[error]int{
 	auth.ErrInvalidCredentials:        http.StatusUnauthorized,
+	auth.ErrDirectoryUnavailable:      http.StatusServiceUnavailable,
+	auth.ErrPasswordExpired:           http.StatusUnauthorized,
+	auth.ErrNoDirectoryAccess:         http.StatusForbidden,
+	auth.ErrAccountConflict:           http.StatusConflict,
+	auth.ErrDirectoryManaged:          http.StatusConflict,
+	workspace.ErrManagedByDirectory:   http.StatusConflict,
 	auth.ErrPasswordTooShort:          http.StatusUnprocessableEntity,
 	auth.ErrPasswordCommon:            http.StatusUnprocessableEntity,
 	auth.ErrInvalidUser:               http.StatusUnprocessableEntity,
@@ -540,6 +558,14 @@ var domainErrors = map[error]int{
 	offboarding.ErrUserInactive:       http.StatusConflict,
 	offboarding.ErrInvalidReceiver:    http.StatusUnprocessableEntity,
 	offboarding.ErrNeedsAdmin:         http.StatusConflict,
+	ldap.ErrMappingExists:             http.StatusConflict,
+	ldap.ErrAlreadyLinked:             http.StatusConflict,
+	ldap.ErrLastLocalSuperadmin:       http.StatusConflict,
+	ldap.ErrNoMappedGroup:             http.StatusUnprocessableEntity,
+	ldap.ErrUserNotFound:              http.StatusUnprocessableEntity,
+	ldap.ErrUserInactive:              http.StatusConflict,
+	ldap.ErrSyncDisabled:              http.StatusConflict,
+	ldap.ErrSyncRunning:               http.StatusConflict,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.

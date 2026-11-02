@@ -213,6 +213,7 @@ func (s *Service) FinishPasskey(ctx context.Context, u repo.User, sessionToken, 
 		return PasskeyInfo{}, err
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthPasskeyAdd, TargetType: "user", TargetID: u.ID, Meta: map[string]any{"name": name}})
+	s.notifySecurity(ctx, u, "two_factor_changed")
 	return infoOf(p), nil
 }
 
@@ -244,6 +245,7 @@ func (s *Service) DeletePasskey(ctx context.Context, u repo.User, id string) err
 		return err
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.AuthPasskeyRemove, TargetType: "user", TargetID: u.ID, Meta: map[string]any{"name": name}})
+	s.notifySecurity(ctx, u, "two_factor_changed")
 	return nil
 }
 

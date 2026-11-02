@@ -2,6 +2,8 @@
   import { api, codeOf, ApiError } from '../lib/api';
   import { t, has, errorText, type Key } from '../lib/i18n/index.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import LdapRules from '../components/LdapRules.svelte';
+  import LdapSync from '../components/LdapSync.svelte';
 
   // Administración → Directorio (SPEC §8.6.4, §8.6.5): la conexión a LDAP / Active Directory y
   // su diagnóstico. Las pruebas usan lo que está en el formulario, sin guardarlo. La contraseña
@@ -9,8 +11,8 @@
   // es "sin cambios".
 
   type Flavor = 'ad' | 'openldap' | 'generic';
-  type Attrs = { email: string; name: string; guid: string };
-  type Defaults = { user_filter: string; login_attrs: string[]; attrs: Attrs; disabled_filter: string };
+  type Attrs = { email: string; name: string; guid: string; photo: string };
+  type Defaults = { user_filter: string; login_attrs: string[]; attrs: Attrs; disabled_filter: string; group_member_filter: string };
   type Settings = {
     enabled: boolean;
     flavor: Flavor;
@@ -27,7 +29,12 @@
     group_base_dn: string;
     attrs: Attrs;
     disabled_filter: string;
+    group_member_filter: string;
     timeout: string;
+    password_help_url: string;
+    precreate_users: boolean;
+    sync_interval: string;
+    sync_max_removal_ratio: number;
     locked: string[]; // fijadas en kudawiki.yaml o KUDAWIKI_AUTH_LDAP_*: el panel no las cambia
     defaults: Record<Flavor, Defaults>;
   };
@@ -49,6 +56,8 @@
     guid: string;
     missing: string[];
     warnings: string[];
+    groups: { guid: string; dn: string; name: string }[];
+    access: { workspace_id: string; workspace_name: string; role: 'viewer' | 'editor' | 'admin'; via: string[] }[];
   };
 
   const flavors: Flavor[] = ['ad', 'openldap', 'generic'];
@@ -65,14 +74,19 @@
     'user_filter',
     'group_base_dn',
     'disabled_filter',
+    'group_member_filter',
     'timeout',
+    'password_help_url',
+    'precreate_users',
   ] as const;
-  const attrKeys = ['email', 'name', 'guid'] as const;
+  const attrKeys = ['email', 'name', 'guid', 'photo'] as const;
 
   let form = $state<Settings | null>(null);
   // Las listas se editan como texto: una URL por línea, los atributos separados por comas.
   let urlsText = $state('');
   let loginAttrsText = $state('');
+  // El tope de bajas se edita en porcentaje; se guarda como fracción (§8.3.4).
+  let ratioPct = $state(10);
   let saved = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -101,6 +115,8 @@
     if (!locked('urls')) out.urls = lines(urlsText);
     if (!locked('login_attrs')) out.login_attrs = lines(loginAttrsText);
     out.attrs = Object.fromEntries(attrKeys.filter((k) => !locked(`attrs.${k}`)).map((k) => [k, form!.attrs[k]]));
+    if (!locked('sync.interval')) out.sync_interval = form.sync_interval;
+    if (!locked('sync.max_removal_ratio')) out.sync_max_removal_ratio = ratioPct / 100;
     return out;
   }
   const dirty = $derived(form !== null && JSON.stringify(editable()) !== saved);
@@ -109,6 +125,7 @@
     form = s;
     urlsText = s.urls.join('\n');
     loginAttrsText = s.login_attrs.join(', ');
+    ratioPct = Math.round(s.sync_max_removal_ratio * 100);
     saved = JSON.stringify(editable());
   }
 
@@ -185,7 +202,7 @@
   }
 
   function fieldLabel(field: string): string {
-    const key = `ldap.${field.replace('.', '_')}`;
+    const key = `ldap.${field.replaceAll('.', '_')}`;
     return has(key) ? t(key) : field;
   }
   const codeText = (code?: string) => (code && has(`ldap.code.${code}`) ? t(`ldap.code.${code}` as Key) : '');
@@ -379,6 +396,21 @@
         {@render hint('disabled_filter', t('ldap.disabled_filter_hint'))}
         {@render invalid('disabled_filter')}
       </label>
+      {#if form.flavor !== 'ad'}
+        <!-- AD saca los grupos de tokenGroups: el filtro no se usa ahí (§8.6.1). -->
+        <label class="field">
+          {t('ldap.group_member_filter')}
+          <input
+            spellcheck="false"
+            placeholder={defaults?.group_member_filter}
+            disabled={locked('group_member_filter')}
+            aria-invalid={errorField === 'group_member_filter'}
+            bind:value={form.group_member_filter}
+          />
+          {@render hint('group_member_filter', t('ldap.group_member_filter_hint', { dn: '{dn}', uid: '{uid}' }))}
+          {@render invalid('group_member_filter')}
+        </label>
+      {/if}
 
       <h2>{t('ldap.attrs')}</h2>
       {#each attrKeys as k (k)}
@@ -392,7 +424,7 @@
             aria-invalid={errorField === `attrs.${k}`}
             bind:value={form.attrs[k]}
           />
-          {@render hint(`attrs.${k}`, k === 'guid' ? t('ldap.attrs_guid_hint') : t('ldap.default_hint'))}
+          {@render hint(`attrs.${k}`, k === 'guid' ? t('ldap.attrs_guid_hint') : k === 'photo' ? t('ldap.attrs_photo_hint') : t('ldap.default_hint'))}
           {@render invalid(`attrs.${k}`)}
         </label>
       {/each}
@@ -401,6 +433,47 @@
         <input class="port" spellcheck="false" disabled={locked('timeout')} aria-invalid={errorField === 'timeout'} bind:value={form.timeout} />
         {@render hint('timeout', t('ldap.timeout_hint'))}
         {@render invalid('timeout')}
+      </label>
+      <label class="field">
+        {t('ldap.password_help_url')}
+        <input
+          type="url"
+          spellcheck="false"
+          placeholder="https://cuenta.empresa.cl"
+          disabled={locked('password_help_url')}
+          aria-invalid={errorField === 'password_help_url'}
+          bind:value={form.password_help_url}
+        />
+        {@render hint('password_help_url', t('ldap.password_help_url_hint'))}
+        {@render invalid('password_help_url')}
+      </label>
+
+      <h2>{t('ldap.sync_settings')}</h2>
+      <label class="check">
+        <input type="checkbox" disabled={locked('precreate_users')} bind:checked={form.precreate_users} />
+        {t('ldap.precreate_users')}
+      </label>
+      {@render hint('precreate_users', t('ldap.precreate_users_hint'))}
+      <label class="field">
+        {t('ldap.sync_interval')}
+        <input class="port" spellcheck="false" disabled={locked('sync.interval')} aria-invalid={errorField === 'sync.interval'} bind:value={form.sync_interval} />
+        {@render hint('sync.interval', t('ldap.sync_interval_hint'))}
+        {@render invalid('sync.interval')}
+      </label>
+      <label class="field">
+        {t('ldap.sync_max_removal_ratio')}
+        <input
+          class="port"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          disabled={locked('sync.max_removal_ratio')}
+          aria-invalid={errorField === 'sync.max_removal_ratio'}
+          bind:value={ratioPct}
+        />
+        {@render hint('sync.max_removal_ratio', t('ldap.sync_max_removal_ratio_hint'))}
+        {@render invalid('sync.max_removal_ratio')}
       </label>
 
       {#if error && !errorField}<p class="error" role="alert">{error}</p>{/if}
@@ -436,6 +509,9 @@
         {@render steps(report)}
       </section>
     {/if}
+
+    <LdapRules />
+    <LdapSync />
 
     <section aria-labelledby="ldap-user-title">
       <h2 id="ldap-user-title">{t('ldap.user_test')}</h2>
@@ -475,11 +551,27 @@
               <dd><code>{userReport.guid || t('ldap.attrs_guid_dn')}</code></dd>
               <dt>{t('ldap.user_attributes')}</dt>
               <dd>{userReport.attributes.join(', ')}</dd>
+              {#if !userReport.warnings.includes('no_group_base')}
+                <dt>{t('ldap.user_groups')}</dt>
+                <dd>{userReport.groups.map((g) => g.name).join(', ') || '—'}</dd>
+                <dt>{t('ldap.user_access')}</dt>
+                <dd>
+                  {#if userReport.access.length}
+                    <ul class="ldap-access">
+                      {#each userReport.access as a (a.workspace_id)}
+                        <li>{t('ldap.user_access_item', { area: a.workspace_name, role: t(`role.${a.role}`), via: a.via.join(', ') })}</li>
+                      {/each}
+                    </ul>
+                  {:else}—{/if}
+                </dd>
+              {/if}
             </dl>
             {#if userReport.missing.length}
               <p class="error">{t('ldap.user_missing', { attrs: userReport.missing.join(', ') })}</p>
             {/if}
             {#if userReport.warnings.includes('guid_from_dn')}<p class="muted">{t('ldap.code.guid_from_dn')}</p>{/if}
+            {#if userReport.warnings.includes('no_mapped_group')}<p class="error">{t('ldap.code.no_mapped_group')}</p>{/if}
+            {#if userReport.warnings.includes('no_group_base')}<p class="muted">{t('ldap.code.no_group_base')}</p>{/if}
           {/if}
           <p class="muted"><small>{t('ldap.user_filter_used')} <code>{userReport.filter}</code> · {userReport.url}</small></p>
         </div>

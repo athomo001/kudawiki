@@ -7,6 +7,7 @@
   import NotificationPrefsForm from '../components/NotificationPrefsForm.svelte';
   import TotpSetup from '../components/TotpSetup.svelte';
   import PasskeyList from '../components/PasskeyList.svelte';
+  import { site } from '../lib/site.svelte';
 
   // Mi perfil (SPEC §8.5.2, §14.1): lo que la persona cambia de sí misma. El correo y los roles
   // los cambia quien administra; aquí solo se muestran.
@@ -157,21 +158,37 @@
     </div>
   </section>
 
-  <form class="stack" onsubmit={saveName}>
-    <h2>{t('profile.data')}</h2>
-    <label class="field">
-      {t('common.name')}
-      <input required maxlength="120" autocomplete="name" bind:value={name} />
-    </label>
-    <div class="field">
-      <span>{t('auth.email')}</span>
-      <span class="profile-value">{me.email}</span>
-      <small class="muted">{t('profile.email_hint')}</small>
-    </div>
-    {#if nameError}<p class="error" role="alert">{nameError}</p>{/if}
-    {#if nameSaved}<p role="status" class="muted">{t('profile.saved')}</p>{/if}
-    <button type="submit" class="primary" disabled={nameBusy || name.trim() === me.full_name}>{nameBusy ? t('common.saving') : t('common.save')}</button>
-  </form>
+  {#if me.auth_source === 'ldap'}
+    <!-- El nombre y el correo se traen del directorio en cada ingreso (§8.6.3): aquí solo se ven. -->
+    <section class="stack" aria-labelledby="data-title">
+      <h2 id="data-title">{t('profile.data')}</h2>
+      <div class="field">
+        <span>{t('common.name')}</span>
+        <span class="profile-value">{me.full_name}</span>
+      </div>
+      <div class="field">
+        <span>{t('auth.email')}</span>
+        <span class="profile-value">{me.email}</span>
+      </div>
+      <p class="muted small">{t('profile.directory_hint')}</p>
+    </section>
+  {:else}
+    <form class="stack" onsubmit={saveName}>
+      <h2>{t('profile.data')}</h2>
+      <label class="field">
+        {t('common.name')}
+        <input required maxlength="120" autocomplete="name" bind:value={name} />
+      </label>
+      <div class="field">
+        <span>{t('auth.email')}</span>
+        <span class="profile-value">{me.email}</span>
+        <small class="muted">{t('profile.email_hint')}</small>
+      </div>
+      {#if nameError}<p class="error" role="alert">{nameError}</p>{/if}
+      {#if nameSaved}<p role="status" class="muted">{t('profile.saved')}</p>{/if}
+      <button type="submit" class="primary" disabled={nameBusy || name.trim() === me.full_name}>{nameBusy ? t('common.saving') : t('common.save')}</button>
+    </form>
+  {/if}
 
   <section aria-labelledby="areas-title">
     <h2 id="areas-title">{t('profile.areas')}</h2>
@@ -206,31 +223,41 @@
 
   <NotificationPrefsForm />
 
-  <form class="stack" onsubmit={changePassword}>
-    <h2>{t('profile.password')}</h2>
-    <!-- El correo oculto ayuda al gestor de contraseñas a saber de qué cuenta es la clave nueva. -->
-    <input class="sr-only" type="email" autocomplete="username" value={me.email} readonly tabindex="-1" aria-hidden="true" />
-    <label class="field">
-      {t('profile.password_current')}
-      <input type="password" autocomplete="current-password" required bind:value={current} />
-    </label>
-    <label class="field">
-      {t('profile.password_new')}
-      <input type="password" autocomplete="new-password" required aria-describedby="password-hint" bind:value={next} />
-    </label>
-    <small id="password-hint" class="muted">{t('profile.password_hint')}</small>
-    <label class="field">
-      {t('auth.password_repeat')}
-      <input type="password" autocomplete="new-password" required bind:value={repeat} />
-    </label>
-    <label class="check">
-      <input type="checkbox" bind:checked={revokeOthers} />
-      {t('profile.revoke_others')}
-    </label>
-    {#if passwordError}<p class="error" role="alert">{passwordError}</p>{/if}
-    {#if passwordDone}<p role="status" class="muted">{t('profile.password_done')}</p>{/if}
-    <button type="submit" class="primary" disabled={passwordBusy}>{passwordBusy ? t('common.saving') : t('profile.password_submit')}</button>
-  </form>
+  {#if me.auth_source === 'ldap'}
+    <section aria-labelledby="password-title">
+      <h2 id="password-title">{t('profile.password')}</h2>
+      <p class="muted">{t('profile.password_directory')}</p>
+      {#if site.password_help_url}
+        <p><a href={site.password_help_url} rel="noopener noreferrer" target="_blank">{t('auth.password_help')}</a></p>
+      {/if}
+    </section>
+  {:else}
+    <form class="stack" onsubmit={changePassword}>
+      <h2>{t('profile.password')}</h2>
+      <!-- El correo oculto ayuda al gestor de contraseñas a saber de qué cuenta es la clave nueva. -->
+      <input class="sr-only" type="email" autocomplete="username" value={me.email} readonly tabindex="-1" aria-hidden="true" />
+      <label class="field">
+        {t('profile.password_current')}
+        <input type="password" autocomplete="current-password" required bind:value={current} />
+      </label>
+      <label class="field">
+        {t('profile.password_new')}
+        <input type="password" autocomplete="new-password" required aria-describedby="password-hint" bind:value={next} />
+      </label>
+      <small id="password-hint" class="muted">{t('profile.password_hint')}</small>
+      <label class="field">
+        {t('auth.password_repeat')}
+        <input type="password" autocomplete="new-password" required bind:value={repeat} />
+      </label>
+      <label class="check">
+        <input type="checkbox" bind:checked={revokeOthers} />
+        {t('profile.revoke_others')}
+      </label>
+      {#if passwordError}<p class="error" role="alert">{passwordError}</p>{/if}
+      {#if passwordDone}<p role="status" class="muted">{t('profile.password_done')}</p>{/if}
+      <button type="submit" class="primary" disabled={passwordBusy}>{passwordBusy ? t('common.saving') : t('profile.password_submit')}</button>
+    </form>
+  {/if}
 
   <section class="stack" aria-labelledby="totp-title">
     <h2 id="totp-title">{t('totp.title')}</h2>

@@ -262,8 +262,14 @@ type UserReport struct {
 	Email      string   `json:"email"`
 	Name       string   `json:"name"`
 	GUID       string   `json:"guid"`
-	Missing    []string `json:"missing"`  // atributos mapeados que la entrada no trae
-	Warnings   []string `json:"warnings"` // guid_from_dn: sin atributo de identidad, renombrar la entrada crea otra cuenta
+	Missing    []string `json:"missing"` // atributos mapeados que la entrada no trae
+	// guid_from_dn: sin atributo de identidad, renombrar la entrada crea otra cuenta;
+	// no_group_base: sin group_base_dn no hay grupos; no_mapped_group: no podría entrar (§8.6.3).
+	Warnings []string `json:"warnings"`
+	// Groups son sus grupos bajo group_base_dn, también los heredados; Access, lo que le dan las
+	// reglas: responde "¿por qué Ana no ve el área TI?" (§8.6.5).
+	Groups []Group `json:"groups"`
+	Access []Grant `json:"access"`
 }
 
 // UnavailableError lleva lo que contestó el directorio cuando no se pudo conectar ni buscar.
@@ -301,7 +307,8 @@ func (s *Service) testUser(ctx context.Context, c config, login string) (UserRep
 		return UserReport{}, &UnavailableError{err}
 	}
 	defer conn.Close()
-	r := UserReport{URL: url, Login: login, Filter: userFilter(c, login), Attributes: []string{}, Missing: []string{}, Warnings: []string{}}
+	r := UserReport{URL: url, Login: login, Filter: userFilter(c, login), Attributes: []string{}, Missing: []string{}, Warnings: []string{},
+		Groups: []Group{}, Access: []Grant{}}
 	attrs := []string{"*", c.Attrs.Email, c.Attrs.Name}
 	if c.Attrs.GUID != "" {
 		attrs = append(attrs, c.Attrs.GUID)
@@ -356,6 +363,26 @@ func (s *Service) testUser(ctx context.Context, c config, login string) (UserRep
 			return UserReport{}, &UnavailableError{err}
 		}
 		r.Enabled = len(res.Entries) == 0
+	}
+	if c.GroupBaseDN == "" {
+		r.Warnings = append(r.Warnings, "no_group_base")
+		return r, nil
+	}
+	// Los mismos pasos que el login: lo que se ve aquí es lo que recibiría al entrar.
+	groups, err := memberships(conn, c, e)
+	if err != nil {
+		return UserReport{}, &UnavailableError{err}
+	}
+	mappings, err := s.store.LDAPMappings(ctx)
+	if err != nil {
+		return UserReport{}, err
+	}
+	r.Access = grants(c, groups, mappings)
+	if len(r.Access) == 0 {
+		r.Warnings = append(r.Warnings, "no_mapped_group")
+	}
+	if r.Groups, err = describe(conn, c, groups); err != nil {
+		return UserReport{}, &UnavailableError{err}
 	}
 	return r, nil
 }

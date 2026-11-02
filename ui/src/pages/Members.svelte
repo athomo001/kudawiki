@@ -19,7 +19,9 @@
   let error = $state('');
 
   const roles = $derived<Role[]>(canGrantAdmin ? ['viewer', 'editor', 'admin'] : ['viewer', 'editor']);
-  const editable = (m: Member) => canGrantAdmin || (m.user_id !== selfId && m.role !== 'admin');
+  // Lo que da un grupo del directorio no se quita desde acá (§8.3.2): se cambia en el directorio.
+  // Quitar a quien tiene además un rol manual le quita solo lo manual.
+  const editable = (m: Member) => (m.ldap_role ? !!m.manual_role : true) && (canGrantAdmin || (m.user_id !== selfId && m.role !== 'admin'));
 
   async function run(action?: () => Promise<void>) {
     busy = true;
@@ -66,8 +68,21 @@
         <tr>
           <td>{m.full_name}</td>
           <td>{m.email}</td>
-          <td>{t(`role.${m.role}`)}</td>
           <td>
+            {t(`role.${m.role}`)}
+            {#if m.ldap_role}<small class="muted managed">{t('members.managed', { group: m.ldap_group || '—' })}</small>{/if}
+          </td>
+          <td>
+            {#if canGrantAdmin && m.ldap_role}
+              <!-- Desanclar: la excepción del superadmin; el rol queda manual y el grupo deja de mandar en esta fila. -->
+              <button
+                type="button"
+                class="link"
+                disabled={busy}
+                aria-label={t('members.detach_label', { name: m.full_name })}
+                onclick={() => run(() => api('POST', `${endpoint}/${m.user_id}/detach`))}>{t('members.detach')}</button
+              >
+            {/if}
             {#if editable(m)}
               <button
                 type="button"

@@ -12,8 +12,8 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// Foto de perfil (SPEC §8.6.3): PNG cuadrado de 128 px. La misma conversión servirá para la
-// foto que traiga el directorio (thumbnailPhoto, F6).
+// Foto de perfil (SPEC §8.6.3): PNG cuadrado de 128 px. La misma conversión sirve para la foto
+// que trae el directorio (attrs.photo): nunca se sirve lo que llegó de afuera.
 const (
 	MaxAvatarBytes  = 5 << 20 // una foto de celular entra; igual se re-codifica a 128 px
 	avatarSize      = 128
@@ -25,9 +25,9 @@ var (
 	ErrAvatarType     = errors.New("unsupported_file_type")
 )
 
-// avatarPNG recorta al centro el cuadrado más grande y lo lleva a 128 px. Solo PNG, JPEG o WebP:
+// AvatarPNG recorta al centro el cuadrado más grande y lo lleva a 128 px. Solo PNG, JPEG o WebP:
 // un SVG es un documento que podría ejecutar algo.
-func avatarPNG(data []byte) ([]byte, error) {
+func AvatarPNG(data []byte) ([]byte, error) {
 	if len(data) > MaxAvatarBytes {
 		return nil, ErrAvatarTooLarge
 	}

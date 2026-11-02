@@ -1,0 +1,67 @@
+# Datos de prueba: lucia está en GG-Wiki-TI a través de TI-Redes (anidado), marta directo, tomas
+# está en el grupo pero inactivo (employeeType, con el disabled_filter del test) y dani no está en
+# ningún grupo. La contraseña de todos es PASSWORD (se reemplaza al sembrar).
+dn: dc=kudawiki,dc=test
+objectClass: dcObject
+objectClass: organization
+o: Kudawiki
+dc: kudawiki
+
+dn: ou=Personas,dc=kudawiki,dc=test
+objectClass: organizationalUnit
+ou: Personas
+
+dn: ou=Grupos,dc=kudawiki,dc=test
+objectClass: organizationalUnit
+ou: Grupos
+
+dn: cn=svc-kudawiki,dc=kudawiki,dc=test
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: svc-kudawiki
+userPassword: PASSWORD
+
+dn: uid=lucia,ou=Personas,dc=kudawiki,dc=test
+objectClass: inetOrgPerson
+uid: lucia
+cn: Lucía Rojas
+sn: Rojas
+mail: lucia@kudawiki.test
+userPassword: PASSWORD
+
+dn: uid=marta,ou=Personas,dc=kudawiki,dc=test
+objectClass: inetOrgPerson
+uid: marta
+cn: Marta Díaz
+sn: Díaz
+mail: marta@kudawiki.test
+userPassword: PASSWORD
+
+dn: uid=tomas,ou=Personas,dc=kudawiki,dc=test
+objectClass: inetOrgPerson
+uid: tomas
+cn: Tomás Vera
+sn: Vera
+mail: tomas@kudawiki.test
+employeeType: inactive
+userPassword: PASSWORD
+
+dn: uid=dani,ou=Personas,dc=kudawiki,dc=test
+objectClass: inetOrgPerson
+uid: dani
+cn: Dani Soto
+sn: Soto
+mail: dani@kudawiki.test
+userPassword: PASSWORD
+
+dn: cn=TI-Redes,ou=Grupos,dc=kudawiki,dc=test
+objectClass: groupOfNames
+cn: TI-Redes
+member: uid=lucia,ou=Personas,dc=kudawiki,dc=test
+
+dn: cn=GG-Wiki-TI,ou=Grupos,dc=kudawiki,dc=test
+objectClass: groupOfNames
+cn: GG-Wiki-TI
+member: cn=TI-Redes,ou=Grupos,dc=kudawiki,dc=test
+member: uid=marta,ou=Personas,dc=kudawiki,dc=test
+member: uid=tomas,ou=Personas,dc=kudawiki,dc=test

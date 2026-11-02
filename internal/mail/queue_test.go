@@ -173,3 +173,15 @@ func TestNotificationMail(t *testing.T) {
 		}
 	}
 }
+
+// El rol de un aviso de cambio de rol sale con su nombre en el idioma del correo (§12.1).
+func TestRoleName(t *testing.T) {
+	f := newFixture(t, Patch{})
+	for lang, want := range map[string]string{"es": "Admin de área", "en": "Area admin"} {
+		c := f.svc.compose(Message{Template: "role_changed", URL: "https://wiki.acme.cl/w/ti"}, lang,
+			map[string]string{"name": "Ana", "actor": "Ben", "area": "TI", "role": "admin", "site": "Wiki"})
+		if !strings.Contains(c.Subject, want) || !strings.Contains(c.Paragraphs[0], want) || c.Unsubscribe != "" {
+			t.Errorf("%s: %+v", lang, c)
+		}
+	}
+}

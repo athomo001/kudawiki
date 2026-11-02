@@ -265,8 +265,9 @@ func (a api) setMeta(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// access es "¿quién puede ver esto?" (§3.4): cada miembro con su rol y si lee la página, con
-// la misma regla que autoriza (repo.CanRead). ?simulate=N dice quién la leería con otro nivel.
+// access es "¿quién puede ver esto?" (§3.4): cada miembro con su rol, de dónde viene y si lee
+// la página, con la misma regla que autoriza (repo.CanRead). ?simulate=N dice quién la leería
+// con otro nivel.
 func (a api) access(w http.ResponseWriter, r *http.Request) {
 	p, ok := a.page(w, r)
 	if !ok {
@@ -281,6 +282,10 @@ func (a api) access(w http.ResponseWriter, r *http.Request) {
 	people := make([]map[string]any, len(members))
 	for i, m := range members {
 		entry := map[string]any{"name": m.FullName, "email": m.Email, "role": m.Role, "can_read": repo.CanRead(m.Role, p.MinRank)}
+		// El porqué: si el rol que vale es el del directorio, el grupo que lo da.
+		if m.LDAPRole != "" && m.LDAPRole == m.Role {
+			entry["group"] = m.Group
+		}
 		if simulate >= 1 && simulate <= 3 {
 			entry["can_read_simulated"] = repo.CanRead(m.Role, simulate)
 		}

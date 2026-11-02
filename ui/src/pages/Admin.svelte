@@ -3,6 +3,7 @@
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import Dialog from '../components/Dialog.svelte';
   import OffboardDialog from '../components/OffboardDialog.svelte';
+  import LinkDirectoryDialog from '../components/LinkDirectoryDialog.svelte';
 
   // offboarding_at: baja en curso, que se completa ese día; offboarded_at: baja completa (§8.4).
   type User = {
@@ -13,6 +14,7 @@
     is_active: boolean;
     invited: boolean;
     totp_enabled: boolean;
+    auth_source: 'local' | 'ldap'; // ldap: entra con la contraseña del directorio (§8.6)
     offboarding_at?: string;
     offboarded_at?: string;
   };
@@ -51,6 +53,10 @@
   let confirmingOffboard = $state(false);
   let promoting = $state<User | null>(null);
   let confirmingSuper = $state(false);
+  // Vincular una cuenta local con el directorio (§8.6.3); solo con el directorio activo.
+  let linking = $state<User | null>(null);
+  let confirmingLink = $state(false);
+  let ldapOn = $state(false);
 
   async function run(action?: () => Promise<void>) {
     busy = true;
@@ -165,6 +171,9 @@
   api<{ enabled: boolean }>('GET', '/admin/smtp')
     .then((s) => (mailOn = s.enabled))
     .catch(() => {});
+  api<{ enabled: boolean }>('GET', '/admin/ldap/status')
+    .then((s) => (ldapOn = s.enabled))
+    .catch(() => {});
 </script>
 
 <h1>{t('nav.admin')}</h1>
@@ -193,6 +202,7 @@
               {status(u)}
               {#if u.is_global_admin}· {t('admin.superadmin')}{/if}
               {#if u.totp_enabled}· {t('admin.totp_on')}{/if}
+              {#if u.auth_source === 'ldap'}· {t('admin.source_ldap')}{/if}
             </td>
             <td>
               {#if u.offboarded_at}
@@ -224,14 +234,28 @@
                 <button type="button" class="link" disabled={busy} onclick={() => resend(u)}>{t('admin.invite_resend')}</button>
               {:else}
                 <!-- Modo auditoría (§7): solo lectura, y cada pedido queda en la auditoría. -->
-                <a href={`/w/~${u.id.toLowerCase()}`} aria-label={t('personal.audit_label', { name: u.full_name })}>{t('personal.audit_link')}</a> ·
-                <button
-                  type="button"
-                  class="link"
-                  aria-label={t('admin.reset_label', { name: u.full_name })}
-                  disabled={busy}
-                  onclick={() => sendReset(u)}>{t('admin.reset')}</button
-                >
+                <a href={`/w/~${u.id.toLowerCase()}`} aria-label={t('personal.audit_label', { name: u.full_name })}>{t('personal.audit_link')}</a>
+                <!-- La contraseña de una cuenta del directorio se cambia en el directorio (§8.6.3). -->
+                {#if u.auth_source !== 'ldap'}
+                  ·
+                  <button
+                    type="button"
+                    class="link"
+                    aria-label={t('admin.reset_label', { name: u.full_name })}
+                    disabled={busy}
+                    onclick={() => sendReset(u)}>{t('admin.reset')}</button
+                  >
+                  {#if ldapOn}
+                    ·
+                    <button
+                      type="button"
+                      class="link"
+                      aria-label={t('admin.link_label', { name: u.full_name })}
+                      disabled={busy}
+                      onclick={() => ((linking = u), (notice = ''), (confirmingLink = true))}>{t('admin.link')}</button
+                    >
+                  {/if}
+                {/if}
                 {#if u.totp_enabled}
                   ·
                   <button
@@ -369,3 +393,4 @@
 </Dialog>
 
 <OffboardDialog user={offboarding} bind:open={confirmingOffboard} ondone={(m) => run(async () => void (notice = m))} />
+<LinkDirectoryDialog user={linking} bind:open={confirmingLink} ondone={(m) => run(async () => void (notice = m))} />
