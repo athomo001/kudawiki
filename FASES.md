@@ -16,7 +16,8 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ✅ |
 | [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ✅ (falta la etiqueta) |
 | [F8-B](#f8-b-faltantes) | Faltantes antes de v1.0 | Respaldos y borrar todo en el panel, modos de color, Mi perfil, borrar y descargar respaldos | ✅ |
-| [F9](#f9--después-de-v10) | Después de v1.0 | Comentarios, PDF, MCP… | ⚪ |
+| [F9](#f9-hardening) | Hardening | SOC 2, ISO 27701, ISO 27001 | ⚪ |
+| [F10](#f10--post-implementacion) | Después de v1.0 | Comentarios, PDF, MCP… | ⚪ |
 
 Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba la lista. Lo que no alcance pasa a la fase siguiente y se anota en el CHANGELOG.
 
@@ -190,13 +191,13 @@ Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones,
 
 ## F8 — Endurecimiento y v1.0 (M7)
 
-- [x] Brechas ISO 27001 (§21.2): TLS obligatorio, backups externos + verificación semanal, revisión de accesos, paquete de evidencia, guía de endurecimiento, SBOM. *(F8.1–F8.4, F8.11, F8.12 y F8.14; el aviso de versión en el panel pasó a F9)*
+- [x] Brechas ISO 27001 (§21.2): TLS obligatorio, backups externos + verificación semanal, revisión de accesos, paquete de evidencia, guía de endurecimiento, SBOM. *(F8.1–F8.4, F8.11, F8.12 y F8.14; el aviso de versión en el panel pasó a F9, hoy F10)*
 - [x] Auditoría: copia a syslog/journald (`audit.forward`) y exportación JSONL/CSV (§11). *(pasaron de F3.3; F8.2)*
 - [x] Editor visual (WYSIWYG → Markdown). *(F8.10: Milkdown, conmutador por persona, ida y vuelta probada)*
 - [x] Ciclo de vida de áreas y traslado entre áreas (el acuse de lectura pasó a F5). *(F8.5 y F8.6)*
 - [x] Exportar/importar área, importador Wiki.js 2.x, export de datos personales. *(F8.7, F8.8 y F8.9)*
 - [x] Pulido de UX, accesibilidad, documentación de operación. *(F8.11: arrastrar y ordenar en el árbol (B7); F8.13: E2E de los flujos; F8.15: E2E de accesibilidad en 18 pantallas y la casilla de tarea con nombre; F8.14: `docs/operacion/` y `deploy/kudawiki.service`)*
-- [x] **Auditoría interna y pentest hecho por Claude** (§21.2.2, decisión del dueño del 2026-11-02: reemplazan al pentest externo para v1.0). *(F8.15, 2026-11-03: `docs/seguridad/auditoria-v1.0.md`, 66 chequeos de caja negra; sin críticos ni altos; tres medios y tres bajos, corregidos salvo el residual M-1r, que pasa a F9)*
+- [x] **Auditoría interna y pentest hecho por Claude** (§21.2.2, decisión del dueño del 2026-11-02: reemplazan al pentest externo para v1.0). *(F8.15, 2026-11-03: `docs/seguridad/auditoria-v1.0.md`, 66 chequeos de caja negra; sin críticos ni altos; tres medios y tres bajos, corregidos salvo el residual M-1r, que pasó a F9, hoy F10)*
 
 **Criterio de salida:** auditoría interna y pentest sin hallazgos altos abiertos, pruebas E2E verdes, documentación de instalación y operación completa → se etiqueta **v1.0**.
 
@@ -221,7 +222,7 @@ Pedidos del dueño para antes de v1.0. Decisiones del 2026-11-03: el superadmin 
 **Cumplido el 2026-11-03.** `go test ./...`, `svelte-check`, E2E 32/32 (con accesibilidad en las pantallas nuevas de Mi perfil y Respaldos) y Chrome (Respaldos 18/18, Mi perfil 18/18, borrar respaldos 9/9, descargar 7/7).
 
 ## F9 hardening
-- [] proceso de hardening basandote en soc2 , iso27701, iso 27001
+- [X] proceso de hardening basandote en soc2 , iso27701, iso 27001 *(análisis de brechas del 2026-11-03 en [docs/seguridad/brechas-f9.md](docs/seguridad/brechas-f9.md): lo hecho, lo que falta y siete pasos propuestos con su criterio de salida, que esperan la aprobación del dueño)*
 
 
 ## F10  post implementacion

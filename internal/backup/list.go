@@ -5,6 +5,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,7 +22,9 @@ type Entry struct {
 // lista: puede ser un temporal a medio escribir o algo que dejó quien opera.
 func List(dir string) ([]Entry, error) {
 	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
+	// Una carpeta que es un archivo tampoco tiene respaldos: la pantalla tiene que seguir en pie
+	// para mostrar por qué falló el último (en Windows ya llega como ErrNotExist).
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return nil, nil
 	}
 	if err != nil {

@@ -40,12 +40,18 @@ func TestPathologicalMarkdown(t *testing.T) {
 			IndexDoc("t", "", md, "es")
 			done <- time.Since(start)
 		}()
-		// Holgado para una máquina de CI lenta: sin los topes, varios pasaban del minuto.
+		// Holgado para una máquina de CI lenta: sin los topes, varios pasaban del minuto. Con el
+		// detector de carreras (make test corre -race) todo va 5 a 20 veces más lento: 60 s sigue
+		// atrapando un caso cuadrático, que se iría a varios minutos.
+		budget := 10 * time.Second
+		if raceDetector {
+			budget = 60 * time.Second
+		}
 		select {
 		case d := <-done:
 			t.Logf("%-12s %v", name, d.Round(time.Millisecond))
-		case <-time.After(10 * time.Second):
-			t.Fatalf("%s: more than 10s", name)
+		case <-time.After(budget):
+			t.Fatalf("%s: more than %v", name, budget)
 		}
 	}
 }

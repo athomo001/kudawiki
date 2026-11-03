@@ -70,6 +70,8 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F7 · Documentos sellados | ✅ Hecha |
 | F8 · Endurecimiento y v1.0 | ✅ Hecha (falta etiquetar v1.0) |
 | F8-B · Faltantes antes de v1.0 | ✅ Hecha: respaldos y borrar todo en el panel, borrar y descargar respaldos, modos de color, Mi perfil |
+| F9 · Hardening (SOC 2, ISO 27701, ISO 27001) | ⚪ Análisis de brechas hecho ([docs/seguridad/brechas-f9.md](docs/seguridad/brechas-f9.md)); los pasos esperan aprobación |
+| F10 · Después de v1.0 | ⚪ Comentarios, PDF, gestión documental, MCP… |
 
 Detalle de cada fase en [FASES.md](FASES.md) · cambios en [CHANGELOG.md](CHANGELOG.md) · mapa del producto en [spec/MAPA.md](spec/MAPA.md) · especificación completa en [spec/SPEC.md](spec/SPEC.md).
 

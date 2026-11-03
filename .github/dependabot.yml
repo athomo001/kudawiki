@@ -19,6 +19,11 @@ updates:
     groups:
       ui:
         patterns: ['*']
+    # svelte-check todavía no corre con TypeScript 7 sin el modo --tsgo y TypeScript 6 al lado
+    # (2026-11-03): se queda en la 6 hasta que lo soporte; entonces se borra esta regla.
+    ignore:
+      - dependency-name: typescript
+        versions: ['>=7']
 
   # Las acciones van fijadas por SHA; Dependabot sube el SHA y el comentario con la versión.
   - package-ecosystem: github-actions

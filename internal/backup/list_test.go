@@ -41,3 +41,15 @@ func TestList(t *testing.T) {
 		t.Errorf("missing dir: %v %v", got, err)
 	}
 }
+
+// Una carpeta de respaldos que en realidad es un archivo (mal configurada o pisada) no tumba la
+// pantalla: no hay respaldos que listar, como si no existiera. En Linux esto es ENOTDIR.
+func TestListNotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "backups")
+	if err := os.WriteFile(file, []byte("no soy una carpeta"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := List(file); err != nil || len(list) != 0 {
+		t.Errorf("List(file) = %v, %v", list, err)
+	}
+}
