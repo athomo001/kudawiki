@@ -27,8 +27,8 @@ type bucket struct {
 	last   time.Time
 }
 
-// RateLimit aplica el límite por IP de la conexión (SPEC §14.5). Detrás de un proxy inverso
-// todas las peticiones traen la IP del proxy: la IP real llega con trust_proxy (F8, §21.2).
+// RateLimit aplica el límite por IP de la conexión (SPEC §14.5). Detrás de un proxy inverso,
+// con trust_proxy, Proxy ya puso en RemoteAddr la IP de quien pide (§21.2.1).
 func RateLimit(l Limit, now func() time.Time) func(http.Handler) http.Handler {
 	var mu sync.Mutex
 	buckets := map[string]*bucket{}

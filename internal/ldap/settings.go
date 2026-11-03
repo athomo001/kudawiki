@@ -53,6 +53,7 @@ func fieldErr(key string, err error) error {
 // secreto de solo escritura (§3.1), y reenviar la máscara es "sin cambios".
 const Mask = "••••••"
 
+// #nosec G101 -- es el nombre de la clave en site_settings, no una contraseña
 const passwordKey = "auth.ldap.bind_password"
 
 // Attrs son los atributos del directorio de donde salen el correo, el nombre, la identidad y la

@@ -58,6 +58,7 @@ type PageRef struct {
 	MinRank     int
 	Description string
 	Icon        string
+	Position    int // orden manual entre sus hermanas (§15, B7); 0 sin orden. Solo lo llena Tree
 }
 
 type Revision struct {
@@ -120,11 +121,36 @@ func (r *Repo) PageBySlug(ctx context.Context, s Scope, slug string) (Page, erro
 // carpeta (SPEC §17, fugas por metadatos).
 func (r *Repo) Tree(ctx context.Context, s Scope) ([]PageRef, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT slug, title, min_rank, description, icon FROM pages WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? ORDER BY slug`, s.WsID, s.MaxRank)
+		`SELECT slug, title, min_rank, description, icon, COALESCE(position, 0) FROM pages WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? ORDER BY slug`, s.WsID, s.MaxRank)
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, scanPageRef)
+	return collect(rows, func(row scanner) (PageRef, error) {
+		var p PageRef
+		return p, row.Scan(&p.Slug, &p.Title, &p.MinRank, &p.Description, &p.Icon, &p.Position)
+	})
+}
+
+// SetOrder numera las páginas en el orden dado (§15, B7). Quien llama ya comprobó que son
+// hermanas; acá cada una tiene que ser visible para el Scope, o nada cambia y es el 404 de
+// siempre. Las hermanas que quien ordena no ve conservan su posición.
+func (r *Repo) SetOrder(ctx context.Context, s Scope, slugs []string) error {
+	tx, err := r.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for i, slug := range slugs {
+		res, err := tx.ExecContext(ctx, `UPDATE pages SET position = ? WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL AND min_rank <= ?`,
+			i+1, s.WsID, slug, s.MaxRank)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return errors.Join(err, ErrNotFound)
+		}
+	}
+	return tx.Commit()
 }
 
 func scanPageRef(row scanner) (PageRef, error) {

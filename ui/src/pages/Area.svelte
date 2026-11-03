@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { api, canEdit, canWrite, codeOf, type Area, type PageRef, type Proposal, type SealedRef, type TagCount } from '../lib/api';
+  import { api, canEdit, canWrite, codeOf, type Area, type PageRef, type Proposal, type SealedRef, type TagCount, type EditorMode } from '../lib/api';
   import { t, errorText, type Key } from '../lib/i18n/index.svelte';
-  import Tree, { buildTree } from '../components/Tree.svelte';
+  import Tree, { buildTree, type TreeDrag } from '../components/Tree.svelte';
+  import Dialog from '../components/Dialog.svelte';
+  import { navigate } from '../lib/router.svelte';
   import Reader from './Reader.svelte';
   import AreaHome from './AreaHome.svelte';
   import History from './History.svelte';
@@ -19,6 +21,8 @@
   import Icon, { type IconName } from '../components/Icon.svelte';
   import Settings from './Settings.svelte';
   import Health from './Health.svelte';
+  import AccessReview from './AccessReview.svelte';
+  import ExportImport from './ExportImport.svelte';
   import Proposals from './Proposals.svelte';
   import Shared from './Shared.svelte';
   import Shares from './Shares.svelte';
@@ -28,7 +32,20 @@
   import SiteFooter from '../components/SiteFooter.svelte';
 
   // Layout de área (SPEC §15): árbol a la izquierda y la vista según la ruta.
-  let { area, sub, selfId, onareachanged }: { area: Area; sub: string; selfId: string; onareachanged: () => void } = $props();
+  let {
+    area,
+    sub,
+    selfId,
+    adminAreas,
+    onareachanged,
+    editorMode,
+    oneditormode,
+  }: {
+    area: Area;
+    sub: string;
+    selfId: string;
+    adminAreas: number; // de cuántas áreas es admin: con más de una, se ofrece exportarlas todas juntas
+    onareachanged: () => void; editorMode: EditorMode; oneditormode: (m: EditorMode) => void } = $props();
 
   let refs = $state<PageRef[]>([]);
   let tags = $state<TagCount[]>([]);
@@ -98,9 +115,16 @@
           { sub: 'settings/content', label: 'area_admin.content', icon: 'history' },
           { sub: 'shares', label: 'shares.title', icon: 'link' },
           templates,
+          { sub: 'export', label: 'import.title', icon: 'files' },
         ],
       },
-      { label: 'area_admin.group_people', items: [{ sub: 'members', label: 'admin.members_link', icon: 'people' }] },
+      {
+        label: 'area_admin.group_people',
+        items: [
+          { sub: 'members', label: 'admin.members_link', icon: 'people' },
+          { sub: 'access-review', label: 'access_review.title', icon: 'check' },
+        ],
+      },
       supervision,
     ];
   });
@@ -125,6 +149,59 @@
   async function loadTree() {
     try {
       [refs, tags] = await Promise.all([api<PageRef[]>('GET', `${base}/tree`), api<TagCount[]>('GET', `${base}/tags`)]);
+    } catch (e) {
+      error = errorText(codeOf(e));
+    }
+  }
+
+  // Arrastrar en el árbol (§15, B7): mover pide confirmación con lo que va a pasar; ordenar no,
+  // porque se deshace igual de fácil.
+  type PendingMove = { from: string; to: string; title: string; subpages: number; linkers: PageRef[] | null; partial: boolean };
+  let pendingMove = $state<PendingMove | null>(null);
+  let showMove = $state(false);
+  let moveError = $state('');
+  const treeDrag = $derived<TreeDrag | undefined>(canEdit(area) ? { onmove: askMove, onreorder: reorder } : undefined);
+  // Tope de páginas cuyos enlaces entrantes se consultan para la vista previa: un subárbol enorme
+  // no dispara cientos de pedidos (y el límite de velocidad, §14.5).
+  const previewMax = 50;
+
+  async function askMove(from: string, to: string) {
+    const moved = refs.filter((r) => r.slug === from || r.slug.startsWith(from + '/'));
+    pendingMove = { from, to, title: titles.get(from) ?? from, subpages: moved.length - 1, linkers: null, partial: moved.length > previewMax };
+    moveError = '';
+    showMove = true;
+    // Las páginas que enlazan a lo que se mueve y que quien mueve ve: sus enlaces se reescriben.
+    // Las que no ve también se reescriben, pero no se listan ni se cuentan (§17).
+    let linkers: PageRef[] = [];
+    try {
+      const lists = await Promise.all(moved.slice(0, previewMax).map((r) => api<PageRef[]>('GET', `${base}/backlinks/${r.slug}`)));
+      const skip = new Set(moved.map((r) => r.slug));
+      linkers = [...new Map(lists.flat().filter((l) => !skip.has(l.slug)).map((l) => [l.slug, l])).values()];
+    } catch {
+      // Sin vista previa igual se puede mover: el servidor reescribe los enlaces de todas formas.
+    }
+    if (pendingMove?.from === from && pendingMove.to === to) pendingMove.linkers = linkers;
+  }
+
+  async function confirmMove(e: SubmitEvent) {
+    e.preventDefault();
+    if (!pendingMove) return;
+    const { from, to } = pendingMove;
+    try {
+      await api('POST', `${base}/move/${from}`, { to });
+      showMove = false;
+      await loadTree();
+      // Si la página abierta se movió (o cuelga de la movida), seguirla a su ruta nueva.
+      if (kind === 'p' && (pageSlug === from || pageSlug.startsWith(from + '/'))) navigate(`${base}/p/${to}${pageSlug.slice(from.length)}`);
+    } catch (err) {
+      moveError = errorText(codeOf(err));
+    }
+  }
+
+  async function reorder(parent: string, slugs: string[]) {
+    try {
+      await api('PUT', `${base}/order`, { parent, slugs });
+      await loadTree();
     } catch (e) {
       error = errorText(codeOf(e));
     }
@@ -180,7 +257,16 @@
 
 {#if editing}
   {#await loadEditor() then { default: Editor }}
-    {#key sub}<Editor {area} slug={kind === 'edit' ? pageSlug : undefined} proposal={proposalView?.[1]} {selfId} {refs} onsaved={changed} />{/key}
+    {#key sub}<Editor
+        {area}
+        slug={kind === 'edit' ? pageSlug : undefined}
+        proposal={proposalView?.[1]}
+        {selfId}
+        {refs}
+        onsaved={changed}
+        {editorMode}
+        {oneditormode}
+      />{/key}
   {/await}
 {:else}
 <div class="area">
@@ -221,7 +307,31 @@
       </a>
     {/if}
     <hr />
-    <Tree nodes={buildTree(refs)} {base} current={pageSlug} />
+    <Tree nodes={buildTree(refs)} {base} current={pageSlug} drag={treeDrag} />
+    {#if treeDrag}
+      <Dialog title={t('page.move')} bind:open={showMove}>
+        {#if pendingMove}
+          <form class="stack" onsubmit={confirmMove}>
+            <p>{t('tree.move_confirm', { title: pendingMove.title, to: pendingMove.to })}</p>
+            {#if pendingMove.subpages}<p class="muted">{t('tree.move_subpages', { n: String(pendingMove.subpages) })}</p>{/if}
+            {#if pendingMove.linkers === null}
+              <p class="muted" role="status">{t('tree.move_loading')}</p>
+            {:else if pendingMove.linkers.length}
+              <p>{t('tree.move_linkers', { n: String(pendingMove.linkers.length) })}</p>
+              <ul class="move-linkers">
+                {#each pendingMove.linkers as l (l.slug)}<li>{l.title} <span class="muted">· {l.slug}</span></li>{/each}
+              </ul>
+              {#if pendingMove.partial}<small class="muted">{t('tree.move_partial', { n: String(previewMax) })}</small>{/if}
+            {:else}
+              <p class="muted">{t('tree.move_no_linkers')}</p>
+            {/if}
+            <small class="muted">{t('page.move_hint')}</small>
+            {#if moveError}<p class="error" role="alert">{moveError}</p>{/if}
+            <button type="submit" class="primary">{t('page.move_submit')}</button>
+          </form>
+        {/if}
+      </Dialog>
+    {/if}
     {#if sealed.length}
       <ul class="sealed-list" aria-label={t('sealed.list')}>
         {#each sealed as s (s.id)}
@@ -267,6 +377,7 @@
       </nav>
     {/if}
     {#if area.audit}<p class="audit-banner" role="note">{t('personal.audit_banner')}</p>{/if}
+    {#if area.archived}<p class="audit-banner" role="note">{t('area.archived_banner')}</p>{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
       <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
@@ -312,6 +423,10 @@
           <Health endpoint={`${base}/health`} context={adminContext} />
         {:else if settingsSection && area.role === 'admin' && !area.personal}
           <Settings {area} section={settingsSection} onchanged={onareachanged} />
+        {:else if sub === 'export' && area.role === 'admin' && !area.personal}
+          <ExportImport {area} {adminAreas} context={adminContext} />
+        {:else if sub === 'access-review' && area.role === 'admin' && !area.personal}
+          <AccessReview endpoint={`${base}/access-review`} context={adminContext} fixHref={`${base}/members`} />
         {:else if sub === 'members' && area.role === 'admin' && !area.personal}
           <Members endpoint={`${base}/members`} context={adminContext} canGrantAdmin={false} {selfId} />
         {:else}

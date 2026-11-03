@@ -33,12 +33,24 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Get("/workspaces", a.listWorkspaces)
 	r.Post("/workspaces", a.createWorkspace)
 	r.With(a.adminScope).Patch("/workspaces/{id}", a.renameWorkspace)
+	// Ciclo de vida (§3.5): borrar pide reautenticarse; cancelar el borrado, no.
+	r.Put("/workspaces/{id}/status", a.setWorkspaceStatus)
+	r.Put("/workspaces/{id}/slug", a.setWorkspaceSlug)
+	r.With(a.requireReauth).Post("/workspaces/{id}/delete", a.deleteWorkspace)
+	r.Delete("/workspaces/{id}/delete", a.cancelWorkspaceDelete)
+	// Traslado entre áreas (§4.13): la vista previa no cambia nada; el traslado pide reautenticarse.
+	r.Post("/transfer/preview", a.previewTransfer)
+	r.With(a.requireReauth).Post("/transfer", a.transferPages)
 	r.Get("/audit", a.audit)
+	r.With(noStore).Get("/audit/export", a.exportAudit)
 	r.Get("/health", a.globalHealth)
+	r.Get("/access-review", a.globalAccessReview)
+	r.Post("/access-review", a.confirmGlobalAccessReview)
 	r.With(noStore).Get("/sealed", a.allSealed)
 	a.siteAdminRoutes(r)
 	a.smtpAdminRoutes(r)
 	a.ldapAdminRoutes(r)
+	a.backupAdminRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(a.globalTemplates)
 		r.Get("/templates", a.listTemplates)
@@ -161,7 +173,10 @@ func (a api) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			st.Admins = []string{}
 		}
 		out[i] = map[string]any{"id": x.ID, "slug": x.Slug, "name": x.Name, "description": x.Description,
-			"members": st.Members, "pages": st.Pages, "admins": st.Admins}
+			"members": st.Members, "pages": st.Pages, "admins": st.Admins, "status": x.Status}
+		if x.DeleteAt != nil {
+			out[i]["delete_at"] = x.DeleteAt.UTC()
+		}
 		if !st.LastEdit.IsZero() {
 			out[i]["last_edit"] = st.LastEdit
 		}
@@ -255,8 +270,25 @@ func (a api) health(w http.ResponseWriter, r *http.Request, areas []repo.Workspa
 		a.fail(w, r, err)
 		return
 	}
+	out := map[string]any{"hash_checked": false}
+	// Los respaldos son de la instalación: solo en la vista del superadmin (§21.2.4).
+	if global {
+		backups, ps, err := health.BackupChecks(r.Context(), a.Read, time.Now())
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		problems = append(ps, problems...)
+		out["backups"] = backups
+		clock, ok := a.Clock.State(r.Context())
+		problems = append(health.ClockChecks(clock, ok), problems...)
+		if ok {
+			out["clock"] = clock
+		}
+	}
 	if problems == nil {
 		problems = []health.Problem{}
 	}
-	a.json(w, http.StatusOK, map[string]any{"problems": problems, "hash_checked": false})
+	out["problems"] = problems
+	a.json(w, http.StatusOK, out)
 }

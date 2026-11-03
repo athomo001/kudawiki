@@ -51,6 +51,11 @@ func (a api) areaRoutes(r chi.Router) {
 		r.Get("/settings", a.areaSettings)
 		r.Patch("/settings", a.updateAreaSettings)
 		r.Route("/members", a.memberRoutes)
+		r.Get("/access-review", a.areaAccessReview)
+		r.Post("/access-review", a.confirmAreaAccessReview)
+		// Exportar e importar el área como Markdown (§13.8).
+		r.Get("/export", a.exportArea)
+		r.Post("/import", a.importArea)
 	})
 }
 
@@ -69,6 +74,13 @@ func (a api) workspaceBoundary(next http.Handler) http.Handler {
 		}
 		if m.Kind == "personal" {
 			r = r.WithContext(context.WithValue(r.Context(), personalKey{}, personalSpace{}))
+		}
+		// Archivada: solo lectura para todos, también su admin (§3.5). Va aquí, en la frontera,
+		// para que ninguna ruta de escritura nueva se olvide de mirarlo; la vista previa del
+		// editor es POST pero no escribe, y sin editor abierto no se pide.
+		if m.Status == "archived" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			a.error(w, r, http.StatusConflict, "area_archived", nil)
+			return
 		}
 		next.ServeHTTP(w, withScope(r, repo.Scope{WsID: m.ID, MaxRank: repo.RoleRank(m.Role)}))
 	})

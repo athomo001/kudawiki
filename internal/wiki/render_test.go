@@ -71,7 +71,8 @@ func TestRenderStripsXSS(t *testing.T) {
 
 func TestRenderFeatures(t *testing.T) {
 	out, toc := render(t, "# Titulo\n\n## VPN\n\n- [x] hecho\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```go\nfunc main() {}\n```\n", Options{})
-	for _, want := range []string{`<h2 id="vpn">VPN</h2>`, `type="checkbox"`, "<table>", `class="chroma"`} {
+	// La tarea va dentro de un <label> con su texto: así la casilla tiene nombre (F8.15).
+	for _, want := range []string{`<h2 id="vpn">VPN</h2>`, `<li><label><input checked="" disabled="" type="checkbox"> hecho</label></li>`, "<table>", `class="chroma"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %s", want, out)
 		}

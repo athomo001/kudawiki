@@ -165,19 +165,21 @@ func HeaderIsDark(header string) bool { return textOn(header) == onDark }
 // valores fijos, y las claves son constantes: nada que venga de una persona llega como texto.
 func (p Palette) CSS() string {
 	var b strings.Builder
-	block := func(vars map[string]string) {
-		b.WriteString(":root{")
+	block := func(selector string, vars map[string]string) {
+		b.WriteString(selector + "{")
 		for _, k := range slices.Sorted(maps.Keys(vars)) {
 			fmt.Fprintf(&b, "%s:%s;", k, vars[k])
 		}
 		b.WriteString("}")
 	}
 	if len(p.Light) > 0 {
-		block(p.Light)
+		block(":root", p.Light)
 	}
+	// El oscuro sigue al modo de color que eligió la persona, no al sistema, y solo en pantalla:
+	// al imprimir sale en claro (§15, B4). El modo rosa usa su propia paleta (app.css).
 	if len(p.Dark) > 0 {
-		b.WriteString("@media (prefers-color-scheme: dark){")
-		block(p.Dark)
+		b.WriteString("@media screen{")
+		block(":root[data-scheme='dark']", p.Dark)
 		b.WriteString("}")
 	}
 	return b.String()

@@ -45,6 +45,12 @@
     server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
     palette: 'M12 3a9 9 0 0 0 0 18c1.7 0 2-1.3 1.3-2.4-.7-1.1 0-2.6 1.4-2.6H17a4 4 0 0 0 4-4c0-5-4-9-9-9M7.5 11h.01M10 7h.01M15 7h.01',
     mail: 'M3 5h18v14H3zM3.5 6l8.5 7 8.5-7',
+    archive: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
+    key: 'M8 11a4 4 0 1 1 0 8a4 4 0 0 1 0-8M11 12l9-9M17 6l3 3M15 8l2 2',
+    // Modo de color (§15, B4): el ícono muestra el modo actual.
+    sun: 'M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+    moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5',
+    flower: 'M12 3.5a3 3 0 1 1 0 6a3 3 0 0 1 0-6M17.5 9a3 3 0 1 1 0 6a3 3 0 0 1 0-6M12 14.5a3 3 0 1 1 0 6a3 3 0 0 1 0-6M6.5 9a3 3 0 1 1 0 6a3 3 0 0 1 0-6',
   };
   export type IconName = keyof typeof paths | 'more';
 

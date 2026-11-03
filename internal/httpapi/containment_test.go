@@ -236,6 +236,8 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/meta/*", "PATCH", "/api/w/ti/meta/" + p, `{"tags":["<x>"]}`, 2, false, 422},
 		{"/api/w/{ws}/meta/*", "PATCH", "/api/w/ti/meta/" + p, `{"level":9}`, 2, false, 422},
 		{"/api/w/{ws}/move/*", "POST", "/api/w/ti/move/" + p, `{"to":"Mal Slug"}`, 2, false, 422},
+		// El orden es de hermanas: una de otra carpeta se rechaza (la visibilidad, en TestTreeOrder).
+		{"/api/w/{ws}/order", "PUT", "/api/w/ti/order", `{"parent":"otra","slugs":["` + p + `"]}`, 2, false, 422},
 		{"/api/w/{ws}/tree", "GET", "/api/w/ti/tree", "", 1, false, 200},
 		{"/api/w/{ws}/tags", "GET", "/api/w/ti/tags", "", 1, false, 200},
 		{"/api/w/{ws}/tags/{tag}", "GET", "/api/w/ti/tags/comun", "", 1, false, 200},
@@ -250,9 +252,12 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/media/{id}", "DELETE", m, "", 2, true, 409},
 		{"/api/w/{ws}/search-misses", "GET", "/api/w/ti/search-misses", "", 3, false, 200},
 		{"/api/w/{ws}/audit", "GET", "/api/w/ti/audit", "", 3, false, 200},
+		{"/api/w/{ws}/audit/export", "GET", "/api/w/ti/audit/export?format=jsonl", "", 3, false, 200},
 		{"/api/w/{ws}/members/", "GET", "/api/w/ti/members", "", 3, false, 200},
 		{"/api/w/{ws}/settings", "GET", "/api/w/ti/settings", "", 3, false, 200},
 		{"/api/w/{ws}/health", "GET", "/api/w/ti/health", "", 3, false, 200},
+		{"/api/w/{ws}/access-review", "GET", "/api/w/ti/access-review", "", 3, false, 200},
+		{"/api/w/{ws}/export", "GET", "/api/w/ti/export", "", 3, false, 200},
 		// Con un nombre vacío valida y no cambia nada: la matriz no altera el área.
 		{"/api/w/{ws}/settings", "PATCH", "/api/w/ti/settings", `{"name":""}`, 3, false, 422},
 		{"/api/w/{ws}/members/", "POST", "/api/w/ti/members", `{"email":"x","role":"admin"}`, 3, false, 422},
@@ -467,8 +472,26 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		"GET /api/me/sessions", "DELETE /api/me/sessions/{id}", "POST /api/me/sessions/revoke-others",
 		"GET /api/me/passkeys", "POST /api/me/passkeys/begin", "POST /api/me/passkeys/finish", "DELETE /api/me/passkeys/{id}",
 		"POST /api/auth/passkey/begin", "POST /api/auth/passkey/finish", "POST /api/auth/reauth/passkey/begin", "POST /api/auth/reauth/passkey/finish",
-		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit",
+		"DELETE /api/w/{ws}/pages/*", "GET /api/admin/audit", "GET /api/admin/audit/export",
+		// Confirmar la revisión de accesos escribe: su contención está en TestAccessReview.
+		"POST /api/w/{ws}/access-review", "GET /api/admin/access-review", "POST /api/admin/access-review",
+		// Importar crea páginas en el área del admin: TestAreaExportImport. Exportar todas las áreas
+		// de quien pide cruza sus áreas: TestExportMyAreas.
+		"POST /api/w/{ws}/import", "GET /api/me/areas/export",
+		// Ciclo de vida de un área, del superadmin: TestAreaLifecycle.
+		"PUT /api/admin/workspaces/{id}/status", "PUT /api/admin/workspaces/{id}/slug",
+		"POST /api/admin/workspaces/{id}/delete", "DELETE /api/admin/workspaces/{id}/delete",
+		// Respaldos y Borrar todo, del superadmin (F8-B): TestBackupsAdmin y TestReset. Borrar un
+		// respaldo (F8-B.6): TestBackupsAdmin (404 a todos menos al superadmin) y TestBackupDelete.
+		"GET /api/admin/backups", "POST /api/admin/backups", "PUT /api/admin/backups/settings", "POST /api/admin/reset",
+		"DELETE /api/admin/backups/{name}",
+		// Bajar un respaldo (F8-B.7): TestBackupsAdmin (404 a todos menos al superadmin) y TestBackupDownload.
+		"GET /api/admin/backups/{name}", "GET /api/admin/backups/{name}/download",
+		// Traslado entre áreas, del superadmin: TestTransfer.
+		"POST /api/admin/transfer/preview", "POST /api/admin/transfer",
 		"GET /healthz", "GET /readyz", "GET /*",
+		// Por red, sin sesión ni contenido: TestMetricsAndReadyz.
+		"GET /metrics",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
 		"POST /api/me/password", "GET /api/me/avatar", "PUT /api/me/avatar", "DELETE /api/me/avatar",
 		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces", "PATCH /api/admin/workspaces/{id}",

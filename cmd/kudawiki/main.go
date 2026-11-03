@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -25,9 +26,12 @@ import (
 	"time"
 
 	"github.com/athomo001/kudawiki"
+	"github.com/athomo001/kudawiki/internal/accessreview"
+	"github.com/athomo001/kudawiki/internal/areaio"
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/backup"
+	"github.com/athomo001/kudawiki/internal/backups"
 	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/config"
 	"github.com/athomo001/kudawiki/internal/crypto"
@@ -39,6 +43,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/masterkey"
 	"github.com/athomo001/kudawiki/internal/media"
+	"github.com/athomo001/kudawiki/internal/metrics"
 	"github.com/athomo001/kudawiki/internal/notify"
 	"github.com/athomo001/kudawiki/internal/offboarding"
 	"github.com/athomo001/kudawiki/internal/personal"
@@ -49,6 +54,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
+	"github.com/athomo001/kudawiki/internal/transfer"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
 	"golang.org/x/term"
@@ -59,13 +65,21 @@ const usage = `usage: kudawiki <command> [flags]
 commands:
   init         create the database, the master key and the first superadmin
                (KUDAWIKI_INIT_EMAIL, KUDAWIKI_INIT_NAME; password is prompted)
-  serve        run the web server
+  serve        run the web server; outside localhost base_url must be https:// unless
+               --insecure-http is given (it warns at every start)
   healthcheck  exit 0 if the local server answers /healthz (Docker HEALTHCHECK)
   search       "search rebuild": regenerate the search index of every page
   audit        "audit verify": check the hash chain of the audit log (exit 1 if broken)
+               "audit export --from YYYY-MM-DD --to YYYY-MM-DD [--out file.zip]": evidence package
+               for an auditor: the events, the chain check, and a manifest signed with a key
+               derived from the master key (exit 1 if the chain is broken)
   migrate      "migrate --dry-run": list the pending migrations without applying them
                (serve applies them, after a backup)
   backup       make a backup now into <data_dir>/backups (the master key is not included)
+               "backup verify <file>": test-restore a backup (also .enc) in a temporary folder:
+               manifest, SQLite integrity_check and the audit chain; recorded for the panel
+               "backup keygen": create the backup key (backup.key_file) that encrypts the
+               offsite copy, if the installation is older than it
   restore      "restore <file>": verify a backup and put it in place; the server must be stopped
   masterkey    "masterkey rotate": replace the master key and re-encrypt what it protects, with the
                server stopped and a backup first; if it is cut, run it again. The old key stays
@@ -75,9 +89,21 @@ commands:
                write the key file if it is missing
   ldap         "ldap sync [--dry-run]": sync accounts and area memberships with the directory now
                (--dry-run lists what it would do). Exit 1 if a safeguard aborted it
+  import       "import wikijs2 --map <mapping.yaml> --as <email> (--dir <folder> | --db <dsn>)":
+               bring a Wiki.js 2.x site into the areas of the mapping, from its disk/Git storage
+               folder or its PostgreSQL/MySQL database (with history and assets). --dry-run first
+               is required: the real run must match the last report
+               "import markdown --area <slug> --as <email> <folder | file.zip>": a Markdown folder
+               --as is an active superadmin; pages that already exist are never overwritten
+  privacy      "privacy export <email> [--out file.zip]": what the wiki holds about a person
+               (profile, memberships, sessions, notifications, quiz results, their audit events
+               and their personal space); never sealed documents or secrets. Recorded in the audit
   doctor       check the content health (broken links, tree, media, search index);
                --ws <slug> for one area, --fix to rebuild the index and remove stray files
                (with the server stopped). Exit 1 if there are errors
+               "doctor --security": check the installation instead: file permissions, where the
+               master key lives, TLS, admins without 2FA, a local superadmin for emergencies and
+               recent tested backups. Exit 1 if there are errors
   admin        console recovery, for when no superadmin can get in (recorded in the audit log):
                  admin unlock <email>                     lift the lockout after failed logins
                  admin set-password <email>               password is prompted; closes their sessions
@@ -94,10 +120,15 @@ func main() {
 
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	configPath := fs.String("config", "", "path to kudawiki.yaml (default "+config.DefaultPath+" if present)")
-	dryRun := fs.Bool("dry-run", false, "migrate, ldap sync: only list what would be applied")
+	dryRun := fs.Bool("dry-run", false, "migrate, ldap sync, import: only list what would be applied")
 	wsSlug := fs.String("ws", "", "doctor: only this area")
 	fix := fs.Bool("fix", false, "doctor: apply the automatic fixes")
-	_ = fs.Parse(os.Args[2:])
+	security := fs.Bool("security", false, "doctor: check the installation hardening instead of the content")
+	insecureHTTP := fs.Bool("insecure-http", false, "serve: allow a plain http:// base_url outside localhost")
+	from := fs.String("from", "", "audit export: first day (YYYY-MM-DD)")
+	to := fs.String("to", "", "audit export: last day (YYYY-MM-DD)")
+	out := fs.String("out", "", "audit export, privacy export: file to write")
+	positional := parseInterleaved(fs, os.Args[2:])
 
 	cfg, err := config.Load(*configPath)
 	if err == nil {
@@ -105,27 +136,35 @@ func main() {
 		case "init":
 			err = runInit(ctx, cfg, os.Getenv("KUDAWIKI_INIT_EMAIL"), os.Getenv("KUDAWIKI_INIT_NAME"))
 		case "serve":
-			err = runServe(ctx, cfg)
+			err = runServe(ctx, cfg, *insecureHTTP)
 		case "healthcheck":
 			err = runHealthcheck(cfg)
 		case "search":
 			err = runSearchRebuild(ctx, cfg)
 		case "audit":
-			err = runAuditVerify(ctx, cfg)
+			err = runAudit(ctx, cfg, positional, *from, *to, *out)
 		case "migrate":
 			err = runMigrateDryRun(ctx, cfg, *dryRun)
 		case "backup":
-			err = runBackup(ctx, cfg)
+			err = runBackupCommand(ctx, cfg, positional)
 		case "restore":
-			err = runRestore(cfg, fs.Arg(0))
+			err = runRestore(cfg, arg(positional, 0))
 		case "masterkey":
-			err = runMasterKey(ctx, cfg, fs.Args())
+			err = runMasterKey(ctx, cfg, positional)
 		case "doctor":
-			err = runDoctor(ctx, cfg, *wsSlug, *fix)
+			if *security {
+				err = runDoctorSecurity(ctx, cfg)
+			} else {
+				err = runDoctor(ctx, cfg, *wsSlug, *fix)
+			}
 		case "admin":
-			err = runAdmin(ctx, cfg, fs.Args())
+			err = runAdmin(ctx, cfg, positional)
 		case "ldap":
-			err = runLDAPSync(ctx, cfg, fs.Args(), *dryRun)
+			err = runLDAPSync(ctx, cfg, positional, *dryRun)
+		case "import":
+			err = runImport(ctx, cfg, positional, *dryRun)
+		case "privacy":
+			err = runPrivacy(ctx, cfg, positional, *out)
 		default:
 			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
@@ -135,6 +174,36 @@ func main() {
 		fmt.Fprintln(os.Stderr, "kudawiki:", err)
 		os.Exit(1)
 	}
+}
+
+// parseInterleaved lee los flags estén antes o después de los subcomandos: el paquete flag
+// para en el primer argumento que no es flag, y `kudawiki ldap sync --dry-run` lo dejaría sin leer.
+// Los flags que este FlagSet no conoce quedan como argumentos: son de un subcomando, que los lee
+// con el suyo (`masterkey split --shares`, `admin revoke-sessions --all`).
+func parseInterleaved(fs *flag.FlagSet, args []string) []string {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		name, _, hasValue := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		f := fs.Lookup(name)
+		if !strings.HasPrefix(args[i], "-") || f == nil {
+			positional = append(positional, args[i])
+			continue
+		}
+		flags = append(flags, args[i])
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); !hasValue && !(ok && b.IsBoolFlag()) && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	_ = fs.Parse(flags) // ExitOnError: un valor inválido ya terminó el proceso
+	return positional
+}
+
+func arg(args []string, i int) string {
+	if i < len(args) {
+		return args[i]
+	}
+	return ""
 }
 
 // runInit toma el correo y el nombre del entorno (deploy/.env); la contraseña nunca:
@@ -156,10 +225,15 @@ func runInit(ctx context.Context, cfg config.Config, email, name string) error {
 		os.Remove(cfg.MasterKeyFile)
 		return consoleError(err, cfg)
 	}
+	// La llave de respaldo (§13.3): aparte de la MASTER_KEY, para la copia que sale del servidor.
+	if err := backup.GenerateKey(cfg.Backup.KeyFile); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
 	if cfg.IsLocal() {
 		fmt.Println("warning: base_url is localhost, so the password policy was relaxed (development only)")
 	}
 	fmt.Println("kudawiki initialized; back up the master key separately from the data:", cfg.MasterKeyFile)
+	fmt.Println("and the backup key, without which the offsite copies cannot be read:", cfg.Backup.KeyFile)
 	return nil
 }
 
@@ -203,12 +277,30 @@ func readPassword() (string, error) {
 	return string(p1), nil
 }
 
-func runServe(ctx context.Context, cfg config.Config) error {
+func runServe(ctx context.Context, cfg config.Config, insecureHTTP bool) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	// /metrics solo para las redes configuradas (§13.5); sin ninguna, no responde a nadie.
+	var collector *metrics.Collector
+	if len(cfg.Metrics.AllowCIDRs) > 0 {
+		var err error
+		if collector, err = metrics.New(cfg.Metrics.AllowCIDRs); err != nil {
+			return err
+		}
+	}
+
+	// TLS obligatorio fuera de localhost (§21.2.1): antes de tocar nada.
+	warning, err := cfg.CheckTransport(insecureHTTP)
+	if err != nil {
+		return err
+	}
+	if warning != "" {
+		logger.Warn(warning, "base_url", cfg.BaseURL)
+	}
 
 	// Sin llave no se arranca: sin ella la contraseña SMTP guardada y los sellados serían
 	// ilegibles (SPEC §6.3). Se mira antes de migrar; su versión, después (masterkey.Load).
-	if _, err := crypto.LoadMasterKey(cfg.MasterKeyFile); err != nil {
+	if _, err = crypto.LoadMasterKey(cfg.MasterKeyFile); err != nil {
 		return fmt.Errorf("%w (run `kudawiki init` first)", err)
 	}
 	db, err := database.Open(cfg.DBPath())
@@ -284,12 +376,27 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: cfg.BaseURL, PasswordReset: cfg.Auth.Local.PasswordReset,
 		ResetTTL: cfg.ResetTTL(), InviteTTL: cfg.InviteTTL(), Log: logger})
 
+	// Respaldos (§13.3, F8-B): el job diario lee su configuración del panel en cada vuelta; lo que
+	// fija el archivo gana. Un destino externo del archivo se valida al arrancar, como antes: la
+	// llave de respaldo es obligatoria para subir.
+	fixed, err := backupFixed(cfg)
+	if err != nil {
+		return err
+	}
+	backupsSvc := backups.NewService(store, rec, masterKey, backups.Options{Fixed: fixed, DB: db.Read, StorageDir: cfg.StorageDir(),
+		Dir: cfg.BackupDir(), KeyFile: cfg.Backup.KeyFile, Notify: backupNotice(store, mailer, cfg.BaseURL, logger), Now: time.Now, Log: logger})
+	// La copia de la auditoría fuera de la wiki (§11.2).
+	sink, err := auditSink(cfg)
+	if err != nil {
+		return err
+	}
 	// Los jobs terminan antes de cerrar la BD: este defer corre antes que el de db.Close.
 	jobCtx, stopJobs := context.WithCancel(ctx)
 	var jobsDone sync.WaitGroup
 	jobsDone.Go(func() {
 		jobs.Purge{Store: store, Files: files, Audit: rec, Retention: cfg.TrashRetention(), AuditRetention: cfg.AuditRetention(),
-			Now: time.Now, Log: logger}.Daily(jobCtx)
+			QuizRetention: cfg.QuizRetention(),
+			Now:           time.Now, Log: logger}.Daily(jobCtx)
 	})
 	jobsDone.Go(func() { mailer.Run(jobCtx, logger) })
 	pages := wiki.NewService(store, rec)
@@ -299,31 +406,51 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	// Completa las bajas que vencieron y seudonimiza la auditoría (§8.4, §13.10).
 	jobsDone.Go(func() { leaving.Daily(jobCtx) })
 	jobsDone.Go(func() { directory.Run(jobCtx) })
-	hour, minute := cfg.BackupAt()
-	jobsDone.Go(func() {
-		jobs.Backup{DB: db.Read, StorageDir: cfg.StorageDir(), Dir: cfg.BackupDir(), Hour: hour, Minute: minute, Audit: rec, Now: time.Now, Log: logger,
-			Keep: backup.Retention{Daily: cfg.Backup.KeepDaily, Weekly: cfg.Backup.KeepWeekly, Monthly: cfg.Backup.KeepMonthly}}.Daily(jobCtx)
-	})
+	jobsDone.Go(func() { backupsSvc.Daily(jobCtx) })
+	access := accessreview.NewService(store, rec, mailer, cfg.AccessReviewEvery(), cfg.BaseURL, time.Now)
+	jobsDone.Go(func() { access.Run(jobCtx, logger) })
+	lifecycle := workspace.NewLifecycle(store, rec, mailer, cfg.StorageDir(), cfg.DeleteGrace(), time.Now, logger)
+	jobsDone.Go(func() { lifecycle.Run(jobCtx) })
+	if sink != nil {
+		jobsDone.Go(func() {
+			audit.Forwarder{Store: store, Sink: sink, Interval: 2 * time.Second, Log: logger}.Run(jobCtx)
+		})
+	}
 	defer func() { stopJobs(); jobsDone.Wait() }()
 
 	editing := presence.NewHub()
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
-			Shares:   shares.NewService(store, rec, logger),
-			Sealed:   sealed.NewService(store, files, rec, masterKey, logger, time.Now),
-			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
-			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
+			Shares: shares.NewService(store, rec, logger), AccessReview: access, Lifecycle: lifecycle,
+			Transfer: transfer.NewService(store, files, rec, logger),
+			Metrics:  collector,
+			// 64 MiB alcanzan para miles de páginas; lo que no entra se vuelve a renderizar.
+			RenderCache: wiki.NewRenderCache(64 << 20),
+			Clock:       &health.Clock{Server: cfg.Time.NTPServer, Now: time.Now},
+			AreaIO:      areaio.NewService(store, pages, files, rec, time.Now),
+			Backups:     backupsSvc,
+			Sealed:      sealed.NewService(store, files, rec, masterKey, logger, time.Now),
+			Personal:    personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
+			RemindAfter: cfg.RemindAfter(), TrustProxy: cfg.TrustProxy, Audit: rec, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// TLS 1.2 como mínimo; Go prefiere 1.3 cuando el navegador lo ofrece (§21.2.1).
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	// Shutdown espera a que terminen las peticiones; los avisos de edición abiertos no terminan
 	// solos (§4.11).
 	srv.RegisterOnShutdown(editing.Close)
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	go func() {
+		if cfg.TLS.CertFile != "" {
+			errc <- srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
+			return
+		}
+		errc <- srv.ListenAndServe()
+	}()
 	logger.Info("listening", "addr", cfg.Listen, "base_url", cfg.BaseURL)
 
 	select {
@@ -334,6 +461,69 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+// backupFixed es la configuración de respaldos que trae el archivo (§13.3): lo que fija gana
+// sobre el panel. Un destino externo completo en el archivo se valida al arrancar y exige la llave
+// de respaldo, como antes de F8-B.
+func backupFixed(cfg config.Config) (backups.Fixed, error) {
+	b := cfg.Backup
+	f := backups.Fixed{Set: b.Set}
+	f.Time, f.KeepDaily, f.KeepWeekly, f.KeepMonthly = b.Time, b.KeepDaily, b.KeepWeekly, b.KeepMonthly
+	f.Remote = backups.Remote{Endpoint: b.Remote.Endpoint, Region: b.Remote.Region, Bucket: b.Remote.Bucket, Prefix: b.Remote.Prefix,
+		AccessKeyID: b.Remote.AccessKeyID, PathStyle: b.Remote.PathStyle}
+	if b.Remote.SecretAccessKeyFile != "" {
+		secret, err := cfg.BackupSecret()
+		if err != nil {
+			return f, err
+		}
+		f.SecretFile = secret
+	}
+	if b.Remote.Endpoint != "" {
+		if _, err := backup.LoadKey(b.KeyFile); err != nil {
+			return f, err
+		}
+		if _, err := backup.NewS3(b.Remote.Endpoint, b.Remote.Region, b.Remote.Bucket, b.Remote.Prefix, b.Remote.AccessKeyID,
+			f.SecretFile, b.Remote.PathStyle); err != nil {
+			return f, err
+		}
+	}
+	return f, nil
+}
+
+// backupNotice avisa por correo a los superadmins que un paso del respaldo falló (§21.2.4).
+func backupNotice(store *repo.Repo, mailer *mail.Service, baseURL string, logger *slog.Logger) func(ctx context.Context, step, detail string) {
+	return func(ctx context.Context, step, detail string) {
+		if on, err := mailer.Enabled(ctx); err != nil || !on {
+			return
+		}
+		users, err := store.ListUsers(ctx)
+		if err != nil {
+			logger.Error("backup notice", "err", err)
+			return
+		}
+		for _, u := range users {
+			if !u.IsGlobalAdmin || !u.IsActive {
+				continue
+			}
+			if err := mailer.Enqueue(ctx, mail.Message{To: u.Email, Lang: u.Locale, Template: "backup_failed",
+				URL: strings.TrimSuffix(baseURL, "/") + "/admin/health", Vars: map[string]string{"name": u.FullName},
+				Lines: []mail.Line{{Template: step, Vars: map[string]string{"detail": detail}}}}); err != nil {
+				logger.Error("backup notice", "err", err)
+			}
+		}
+	}
+}
+
+// auditSink arma el destino de la copia de la auditoría (§11.2), o nil si no hay.
+func auditSink(cfg config.Config) (audit.Sink, error) {
+	switch cfg.Audit.Forward {
+	case "stdout":
+		return audit.StdoutSink{W: os.Stdout}, nil
+	case "syslog":
+		return audit.NewSyslogSink(cfg.Audit.Syslog.Address, cfg.Audit.Syslog.CAFile)
+	}
+	return nil, nil
 }
 
 // newDirectory arma el servicio del directorio con la configuración del archivo y lo que la
@@ -375,6 +565,7 @@ func runLDAPSync(ctx context.Context, cfg config.Config, args []string, dryRun b
 	if len(args) != 1 || args[0] != "sync" {
 		return errors.New("usage: kudawiki ldap sync [--dry-run]")
 	}
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}
@@ -467,12 +658,65 @@ func runSearchRebuild(ctx context.Context, cfg config.Config) error {
 	return repo.New(db).RebuildIndex(ctx, wiki.IndexDoc)
 }
 
+// runAudit es `audit verify` y `audit export`.
+func runAudit(ctx context.Context, cfg config.Config, args []string, from, to, out string) error {
+	switch {
+	case len(args) == 1 && args[0] == "verify":
+		return runAuditVerify(ctx, cfg)
+	case len(args) == 1 && args[0] == "export":
+		return runAuditExport(ctx, cfg, from, to, out)
+	}
+	return errors.New(`usage: kudawiki audit verify | audit export --from YYYY-MM-DD --to YYYY-MM-DD [--out file.zip]`)
+}
+
+// runAuditExport arma el paquete de evidencia (§21.2.7). Lee la base sin migrar, como verify, y
+// necesita la MASTER_KEY para firmar. Queda en la auditoría como hecho desde la consola.
+func runAuditExport(ctx context.Context, cfg config.Config, from, to, out string) error {
+	if out == "" {
+		out = "kudawiki-evidence-" + from + "-" + to + ".zip"
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	store := repo.New(db)
+	mk, err := masterkey.Load(ctx, store, cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
+	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	rep, err := audit.WriteEvidence(ctx, store, f, from, to, crypto.EvidenceKey(mk.Key), time.Now())
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
+		os.Remove(out)
+		if errors.Is(err, audit.ErrInvalidRange) {
+			return errors.New("--from and --to must be dates (YYYY-MM-DD), from not after to")
+		}
+		return err
+	}
+	if pending, err := db.Pending(ctx); err == nil && len(pending) == 0 {
+		audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil))).Record(ctx, audit.Event{Action: audit.AuditExport,
+			TargetType: "audit", TargetID: from + ".." + to, System: "cli", Meta: map[string]any{"format": "evidence", "events": rep.Events, "chain_ok": rep.ChainOK}})
+	}
+	fmt.Printf("evidence package: %s (%d events from %s to %s)\n", out, rep.Events, from, to)
+	fmt.Printf("signing key id: %s (give it to the auditor through another channel)\n", rep.KeyID)
+	if !rep.ChainOK {
+		return fmt.Errorf("the package was written, but the audit chain is broken: %s", rep.ChainError)
+	}
+	return nil
+}
+
 // runAuditVerify recorre la cadena de la auditoría (SPEC §11.1). Abre la BD sin migrar: es
 // una revisión, y tiene que poder correr sobre una copia restaurada sin tocarla.
 func runAuditVerify(ctx context.Context, cfg config.Config) error {
-	if len(os.Args) < 3 || os.Args[2] != "verify" {
-		return errors.New(`usage: kudawiki audit verify`)
-	}
 	db, err := database.Open(cfg.DBPath())
 	if err != nil {
 		return err
@@ -500,7 +744,15 @@ func runHealthcheck(cfg config.Config) error {
 		return err
 	}
 	client := http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
+	scheme := "http"
+	if cfg.TLS.CertFile != "" {
+		// Con TLS propio el certificado es del nombre público, no de 127.0.0.1: no se puede
+		// verificar contra la dirección local, y aquí solo se pregunta si el proceso responde.
+		scheme = "https"
+		// #nosec G402 -- healthcheck contra el propio servidor en localhost: el certificado es del nombre público
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}} //nolint:gosec // solo /healthz en 127.0.0.1
+	}
+	resp, err := client.Get(scheme + "://127.0.0.1:" + port + "/healthz")
 	if err != nil {
 		return err
 	}
@@ -517,6 +769,7 @@ func runMigrateDryRun(ctx context.Context, cfg config.Config, dryRun bool) error
 	if !dryRun {
 		return errors.New("migrations are applied by `kudawiki serve`, after a backup; use `kudawiki migrate --dry-run` to list them")
 	}
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}
@@ -556,11 +809,74 @@ func backupBeforeMigrate(ctx context.Context, db *database.DB, cfg config.Config
 		return "", fmt.Errorf("backup before migrating: %w", err)
 	}
 	logger.Info("backup before migrating", "file", path, "migrations", len(pending))
+	// Uno por actualización, para siempre, llenaba el disco (F8-B.6): quedan los últimos tres.
+	// Si no se pueden borrar los viejos, la actualización sigue igual.
+	removed, err := backup.KeepLatest(cfg.BackupDir(), backup.PreMigrate, backup.KeepPreMigrate)
+	if err != nil {
+		logger.Warn("pruning pre-migrate backups", "err", err)
+	} else if len(removed) > 0 {
+		logger.Info("pre-migrate backups pruned", "removed", len(removed))
+	}
 	return path, nil
+}
+
+// runBackupCommand es `backup`, `backup verify <file>` y `backup keygen`.
+func runBackupCommand(ctx context.Context, cfg config.Config, args []string) error {
+	switch {
+	case len(args) == 0:
+		return runBackup(ctx, cfg)
+	case len(args) == 1 && args[0] == "keygen":
+		if err := backup.GenerateKey(cfg.Backup.KeyFile); err != nil {
+			return err
+		}
+		fmt.Println("backup key created:", cfg.Backup.KeyFile)
+		fmt.Println("keep a copy of it apart from the backups, like the master key: without it the offsite copies cannot be read")
+		return nil
+	case len(args) == 2 && args[0] == "verify":
+		return runBackupVerify(ctx, cfg, args[1])
+	}
+	return errors.New("usage: kudawiki backup | backup verify <file> | backup keygen")
+}
+
+// runBackupVerify prueba restaurar un respaldo en una carpeta temporal (§21.2.4). Si la base de
+// la instalación existe y está al día, deja el resultado para el panel y la auditoría.
+func runBackupVerify(ctx context.Context, cfg config.Config, file string) error {
+	key, _ := backup.LoadKey(cfg.Backup.KeyFile) // solo hace falta para un .enc; CheckBackup lo dice
+	tmp := cfg.BackupDir()
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		return err
+	}
+	res, checkErr := jobs.CheckBackup(ctx, file, key, tmp)
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
+	if _, err := os.Stat(cfg.DBPath()); err == nil {
+		if db, err := database.Open(cfg.DBPath()); err == nil {
+			defer db.Close()
+			if pending, err := db.Pending(ctx); err == nil && len(pending) == 0 {
+				store := repo.New(db)
+				run := jobs.JobRun{At: time.Now(), File: filepath.Base(file), Source: "cli", Events: res.Events, OK: checkErr == nil}
+				action := audit.BackupVerify
+				if checkErr != nil {
+					run.Error, action = checkErr.Error(), audit.BackupFailed
+				}
+				jobs.SaveRun(ctx, store, jobs.BackupVerifyJob, run)
+				audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil))).Record(ctx, audit.Event{Action: action,
+					TargetType: "backup", TargetID: filepath.Base(file), System: "cli", Meta: map[string]any{"ok": checkErr == nil, "step": jobs.BackupVerifyJob}})
+			}
+		}
+	}
+	if checkErr != nil {
+		return fmt.Errorf("the backup does not restore: %w", checkErr)
+	}
+	m := res.Manifest
+	fmt.Printf("backup ok: %s backup from %s, schema %d, %d files; integrity_check ok; audit chain ok (%d events)\n",
+		m.Kind, m.CreatedAt.Format(time.RFC3339), m.Schema, len(m.Files), res.Events)
+	return nil
 }
 
 // runBackup hace un respaldo ahora (SPEC §13.3) y lo verifica. La MASTER_KEY no va adentro.
 func runBackup(ctx context.Context, cfg config.Config) error {
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}
@@ -599,6 +915,19 @@ func runRestore(cfg config.Config, file string) error {
 		return err
 	} else if used {
 		return errors.New("the database is in use: stop `kudawiki serve` (or the container) before restoring")
+	}
+	if strings.HasSuffix(file, backup.EncSuffix) {
+		// La copia del destino externo: se descifra al lado con la llave de respaldo (§13.3).
+		key, err := backup.LoadKey(cfg.Backup.KeyFile)
+		if err != nil {
+			return err
+		}
+		plain := strings.TrimSuffix(file, backup.EncSuffix)
+		if err := backup.DecryptFile(file, plain, key); err != nil {
+			return err
+		}
+		defer os.Remove(plain)
+		file = plain
 	}
 	m, previous, err := backup.Restore(file, cfg.DBPath(), cfg.StorageDir(), database.Latest())
 	if err != nil {
@@ -653,6 +982,13 @@ func runDoctor(ctx context.Context, cfg config.Config, wsSlug string, fix bool) 
 	if err != nil {
 		return err
 	}
+	if wsSlug == "" {
+		_, ps, err := health.BackupChecks(ctx, store, time.Now())
+		if err != nil {
+			return err
+		}
+		problems = append(ps, problems...)
+	}
 	if fix && len(problems) > 0 {
 		if err := doctorFix(ctx, store, cfg, areas, problems); err != nil {
 			return err
@@ -682,6 +1018,7 @@ func runAdmin(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 {
 		return errUsageAdmin
 	}
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}
@@ -773,6 +1110,7 @@ func doctorFix(ctx context.Context, store *repo.Repo, cfg config.Config, areas [
 		case strings.HasPrefix(p.Check, "search."):
 			reindex = true
 		case p.Check == "media.stray_file":
+			// #nosec G703 -- p.Detail es un nombre de archivo que listó health.Check dentro de storage/, no entrada de un usuario
 			if err := os.Remove(filepath.Join(cfg.StorageDir(), "ws_"+wsID[p.Area], p.Detail)); err != nil {
 				return err
 			}
@@ -804,6 +1142,7 @@ func runMasterKey(ctx context.Context, cfg config.Config, args []string) error {
 			return errors.New("the database is in use: stop `kudawiki serve` (or the container) before rotating the master key")
 		}
 	}
+	// #nosec G703 -- ruta que da quien opera la CLI, no un usuario de la wiki
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}

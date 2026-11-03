@@ -9,17 +9,20 @@ import (
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/audit"
+	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/wiki"
 )
 
 const (
-	unusedMedia   = 24 * time.Hour      // media que nadie usa, o que alguien borró (§4.4)
-	missRetention = 90 * 24 * time.Hour // búsquedas sin resultados (§9.6)
-	viewRetention = 90 * 24 * time.Hour // visitas por página (§4.17)
-	mailRetention = 30 * 24 * time.Hour // correos ya entregados o rendidos (§12)
-	draftAge      = 30 * 24 * time.Hour // borradores del autoguardado sin tocar (§4.11)
-	system        = "daily_purge"       // meta.system de lo que registra este job
+	unusedMedia   = 24 * time.Hour       // media que nadie usa, o que alguien borró (§4.4)
+	missRetention = 90 * 24 * time.Hour  // búsquedas sin resultados (§9.6)
+	viewRetention = 90 * 24 * time.Hour  // visitas por página (§4.17)
+	mailRetention = 30 * 24 * time.Hour  // correos ya entregados o rendidos (§12)
+	draftAge      = 30 * 24 * time.Hour  // borradores del autoguardado sin tocar (§4.11)
+	readNotices   = 90 * 24 * time.Hour  // notificaciones ya leídas (§13.10)
+	loginSeen     = 365 * 24 * time.Hour // IP y navegador vistos, para el aviso de login nuevo (§8.2, §13.10)
+	system        = "daily_purge"        // meta.system de lo que registra este job
 )
 
 type store interface {
@@ -31,6 +34,9 @@ type store interface {
 	PurgeDrafts(ctx context.Context, cutoff time.Time) error
 	PurgeRevisions(ctx context.Context, now time.Time) (map[string]int, error)
 	PurgeAudit(ctx context.Context, cutoff string) (int64, error)
+	PurgePersonal(ctx context.Context, c repo.Retention) (map[string]int64, error)
+	TruncateWAL(ctx context.Context) error
+	Optimize(ctx context.Context) error
 }
 
 type files interface {
@@ -46,6 +52,7 @@ type Purge struct {
 	Audit          *audit.Recorder
 	Retention      time.Duration // trash.retention_days
 	AuditRetention time.Duration // audit.retention_days, nunca menos de 180 días
+	QuizRetention  time.Duration // quizzes.retention_days: resultados de cuestionarios y aperturas (§13.10)
 	Now            func() time.Time
 	Log            *slog.Logger
 }
@@ -83,6 +90,21 @@ func (p Purge) Run(ctx context.Context) error {
 	}
 	events, err := p.Store.PurgeAudit(ctx, now.Add(-p.AuditRetention).UTC().Format(audit.TimeFormat))
 	errs = errors.Join(errs, err)
+	// Datos personales con vencimiento (§13.10): queda cuántos, nunca de quién.
+	personal, err := p.Store.PurgePersonal(ctx, repo.Retention{SessionSeen: now.Add(-auth.SessionIdle), SessionCreated: now.Add(-auth.SessionAbsolute),
+		NotificationRead: now.Add(-readNotices), LoginHistory: now.Add(-loginSeen), QuizResults: now.Add(-p.QuizRetention)})
+	errs = errors.Join(errs, err)
+	if personal["quiz_attempts"]+personal["read_views"]+personal["login_history"] > 0 {
+		meta := map[string]any{}
+		for k, v := range personal {
+			meta[k] = v
+		}
+		p.Audit.Record(ctx, audit.Event{Action: audit.PrivacyRetention, TargetType: "system", TargetID: "retention", System: system, Meta: meta})
+	}
+	// Después de borrar, una vez al día (§13.4): el WAL vuelve a cero y SQLite actualiza sus
+	// estadísticas. No más seguido: con 50 000 páginas, vaciar el WAL enfría la caché y la
+	// búsqueda empeora (docs/rendimiento.md); entre pasadas, SQLite hace sus checkpoints solo.
+	errs = errors.Join(errs, p.Store.TruncateWAL(ctx), p.Store.Optimize(ctx))
 	p.Log.Info("daily purge", "pages", len(pages), "media_files", len(purged), "unused_media", len(unused), "audit_events", events)
 	return errs
 }

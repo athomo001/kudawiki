@@ -52,11 +52,12 @@ type User struct {
 	IsActive      bool
 	Locale        string
 	ReadingPrefs  ReadingPrefs
-	Invited       bool // creado por invitación y todavía sin contraseña (SPEC §8.5.3)
-	HasAvatar     bool // la foto se lee aparte (Avatar): no viaja en cada request
-	TOTPEnabled   bool // el secreto se lee aparte (TOTPOf), solo al verificar un código (§8.1)
-	Passkeys      int  // cuántas tiene; las credenciales se leen aparte (PasskeysOf, §8.1)
-	HasVault      bool // configuró su clave de bóveda (§6.3); las llaves se leen aparte (VaultOf)
+	EditorMode    string // markdown o visual (§4.2)
+	Invited       bool   // creado por invitación y todavía sin contraseña (SPEC §8.5.3)
+	HasAvatar     bool   // la foto se lee aparte (Avatar): no viaja en cada request
+	TOTPEnabled   bool   // el secreto se lee aparte (TOTPOf), solo al verificar un código (§8.1)
+	Passkeys      int    // cuántas tiene; las credenciales se leen aparte (PasskeysOf, §8.1)
+	HasVault      bool   // configuró su clave de bóveda (§6.3); las llaves se leen aparte (VaultOf)
 	// Baja (§8.4): OffboardingAt es el fin de la gracia de una baja en curso y OffboardedAt cuándo
 	// se completó. Cero si no hay.
 	OffboardingAt time.Time
@@ -92,7 +93,7 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 
 const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
 	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled,
-	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at, auth_source, COALESCE(ldap_guid, ''), COALESCE(ldap_dn, ''), vault_pubkey IS NOT NULL`
+	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at, auth_source, COALESCE(ldap_guid, ''), COALESCE(ldap_dn, ''), vault_pubkey IS NOT NULL, editor_mode`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -118,7 +119,7 @@ func scanUser(row scanner) (User, error) {
 	var prefs string
 	var offboarding, offboarded sql.NullTime
 	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled, &u.Passkeys,
-		&offboarding, &offboarded, &u.AuthSource, &u.LDAPGUID, &u.LDAPDN, &u.HasVault)
+		&offboarding, &offboarded, &u.AuthSource, &u.LDAPGUID, &u.LDAPDN, &u.HasVault, &u.EditorMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -136,14 +137,16 @@ func scanUser(row scanner) (User, error) {
 	return u, nil
 }
 
-// SetPreferences cambia el idioma y las preferencias de lectura de una persona (SPEC §15).
-func (r *Repo) SetPreferences(ctx context.Context, userID, locale string, prefs ReadingPrefs) error {
+// SetPreferences cambia el idioma, las preferencias de lectura (SPEC §15) y el modo del editor
+// (§4.2) de una persona.
+func (r *Repo) SetPreferences(ctx context.Context, userID, locale string, prefs ReadingPrefs, editorMode string) error {
 	b, err := json.Marshal(prefs)
 	if err != nil {
 		return err
 	}
 	res, err := r.db.Write.ExecContext(ctx,
-		`UPDATE users SET locale = ?, reading_prefs_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, locale, string(b), userID)
+		`UPDATE users SET locale = ?, reading_prefs_json = ?, editor_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		locale, string(b), editorMode, userID)
 	if err != nil {
 		return err
 	}

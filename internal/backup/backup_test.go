@@ -222,6 +222,34 @@ func TestPrune(t *testing.T) {
 	}
 }
 
+// Los previos a migrar se quedan en los tres más nuevos (F8-B.6); los demás tipos no se tocan.
+func TestKeepLatest(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		write(t, filepath.Join(dir, Name(PreMigrate, now.AddDate(0, 0, -i))), "")
+	}
+	write(t, filepath.Join(dir, Name(Manual, now.AddDate(-1, 0, 0))), "")
+	write(t, filepath.Join(dir, Name(Daily, now.AddDate(-2, 0, 0))), "")
+
+	removed, err := KeepLatest(dir, PreMigrate, KeepPreMigrate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{Name(PreMigrate, now.AddDate(0, 0, -3)), Name(PreMigrate, now.AddDate(0, 0, -4))}
+	if !slices.Equal(removed, want) {
+		t.Errorf("removed %v, want %v", removed, want)
+	}
+	left, _ := List(dir)
+	var kinds []Kind
+	for _, e := range left {
+		kinds = append(kinds, e.Kind)
+	}
+	if !slices.Equal(kinds, []Kind{PreMigrate, PreMigrate, PreMigrate, Manual, Daily}) {
+		t.Errorf("left %v", kinds)
+	}
+}
+
 // Restaurar con el servidor corriendo rompería la base: InUse lo detecta aunque el servidor
 // esté en otro proceso o en otro contenedor sobre el mismo volumen.
 func TestInUse(t *testing.T) {

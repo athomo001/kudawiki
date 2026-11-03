@@ -159,3 +159,34 @@ func (r *Repo) PurgeAudit(ctx context.Context, cutoff string) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// AuditAfter devuelve hasta limit eventos con id mayor que after, en orden: la copia a syslog
+// (§11.2) los manda por tandas desde donde quedó. Es del sistema: no filtra.
+func (r *Repo) AuditAfter(ctx context.Context, after int64, limit int) ([]AuditRow, error) {
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT `+auditColumns+` FROM audit_log a WHERE a.id > ? ORDER BY a.id LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, func(row scanner) (AuditRow, error) { return scanAuditRow(row) })
+}
+
+// AuditRange recorre en orden los eventos con fecha entre from y to (AAAA-MM-DD, los dos
+// incluidos), para el paquete de evidencia (§21.2.7). Es del sistema: no filtra.
+func (r *Repo) AuditRange(ctx context.Context, from, to string, fn func(AuditRow) error) error {
+	rows, err := r.db.Read.QueryContext(ctx, `SELECT `+auditColumns+` FROM audit_log a
+		WHERE a.at >= ? AND a.at < date(?, '+1 day') ORDER BY a.id`, from, to)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanAuditRow(rows)
+		if err != nil {
+			return err
+		}
+		if err := fn(a); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}

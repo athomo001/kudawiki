@@ -13,8 +13,9 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F4](#f4--propuestas-y-notificaciones-m3) | Propuestas y notificaciones (M3) | Modo draft completo | ✅ |
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ✅ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas, artículos compartidos entre áreas | ✅ |
-| [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ⚪ |
-| [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ⚪ |
+| [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ✅ |
+| [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ✅ (falta la etiqueta) |
+| [F8-B](#f8-b-faltantes) | Faltantes antes de v1.0 | Respaldos y borrar todo en el panel, modos de color, Mi perfil, borrar y descargar respaldos | ✅ |
 | [F9](#f9--después-de-v10) | Después de v1.0 | Comentarios, PDF, MCP… | ⚪ |
 
 Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba la lista. Lo que no alcance pasa a la fase siguiente y se anota en el CHANGELOG.
@@ -44,7 +45,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [x] Licencia del proyecto: privada, todos los derechos reservados (`LICENSE`, SPEC §19.31).
 - [ ] `SECURITY.md`.
 - [x] Infraestructura del repo: `go.mod` (toolchain fijado), estructura de §16, `Makefile` y CI (`.github/workflows/ci.yml`: gofmt, vet, staticcheck, tests con `-race`, govulncheck, `pnpm audit`, build de la imagen). Falta verlo verde en GitHub.
-- [ ] Mockups que faltan: cuestionario (crear, responder, resultados), inicio personal, "quién puede ver esto", panel de superadmin (incluidas Apariencia y LDAP), recuperar contraseña, vista móvil, modo oscuro.
+- [ ] Mockups que faltan: cuestionario (crear, responder, resultados), inicio personal, "quién puede ver esto", panel de superadmin (incluidas Apariencia y LDAP), recuperar contraseña, vista móvil. *(El modo oscuro se construyó sin mockup el 2026-11-03, B4: el dueño rechazó el mockup y pidió un ícono.)*
 
 **Criterio de salida:** SPEC v1.0 congelado (los cambios posteriores pasan por el CHANGELOG), repo con CI verde sobre un `main.go` vacío.
 
@@ -189,18 +190,40 @@ Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones,
 
 ## F8 — Endurecimiento y v1.0 (M7)
 
-- [ ] Brechas ISO 27001 (§21.2): TLS obligatorio, backups externos + verificación semanal, revisión de accesos, paquete de evidencia, guía de endurecimiento, SBOM.
-- [ ] Auditoría: copia a syslog/journald (`audit.forward`) y exportación JSONL/CSV (§11). *(pasaron de F3.3)*
-- [ ] Editor visual (WYSIWYG → Markdown).
-- [ ] Ciclo de vida de áreas y traslado entre áreas (el acuse de lectura pasó a F5).
-- [ ] Exportar/importar área, importador Wiki.js 2.x, export de datos personales.
-- [ ] Pulido de UX, accesibilidad, documentación de operación.
-- [ ] **Pentest externo.**
+- [x] Brechas ISO 27001 (§21.2): TLS obligatorio, backups externos + verificación semanal, revisión de accesos, paquete de evidencia, guía de endurecimiento, SBOM. *(F8.1–F8.4, F8.11, F8.12 y F8.14; el aviso de versión en el panel pasó a F9)*
+- [x] Auditoría: copia a syslog/journald (`audit.forward`) y exportación JSONL/CSV (§11). *(pasaron de F3.3; F8.2)*
+- [x] Editor visual (WYSIWYG → Markdown). *(F8.10: Milkdown, conmutador por persona, ida y vuelta probada)*
+- [x] Ciclo de vida de áreas y traslado entre áreas (el acuse de lectura pasó a F5). *(F8.5 y F8.6)*
+- [x] Exportar/importar área, importador Wiki.js 2.x, export de datos personales. *(F8.7, F8.8 y F8.9)*
+- [x] Pulido de UX, accesibilidad, documentación de operación. *(F8.11: arrastrar y ordenar en el árbol (B7); F8.13: E2E de los flujos; F8.15: E2E de accesibilidad en 18 pantallas y la casilla de tarea con nombre; F8.14: `docs/operacion/` y `deploy/kudawiki.service`)*
+- [x] **Auditoría interna y pentest hecho por Claude** (§21.2.2, decisión del dueño del 2026-11-02: reemplazan al pentest externo para v1.0). *(F8.15, 2026-11-03: `docs/seguridad/auditoria-v1.0.md`, 66 chequeos de caja negra; sin críticos ni altos; tres medios y tres bajos, corregidos salvo el residual M-1r, que pasa a F9)*
 
-**Criterio de salida:** pentest sin hallazgos altos abiertos, pruebas E2E verdes, documentación de instalación y operación completa → se etiqueta **v1.0**.
+**Criterio de salida:** auditoría interna y pentest sin hallazgos altos abiertos, pruebas E2E verdes, documentación de instalación y operación completa → se etiqueta **v1.0**.
+
+**Cumplido el 2026-11-03**, salvo la etiqueta. Sin hallazgos altos ni críticos abiertos (`docs/seguridad/auditoria-v1.0.md`). E2E 26/26 (`make e2e`). La instalación y la operación están en `docs/operacion/`. `go test ./...`, `make lint` y `make audit` pasan. La etiqueta `v1.0` y el commit esperan el visto bueno del dueño.
 
 ---
+## F8-B Faltantes
 
-## F9 — Después de v1.0
+Pedidos del dueño para antes de v1.0. Decisiones del 2026-11-03: el superadmin respalda completo y los admins exportan sus áreas; borrar todo es un botón del panel; restaurar es por consola, con la lista en el panel (SPEC §13.3, §13.8, §13.12, ADR-0013).
 
-Sin orden fijo; se prioriza según el uso real: regla de dos personas, comentarios, PDF, **gestión documental** (§4.18, pedido del dueño del 2026-11-02: subir PDF, Excel y otros, marcarlos como evidencia o proceso interno, versiones del archivo y verlos en la web; lo abierto en §19.39) junto con la búsqueda en adjuntos, draw.io/Excalidraw, espejo Git de salida, tokens de API + servidor MCP, "¿te sirvió esta página?", búsquedas sin resultados a la vista de más personas (la actividad y las más vistas se adelantaron a F3.7, §4.17).
+- [x] crear un sistema de crear backup, completo y backup de  articulos, tambien que pueda el admin  crear un backup de su area y el admin podria crear backuo de las area que quiera o de todas, ya que actualmente no hay menu sobre eso visualmente *(F8-B.1: **Administración → Respaldos** con *Respaldar ahora*, un respaldo completo; el admin de área ya exportaba su área (F8.7) y ahora, con más de una, **Exportar todas mis áreas**, F8-B.3)*
+- [x] crear un sistema para tomar bakup y agregarlos al sistema *(F8-B.1: la lista de respaldos en el panel, y en cada uno el comando de `kudawiki restore`, con y sin Docker; importar el ZIP de un área ya estaba, F8.7)*
+- [x] crear un sistema para borrar todo y solo quede la cuenta de admin *(F8-B.4: **Borrar todo** en Respaldos, con reautenticación, la frase `BORRAR TODO` y un respaldo previo que se prueba restaurar; si falla, no borra nada)*
+- [x] crear algo para poder configurar backup programado y que se va a respaldar  y donde se enviara o se queda en el mism server  en una carpeta de backup como lo hace wikijs *(F8-B.2: hora, retención y destino S3 desde el panel; siempre completo; la carpeta local solo en `kudawiki.yaml`)*
+- [x] Modo oscuro y modo rosa (§15, B4): un ícono en la barra cambia claro → oscuro → rosa con *circular reveal*. *(2026-11-03, adelantado de F9 por el dueño)*
+- [x] el panel de usuario es muy tosco hay que mejorarlo *(F8-B.5: **Mi perfil** con el molde de Administración, diseño aprobado el 2026-11-03: ["Kudawiki — Mi perfil"](https://claude.ai/artifact/WFiZsUd4mSKQikbqdtorsY), SPEC §15. Seis secciones en dos grupos, Mi cuenta y Seguridad, con su propia ruta cada una)*
+- [x] Borrar respaldos para que no se llene el disco *(F8-B.6, decisión del dueño del 2026-11-03: de los "Antes de actualizar" quedan los 3 últimos, y cada respaldo de la lista tiene *Borrar*, con reautenticación; el último probado y los de antes de borrar todo no se borran. SPEC §13.3)*
+- [x] Descargar un respaldo desde el panel *(F8-B.7, decisión del dueño del 2026-11-03: tal cual, sin cifrar, con reautenticación, sin cache y en la auditoría; la pantalla advierte que trae todo el contenido. SPEC §13.3)*
+
+**Criterio de salida:** los pedidos de arriba construidos y probados (Go, contención, Chrome), con la documentación al día.
+
+**Cumplido el 2026-11-03.** `go test ./...`, `svelte-check`, E2E 32/32 (con accesibilidad en las pantallas nuevas de Mi perfil y Respaldos) y Chrome (Respaldos 18/18, Mi perfil 18/18, borrar respaldos 9/9, descargar 7/7).
+
+## F9 hardening
+- [] proceso de hardening basandote en soc2 , iso27701, iso 27001
+
+
+## F10  post implementacion
+
+Sin orden fijo; se prioriza según el uso real: regla de dos personas, comentarios, PDF, **gestión documental** (§4.18, pedido del dueño del 2026-11-02: subir PDF, Excel y otros, marcarlos como evidencia o proceso interno, versiones del archivo y verlos en la web; lo abierto en §19.39) junto con la búsqueda en adjuntos, draw.io/Excalidraw, espejo Git de salida, tokens de API + servidor MCP, "¿te sirvió esta página?", chequeo de versiones (`updates.check`, §13.9) con el aviso de seguridad en el panel y en `doctor --security` (§21.2.3, pasó de F8 el 2026-11-03), **render con costo lineal en todo caso** (residual M-1r del pentest de F8.15: reportar a goldmark los párrafos gigantes que siguen siendo cuadráticos y, si no se corrige, un tope por párrafo; `docs/seguridad/auditoria-v1.0.md`), búsquedas sin resultados a la vista de más personas (la actividad y las más vistas se adelantaron a F3.7, §4.17).

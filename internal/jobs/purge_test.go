@@ -331,3 +331,48 @@ func TestRevisionRetention(t *testing.T) {
 		t.Errorf("%d revision.purge events, want 2 (one per area)", events)
 	}
 }
+
+// §13.10: vencen las sesiones (por inactividad o edad, §8.2), las notificaciones leídas a los 90
+// días, lo visto para el aviso de login nuevo al año y los intentos de cuestionario y aperturas
+// según quizzes.retention_days. Lo que no venció, o el intento en curso, no se toca.
+func TestPurgePersonal(t *testing.T) {
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	store := repo.New(db)
+	uid := ulid.Make().String()
+	if err := store.CreateUser(ctx, repo.User{ID: uid, Email: "e@x.cl", FullName: "E", IsActive: true, Locale: "es"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	old, recent := now.Add(-800*24*time.Hour), now.Add(-time.Hour)
+	for i, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, []any{"a", "a", uid, old, old}},
+		{`INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, []any{"b", "b", uid, recent, recent}},
+		{`INSERT INTO login_history (user_id, ip, browser, last_at) VALUES (?, '1.1.1.1', 'x', ?)`, []any{uid, old}},
+		{`INSERT INTO login_history (user_id, ip, browser, last_at) VALUES (?, '2.2.2.2', 'x', ?)`, []any{uid, recent}},
+	} {
+		if _, err := db.Write.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	rec := audit.NewRecorder(store, time.Now, slog.New(slog.DiscardHandler))
+	p := Purge{Store: store, Files: media.NewService(store, rec, t.TempDir(), 1<<20), Audit: rec, Retention: 30 * 24 * time.Hour,
+		AuditRetention: 730 * 24 * time.Hour, QuizRetention: 730 * 24 * time.Hour, Now: time.Now, Log: slog.New(slog.DiscardHandler)}
+	if err := p.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int{"sessions": 1, "login_history": 1} {
+		var n int
+		db.Read.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n)
+		if n != want {
+			t.Errorf("%s: %d rows left, want %d", table, n, want)
+		}
+	}
+	events, _ := store.AuditEvents(ctx, repo.AuditFilter{Action: "privacy.retention", Limit: 5})
+	if len(events) != 1 {
+		t.Errorf("retention audit: %+v", events)
+	}
+}

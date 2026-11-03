@@ -22,10 +22,14 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
+	"github.com/athomo001/kudawiki/internal/backups"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/health"
+	"github.com/athomo001/kudawiki/internal/jobs"
 	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
+	"github.com/athomo001/kudawiki/internal/metrics"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
 	"github.com/athomo001/kudawiki/internal/offboarding"
@@ -37,6 +41,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
+	"github.com/athomo001/kudawiki/internal/transfer"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -83,6 +88,7 @@ type authService interface {
 	CompletePasswordReset(ctx context.Context, token, password string) error
 	AdminPasswordReset(ctx context.Context, actorID, ip, userID string, emailed bool) (string, error)
 	SetPreferences(ctx context.Context, userID string, p auth.Preferences) error
+	UnknownResets() int64
 	SetFullName(ctx context.Context, userID, name string) error
 	ChangePassword(ctx context.Context, userID, sessionToken, current, next string, revokeOthers bool) error
 	SetAvatar(ctx context.Context, userID string, data []byte) error
@@ -107,6 +113,7 @@ type wikiService interface {
 	Verify(ctx context.Context, sc repo.Scope, actorID, slug string) error
 	SetReview(ctx context.Context, sc repo.Scope, actorID, slug string, ownerID *string, days *int) error
 	Move(ctx context.Context, sc repo.Scope, actorID, from, to string) error
+	Order(ctx context.Context, sc repo.Scope, parent string, slugs []string) error
 	SetLevel(ctx context.Context, sc repo.Scope, actorID, slug string, level int) error
 	Delete(ctx context.Context, sc repo.Scope, actorID, slug string) error
 	Restore(ctx context.Context, sc repo.Scope, actorID, id string) error
@@ -233,6 +240,7 @@ type reader interface {
 	PanelAreas(ctx context.Context) (map[string]*repo.PanelArea, error)
 	WorkspaceByID(ctx context.Context, id string) (repo.Workspace, error)
 	Memberships(ctx context.Context, userID string) ([]repo.Membership, error)
+	MembershipAliases(ctx context.Context, userID string) (map[string][]string, error)
 	MembershipBySlug(ctx context.Context, slug, userID string) (repo.Membership, error)
 	Members(ctx context.Context, s repo.Scope) ([]repo.Member, error)
 	Tree(ctx context.Context, s repo.Scope) ([]repo.PageRef, error)
@@ -280,6 +288,9 @@ type reader interface {
 	OrphanIndexRows(ctx context.Context) (int, error)
 	Proposals(ctx context.Context, s repo.Scope, f repo.ProposalFilter) ([]repo.Proposal, error)
 	ProposalByID(ctx context.Context, s repo.Scope, id string) (repo.Proposal, error)
+	// El estado de los jobs del sistema: respaldos (§21.2.4) y /readyz (§13.5).
+	JobState(ctx context.Context, name string) (string, error)
+	Gauges(ctx context.Context, now time.Time) (repo.Gauges, error)
 }
 
 // brandingService es la marca de la empresa (SPEC §15.1).
@@ -321,6 +332,12 @@ type draftStore interface {
 	DeleteDraft(ctx context.Context, s repo.Scope, userID, slug string) error
 }
 
+// auditLog registra lo que hace una persona que no pasa por un servicio de dominio: leer y
+// exportar (§11.2: siempre después de que salió bien).
+type auditLog interface {
+	Record(ctx context.Context, e audit.Event)
+}
+
 type readiness interface {
 	Ready(ctx context.Context) error
 }
@@ -343,11 +360,28 @@ type Deps struct {
 	Quizzes    quizService
 	// Offboarding es la baja de usuarios y el superadmin desde el panel (§8.4, B15).
 	Offboarding offboardingService
-	Presence    *presence.Hub
-	Read        reader
-	DB          readiness
-	UI          fs.FS // contenido de ui/dist
-	BaseURL     *url.URL
+	// AccessReview es la revisión periódica de accesos (§21.2.7).
+	AccessReview accessReviewService
+	// Lifecycle es el ciclo de vida de un área (§3.5).
+	Lifecycle lifecycleService
+	// Transfer es el traslado de páginas entre áreas (§4.13).
+	Transfer transferService
+	// AreaIO exporta e importa un área como Markdown (§13.8).
+	AreaIO areaIOService
+	// Backups es Administración → Respaldos (§13.3, F8-B).
+	Backups backupsService
+	// Metrics es /metrics (§13.5); nil si metrics.allow_cidrs está vacío.
+	Metrics *metrics.Collector
+	// RenderCache guarda el HTML de las páginas (§13.4, B11); nil, sin caché.
+	RenderCache *wiki.RenderCache
+	// Clock compara la hora con time.ntp_server (§21.2.5); sin servidor no hace nada.
+	Clock    *health.Clock
+	Presence *presence.Hub
+	Audit    auditLog
+	Read     reader
+	DB       readiness
+	UI       fs.FS // contenido de ui/dist
+	BaseURL  *url.URL
 	// TrashRetention dice cuándo se purga lo que está en la papelera (SPEC §4.5).
 	TrashRetention time.Duration
 	// StorageDir es la carpeta de los archivos subidos: la salud la compara con la BD (§13.7).
@@ -355,6 +389,8 @@ type Deps struct {
 	// RemindAfter es approval.remind_after_days: desde ahí la bandeja marca una propuesta como
 	// "esperando hace N días" (§5.2, §5.3).
 	RemindAfter time.Duration
+	// TrustProxy: hay un proxy inverso delante (§21.2.1); ver middleware.Proxy.
+	TrustProxy bool
 	// RateLimit es el límite general de la API (§14.5); sin indicarlo, rige el de omisión.
 	RateLimit middleware.Limit
 	Log       *slog.Logger
@@ -370,7 +406,11 @@ func New(d Deps) http.Handler {
 		limit = middleware.DefaultLimit
 	}
 	root := chi.NewRouter()
-	root.Use(middleware.Log(d.Log), middleware.SecurityHeaders(d.BaseURL.Scheme == "https"))
+	root.Use(middleware.Proxy(d.TrustProxy, strings.TrimSuffix(d.BaseURL.String(), "/")), middleware.Log(d.Log),
+		middleware.SecurityHeaders(d.BaseURL.Scheme == "https"))
+	if d.Metrics != nil {
+		root.Use(d.Metrics.Middleware)
+	}
 	// La baja en un clic (RFC 8058) la manda el servidor de correo, sin Origin: va fuera de la
 	// protección CSRF y la autoriza la firma del enlace. El GET de la misma URL es la interfaz.
 	root.With(middleware.RateLimit(limit, time.Now)).Post("/unsubscribe", a.unsubscribe)
@@ -379,12 +419,17 @@ func New(d Deps) http.Handler {
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r.Get("/readyz", a.readyz)
+	r.Get("/metrics", a.metrics)
 
 	r.Route("/api", func(r chi.Router) {
 		// La IP de quien pide va al contexto para la auditoría (§11.2); la sesión agrega quién es.
 		// La IP y el navegador, también para la sesión que se abra (§8.2).
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Lo que responde la API es de quien tiene la sesión: que el navegador no lo guarde
+				// (un equipo compartido, el botón Atrás después de salir). La media, la foto y los
+				// logos ponen su propia política (§4.4, §15.1.3).
+				w.Header().Set("Cache-Control", "no-store")
 				ctx := audit.WithActor(r.Context(), audit.Actor{IP: clientIP(r)})
 				next.ServeHTTP(w, r.WithContext(auth.WithClient(ctx, auth.Client{IP: clientIP(r), UserAgent: r.UserAgent()})))
 			})
@@ -438,6 +483,20 @@ func (a api) readyz(w http.ResponseWriter, r *http.Request) {
 		st.DebugUntil = nil // es del panel
 		out["ldap"] = st
 	}
+	// El estado de los jobs (§13.5): informa, no cambia el 200; para alertar están /metrics y Salud.
+	if b, ps, err := health.BackupChecks(r.Context(), a.Read, time.Now()); err == nil {
+		checks := make([]string, len(ps))
+		for i, p := range ps {
+			checks[i] = p.Check
+		}
+		out["backups"] = map[string]any{"daily": b.Daily, "upload": b.Upload, "verify": b.Verify, "problems": checks}
+	}
+	if g, err := a.Read.Gauges(r.Context(), time.Now()); err == nil {
+		out["email"] = map[string]int64{"pending": g.EmailPending}
+	}
+	if st, ok := a.Clock.State(r.Context()); ok {
+		out["clock"] = st
+	}
 	a.json(w, http.StatusOK, out)
 }
 
@@ -465,6 +524,7 @@ func (a api) spa(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.Set("Cache-Control", "no-cache")
 	}
+	// #nosec G703 -- FS embebido y de solo lectura de la UI; fs.ValidPath rechaza ".."
 	http.ServeFileFS(w, r, a.UI, name)
 }
 
@@ -563,6 +623,12 @@ var domainErrors = map[error]int{
 	auth.ErrInvalidPasskeyName:        http.StatusUnprocessableEntity,
 	workspace.ErrInvalidArea:          http.StatusUnprocessableEntity,
 	workspace.ErrSlugTaken:            http.StatusConflict,
+	workspace.ErrInvalidStatus:        http.StatusUnprocessableEntity,
+	workspace.ErrConfirmSlug:          http.StatusUnprocessableEntity,
+	workspace.ErrDeletePending:        http.StatusConflict,
+	transfer.ErrInvalid:               http.StatusUnprocessableEntity,
+	transfer.ErrTaken:                 http.StatusConflict,
+	repo.ErrChanged:                   http.StatusConflict,
 	workspace.ErrInvalidRole:          http.StatusUnprocessableEntity,
 	workspace.ErrUserNotFound:         http.StatusUnprocessableEntity,
 	workspace.ErrForbidden:            http.StatusForbidden,
@@ -638,6 +704,12 @@ var domainErrors = map[error]int{
 	ldap.ErrUserInactive:              http.StatusConflict,
 	ldap.ErrSyncDisabled:              http.StatusConflict,
 	ldap.ErrSyncRunning:               http.StatusConflict,
+	backups.ErrInvalid:                http.StatusUnprocessableEntity,
+	backups.ErrLocked:                 http.StatusConflict,
+	backups.ErrNoKey:                  http.StatusUnprocessableEntity,
+	backups.ErrBusy:                   http.StatusConflict,
+	backups.ErrConfirm:                http.StatusUnprocessableEntity,
+	backups.ErrProtected:              http.StatusConflict,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.
@@ -656,11 +728,57 @@ func (a api) fail(w http.ResponseWriter, r *http.Request, err error) {
 	a.error(w, r, http.StatusInternalServerError, "internal", err)
 }
 
-// clientIP usa la dirección de la conexión; confiar en X-Forwarded-For llega con trust_proxy (§21.2).
+// clientIP usa la dirección de la conexión; con trust_proxy, middleware.Proxy ya la reemplazó
+// por la de quien pide (§21.2.1).
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// metrics es /metrics en el formato de Prometheus (§13.5). Fuera de metrics.allow_cidrs, el 404
+// de cualquier ruta que no existe.
+func (a api) metrics(w http.ResponseWriter, r *http.Request) {
+	if a.Metrics == nil || !a.Metrics.Allowed(clientIP(r)) {
+		a.error(w, r, http.StatusNotFound, "not_found", nil)
+		return
+	}
+	ctx := r.Context()
+	var samples []metrics.Sample
+	add := func(name, help, typ, labels string, v float64) {
+		samples = append(samples, metrics.Sample{Name: name, Help: help, Type: typ, Labels: labels, Value: v})
+	}
+	add("kudawiki_up", "1 while the server answers.", "gauge", "", 1)
+	add("kudawiki_password_reset_unknown_total", "Password resets requested for addresses with no account since start.", "counter", "",
+		float64(a.Auth.UnknownResets()))
+	if g, err := a.Read.Gauges(ctx, time.Now()); err == nil {
+		add("kudawiki_email_outbox_pending", "Emails waiting to be delivered.", "gauge", "", float64(g.EmailPending))
+		add("kudawiki_sessions", "Sessions seen in the last 12 hours.", "gauge", "", float64(g.Sessions))
+		add("kudawiki_users_active", "Active accounts.", "gauge", "", float64(g.ActiveUsers))
+		add("kudawiki_database_bytes", "Size of wiki.db.", "gauge", "", float64(g.DatabaseBytes))
+	}
+	if b, _, err := health.BackupChecks(ctx, a.Read, time.Now()); err == nil {
+		for _, s := range []struct {
+			kind string
+			run  *jobs.JobRun
+		}{{"daily", b.Daily}, {"upload", b.Upload}, {"verify", b.Verify}} {
+			if s.run == nil {
+				continue
+			}
+			ok := 1.0
+			if s.run.Error != "" {
+				ok = 0
+			}
+			add("kudawiki_backup_last_run_timestamp_seconds", "When each backup step last ran.", "gauge", `kind="`+s.kind+`"`, float64(s.run.At.Unix()))
+			add("kudawiki_backup_last_run_success", "1 if the last run of each backup step worked.", "gauge", `kind="`+s.kind+`"`, ok)
+		}
+	}
+	if st, ok := a.Clock.State(ctx); ok && st.Error == "" {
+		add("kudawiki_clock_offset_seconds", "Offset from the NTP server (time.ntp_server).", "gauge", "", float64(st.OffsetMS)/1000)
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	a.Metrics.Write(w, samples)
 }

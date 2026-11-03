@@ -235,3 +235,43 @@ func TestLDAP(t *testing.T) {
 		t.Error("a missing password file was accepted")
 	}
 }
+
+// §21.2.1: fuera de localhost, sin https:// no se arranca salvo con --insecure-http (con aviso);
+// con TLS propio, base_url tiene que ser https://; el certificado y la llave van juntos.
+func TestCheckTransport(t *testing.T) {
+	for _, tc := range []struct {
+		base, cert string
+		insecure   bool
+		wantErr    bool
+		wantWarn   bool
+	}{
+		{base: "https://wiki.empresa.cl"},
+		{base: "http://localhost:8080"},
+		{base: "http://wiki.empresa.cl", wantErr: true},
+		{base: "http://wiki.empresa.cl", insecure: true, wantWarn: true},
+		{base: "https://wiki.empresa.cl", cert: "/etc/kudawiki/tls.crt"},
+		{base: "http://localhost:8080", cert: "/etc/kudawiki/tls.crt", wantErr: true},
+	} {
+		c := Config{BaseURL: tc.base}
+		c.TLS.CertFile = tc.cert
+		warn, err := c.CheckTransport(tc.insecure)
+		if (err != nil) != tc.wantErr || (warn != "") != tc.wantWarn {
+			t.Errorf("%+v: warn=%q err=%v", tc, warn, err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "kudawiki.yaml")
+	os.WriteFile(path, []byte("tls:\n  cert_file: /x.crt\n"), 0o600)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "go together") {
+		t.Errorf("cert without key: %v", err)
+	}
+	t.Setenv("KUDAWIKI_TRUST_PROXY", "true")
+	c, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err == nil {
+		t.Fatal("explicit missing file must fail")
+	}
+	os.WriteFile(path, []byte("listen: \":8080\"\n"), 0o600)
+	if c, err = Load(path); err != nil || !c.TrustProxy {
+		t.Errorf("KUDAWIKI_TRUST_PROXY: %v %v", c.TrustProxy, err)
+	}
+}

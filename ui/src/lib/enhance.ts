@@ -114,7 +114,7 @@ function mermaid(root: HTMLElement) {
       if (!frame.isConnected) return removeEventListener('message', onMessage); // la vista se rehízo
       if (e.source !== frame.contentWindow) return;
       if (e.data?.type === 'ready') {
-        const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+        const dark = document.documentElement.dataset.scheme === 'dark'; // modo de color (§15, B4)
         frame.contentWindow?.postMessage({ type: 'render', source, dark }, '*'); // origen opaco: no hay otro destino
       } else if (e.data?.type === 'size' && typeof e.data.height === 'number') {
         frame.height = String(Math.min(Math.ceil(e.data.height), 4000));

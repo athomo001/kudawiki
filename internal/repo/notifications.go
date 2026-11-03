@@ -181,7 +181,7 @@ type DueReminder struct {
 
 func (r *Repo) DueReminders(ctx context.Context, before time.Time) ([]DueReminder, error) {
 	rows, err := r.db.Read.QueryContext(ctx, `SELECT id, workspace_id, title, author_id, created_at FROM proposals
-		WHERE status = 'pending' AND reminded_at IS NULL AND created_at <= ? ORDER BY created_at`, sqlTime(before))
+		WHERE status = 'pending' AND reminded_at IS NULL AND created_at <= ?`+activeAreaOf("proposals")+` ORDER BY created_at`, sqlTime(before))
 	if err != nil {
 		return nil, err
 	}

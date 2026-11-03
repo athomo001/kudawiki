@@ -3,6 +3,7 @@
 package crypto
 
 import (
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -71,4 +72,13 @@ func LoadMasterKey(path string) ([]byte, error) {
 		return nil, errors.New("master key must be exactly 32 bytes")
 	}
 	return key, nil
+}
+
+// EvidenceKey es la llave Ed25519 que firma el paquete de evidencia de la auditoría (§21.2.7).
+// Sale de la MASTER_KEY, así no hay otro secreto que custodiar y la pública es la misma en cada
+// paquete hasta que la llave maestra rota; el auditor la registra una vez.
+func EvidenceKey(master []byte) ed25519.PrivateKey {
+	m := hmac.New(sha256.New, master)
+	m.Write([]byte("kudawiki audit evidence signing key"))
+	return ed25519.NewKeyFromSeed(m.Sum(nil))
 }

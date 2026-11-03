@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, canEdit, canWrite, codeOf, isPersonalSlug, type Area as AreaT, type Me, type ReadingPrefs } from './lib/api';
+  import { api, ApiError, canEdit, canWrite, codeOf, isPersonalSlug, type Area as AreaT, type Me, type ReadingPrefs, type EditorMode } from './lib/api';
   import { viewer } from './lib/watermark.svelte';
   import { setLocale, errorText, t } from './lib/i18n/index.svelte';
   import { applyPrefs } from './lib/prefs';
@@ -10,7 +10,13 @@
   import MfaSetup from './pages/MfaSetup.svelte';
   import Home from './pages/Home.svelte';
   import MyHome from './pages/MyHome.svelte';
-  import Profile from './pages/Profile.svelte';
+  import ProfileNav from './components/ProfileNav.svelte';
+  import ProfileAccount from './pages/ProfileAccount.svelte';
+  import ProfilePrefs from './pages/ProfilePrefs.svelte';
+  import ProfileNotifications from './pages/ProfileNotifications.svelte';
+  import ProfileSecurity from './pages/ProfileSecurity.svelte';
+  import ProfileSessions from './pages/ProfileSessions.svelte';
+  import ProfileVault from './pages/ProfileVault.svelte';
   import AdminNav from './components/AdminNav.svelte';
   import People from './pages/People.svelte';
   import Areas from './pages/Areas.svelte';
@@ -18,8 +24,11 @@
   import Templates from './pages/Templates.svelte';
   import Audit from './pages/Audit.svelte';
   import Health from './pages/Health.svelte';
+  import AccessReview from './pages/AccessReview.svelte';
+  import Transfer from './pages/Transfer.svelte';
   import Appearance from './pages/Appearance.svelte';
   import Email from './pages/Email.svelte';
+  import Backups from './pages/Backups.svelte';
   import Directory from './pages/Directory.svelte';
   import SiteFooter from './components/SiteFooter.svelte';
   import Area from './pages/Area.svelte';
@@ -73,9 +82,9 @@
   }
 
   // El cambio se ve al instante, sin recargar (SPEC §15); si el servidor lo rechaza, se deshace.
-  async function savePrefs(change: { locale?: 'es' | 'en'; reading_prefs?: ReadingPrefs }) {
+  async function savePrefs(change: { locale?: 'es' | 'en'; reading_prefs?: ReadingPrefs; editor_mode?: EditorMode }) {
     if (!me) return;
-    const before = { locale: me.locale, reading_prefs: me.reading_prefs };
+    const before = { locale: me.locale, reading_prefs: me.reading_prefs, editor_mode: me.editor_mode };
     Object.assign(me, change);
     error = '';
     try {
@@ -90,6 +99,8 @@
   const areaPath = $derived(route.path.match(/^\/w\/(~?[a-z0-9-]+)(?:\/(.*))?$/));
   // Administración (diseño "Kudawiki — Administración", §15): solo el superadmin; para el resto
   // es una ruta más que no existe.
+  // Mi perfil tiene su propia zona con menú, como la administración (§15, "Kudawiki — Mi perfil").
+  const profile = $derived(route.path === '/me/profile' || route.path.startsWith('/me/profile/'));
   const admin = $derived(!!me?.is_global_admin && (route.path === '/admin' || route.path.startsWith('/admin/')));
   const adminArea = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})(\/members)?$/));
   // Un sellado fuera de su área (§6): el superadmin no es miembro, y el aviso al autor lleva aquí.
@@ -130,6 +141,14 @@
     const to = me.workspaces.find((w) => w.slug === last) ?? me.workspaces[0];
     if (to) navigate(`/w/${to.slug}`, { replace: true });
   });
+  // La dirección vieja de un área renombrada (B17) lleva a la nueva, con el mismo resto de ruta.
+  // Solo las de sus áreas: /auth/me no trae las de otras.
+  $effect(() => {
+    const slug = areaPath?.[1];
+    if (!me || !slug || area) return;
+    const to = me.workspaces.find((w) => w.aliases?.includes(slug));
+    if (to) navigate(`/w/${to.slug}${areaPath?.[2] ? `/${areaPath[2]}` : ''}${location.search}${location.hash}`, { replace: true });
+  });
   $effect(() => {
     if (!area) return;
     try {
@@ -164,7 +183,15 @@
     {#if !editing}<TopBar {me} {area} {avatarRev} onprefs={savePrefs} onlogout={logout} />{/if}
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if area}
-      <Area {area} sub={areaPath?.[2] ?? ''} selfId={me.id} onareachanged={loadMe} />
+      <Area
+        {area}
+        sub={areaPath?.[2] ?? ''}
+        selfId={me.id}
+        adminAreas={me.workspaces.filter((w) => w.role === 'admin').length}
+        onareachanged={loadMe}
+        editorMode={me.editor_mode}
+        oneditormode={(m) => savePrefs({ editor_mode: m })}
+      />
     {:else if admin}
       {@const site = `${t('nav.admin')} · ${t('admin.group_site')}`}
       {@const supervision = `${t('nav.admin')} · ${t('admin.group_supervision')}`}
@@ -181,10 +208,16 @@
             {:else if ldapTab}
               <!-- Una sola rama para las cuatro pestañas: el formulario sin guardar no se pierde al cambiar de pestaña. -->
               <Directory tab={(ldapTab[1] as 'rules' | 'sync' | 'test' | undefined) ?? 'connection'} />
+            {:else if route.path === '/admin/transfer'}
+              <Transfer context={`${t('nav.admin')} · ${t('admin.group_access')}`} />
+            {:else if route.path === '/admin/access-review'}
+              <AccessReview endpoint="/admin/access-review" context={`${t('nav.admin')} · ${t('admin.group_access')}`} fixHref="/admin/users" global />
             {:else if route.path === '/admin/appearance'}
               <Appearance />
             {:else if route.path === '/admin/email'}
               <Email email={me.email} />
+            {:else if route.path === '/admin/backups'}
+              <Backups />
             {:else if route.path === '/admin/templates'}
               <Templates endpoint="/admin/templates" context={site} global />
             {:else if route.path === '/admin/health'}
@@ -200,14 +233,36 @@
           <SiteFooter />
         </main>
       </div>
+    {:else if profile}
+      <div class="area">
+        <ProfileNav {me} {avatarRev} />
+        <main class="area-main">
+          <div class="view admin-view">
+            {#if route.path === '/me/profile'}
+              <ProfileAccount {me} {avatarRev} onchanged={profileChanged} />
+            {:else if route.path === '/me/profile/preferences'}
+              <ProfilePrefs {me} onprefs={savePrefs} />
+            {:else if route.path === '/me/profile/notifications'}
+              <ProfileNotifications />
+            {:else if route.path === '/me/profile/security'}
+              <ProfileSecurity {me} onchanged={profileChanged} />
+            {:else if route.path === '/me/profile/sessions'}
+              <ProfileSessions />
+            {:else if route.path === '/me/profile/vault'}
+              <ProfileVault hasVault={me.vault} onchanged={profileChanged} />
+            {:else}
+              <NotFound />
+            {/if}
+          </div>
+          <SiteFooter />
+        </main>
+      </div>
     {:else}
       <main class="view">
         {#if route.path === '/'}
           {#if !me.workspaces.length}<Home {me} />{/if}
         {:else if route.path === '/me'}
           <MyHome {me} />
-        {:else if route.path === '/me/profile'}
-          <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
         {:else if sealedPath}
           <Sealed id={sealedPath[1] ?? ''} memberOf={[me.personal.slug, ...me.workspaces.map((w) => w.slug)]} />
         {:else}

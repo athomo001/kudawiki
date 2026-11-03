@@ -17,8 +17,8 @@ func TestNextRun(t *testing.T) {
 		{"2026-12-31 04:00", "2027-01-01 03:00"},
 	} {
 		now, _ := time.ParseInLocation("2006-01-02 15:04", tc.now, loc)
-		if got := nextRun(now, 3, 0).Format("2006-01-02 15:04"); got != tc.want {
-			t.Errorf("nextRun(%s) = %s, want %s", tc.now, got, tc.want)
+		if got := NextRun(now, 3, 0).Format("2006-01-02 15:04"); got != tc.want {
+			t.Errorf("NextRun(%s) = %s, want %s", tc.now, got, tc.want)
 		}
 	}
 }

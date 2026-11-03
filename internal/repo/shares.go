@@ -55,14 +55,17 @@ const (
 	sharedJoins = ` FROM page_shares sh
 	JOIN pages p ON p.id = sh.page_id AND p.workspace_id = sh.workspace_id
 	JOIN workspaces sw ON sw.id = sh.workspace_id`
-	sharedWhere = ` WHERE sh.target_workspace_id = ? AND sh.status = 'active' AND p.deleted_at IS NULL AND p.min_rank = 1 AND sw.kind = 'area'`
+	// Un área de origen desactivada o por borrar no se ve, tampoco por sus vínculos (§3.5); al
+	// reactivarla vuelven a verse. Archivada sí: es solo lectura.
+	sharedWhere = ` WHERE sh.target_workspace_id = ? AND sh.status = 'active' AND p.deleted_at IS NULL AND p.min_rank = 1 AND sw.kind = 'area'
+	AND sw.status != 'deactivated' AND sw.delete_at IS NULL`
 )
 
 // ShareTargets son las áreas a las que se puede pedir compartir desde la de s: todas las demás
-// áreas, sin los espacios personales.
+// áreas activas, sin los espacios personales (§3.5: una archivada no recibe nada nuevo).
 func (r *Repo) ShareTargets(ctx context.Context, s Scope) ([]ShareTarget, error) {
 	rows, err := r.db.Read.QueryContext(ctx,
-		`SELECT id, name FROM workspaces WHERE kind = 'area' AND id <> ? ORDER BY name`, s.WsID)
+		`SELECT id, name FROM workspaces WHERE kind = 'area' AND id <> ? AND status = 'active' AND delete_at IS NULL ORDER BY name`, s.WsID)
 	if err != nil {
 		return nil, err
 	}

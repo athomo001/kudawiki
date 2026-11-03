@@ -2,7 +2,7 @@
    los reemplaza desde un <style> con nonce que arma el servidor (internal/branding): los
    componentes solo usan tokens. Nada de estilos en línea: la CSP no los deja (§14.5). */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --kw-accent: #1d4f91; /* menú lateral, botón de editar y botones principales */
   --kw-on-accent: #fff;
   --kw-primary: var(--kw-accent);
@@ -76,9 +76,12 @@
   --kw-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
-/* Sin mockup propio todavía (F0): el modo oscuro sigue al sistema con los mismos tokens. */
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Modos de color (SPEC §15, B4): claro, oscuro o rosa, como data-scheme en <html> (lib/scheme.svelte.ts).
+   Solo en pantalla: al imprimir sale siempre en claro. La marca de la empresa trae sus propios
+   tonos para el oscuro (internal/branding) y gana por ir después en la página. */
+@media screen {
+  :root[data-scheme='dark'] {
+    color-scheme: dark; /* barras de desplazamiento y controles nativos */
     --kw-link: #7fa7e0;
     --kw-link-hover: #a9c5ee;
     --kw-bg: #0d1117;
@@ -112,6 +115,57 @@
     --kw-logo-k: #15171c;
   }
 }
+/* Rosa: un rosa empolvado sobrio en toda la interfaz (barra, menú, fondos, enlaces y botones),
+   no chillón. Los estados, los niveles y el diff no cambian: tienen significado (§15.1.2).
+   Contraste AA: texto secundario 6:1, enlaces 6.2:1 y botones 6:1 con texto blanco. */
+@media screen {
+  :root[data-scheme='rose'] {
+    --kw-accent: #9c4766;
+    --kw-link: #a0405f;
+    --kw-link-hover: #7d2f49;
+    --kw-bg: #fffafb;
+    --kw-bg-subtle: #fbf0f3;
+    --kw-hover: #f7e6ec;
+    --kw-text: #2b1f24;
+    --kw-text-body: #3b2c32;
+    --kw-text-soft: #4d3b42;
+    --kw-text-muted: #6e5961;
+    --kw-border: #e2c9d2;
+    --kw-line: #f0dde4;
+    --kw-code-bg: #f8ecf0;
+    --kw-state-info: #9c4766;
+    --kw-info-bg: #fbeaf0;
+    --kw-focus-ring: #a0405f;
+    --kw-sidebar: #8f4560;
+    --kw-on-sidebar: #fff;
+    --kw-sidebar-muted: #f1cfdb;
+    --kw-level-on-sidebar: #ffe0b0;
+    --kw-topbar-bg: #3a2530;
+    --kw-topbar-text: #f6e9ee;
+    --kw-topbar-muted: #c9aab6;
+    --kw-topbar-line: #5a3e4a;
+    --kw-topbar-field: #4a303c;
+    --kw-topbar-field-line: #5d4250;
+    --kw-topbar-strong-line: #6c4f5c;
+    --kw-topbar-focus: #f2b6c8;
+    --kw-topbar-action: #c2577a;
+    --kw-topbar-action-hover: #ad4a6b;
+    --kw-topbar-logo-back: #7a4a5e;
+    --kw-topbar-logo-mid: #c2577a;
+    --kw-topbar-logo-front: #e7a3b9;
+    --kw-topbar-logo-k: #3a2530;
+    --kw-md-heading: #9c4766;
+    --kw-cm-active: #fcf0f4;
+    --kw-cm-selection: #f3d3df;
+    --kw-logo-back: #f3d3df;
+    --kw-logo-mid: #c2577a;
+    --kw-logo-front: #9c4766;
+  }
+}
+
+/* Cambio de modo con un círculo que crece desde el clic (circular reveal, View Transitions API):
+   se apaga el fundido por defecto y lib/scheme.svelte.ts anima el recorte del estado nuevo. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 .topbar {
   --kw-logo-back: var(--kw-topbar-logo-back); --kw-logo-mid: var(--kw-topbar-logo-mid);
   --kw-logo-front: var(--kw-topbar-logo-front); --kw-logo-k: var(--kw-topbar-logo-k);
@@ -205,9 +259,8 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 .totp-secret { overflow-wrap: anywhere; }
 .recovery-codes { columns: 2; column-gap: 2rem; padding-left: 1.75rem; font-size: 0.9375rem; }
 .recovery-codes li { break-inside: avoid; padding: 0.125rem 0; }
-/* Mis sesiones (§8.2): una por línea, el cerrar a la derecha. */
-.session-list + button, .stack > .passkey-action { justify-self: start; }
-.session-list li, .passkey-list li { display: flex; gap: 1rem; justify-content: space-between; align-items: baseline; padding: 0.5rem 0; border-bottom: 1px solid var(--kw-line); }
+/* La passkey nueva (§8.5.2): el botón a la izquierda, no estirado. */
+.stack > .passkey-action { justify-self: start; }
 /* La baja (§8.4): un bloque por área, con lo que se transfiere y a quién. */
 .offboard-area { display: grid; gap: 0.25rem; padding: 0.5rem 0; border-bottom: 1px solid var(--kw-line); }
 .offboard h3 { margin-bottom: 0; }
@@ -381,6 +434,11 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 .tree .tree .nav-item { padding-left: 2rem; }
 .tree .tree .tree .nav-item { padding-left: 3rem; }
 .tree .tree .tree .tree .nav-item { padding-left: 4rem; }
+/* Dónde cae lo que se arrastra (§15, B7): una línea entre hermanas, o un marco al meterla adentro */
+.tree .drop-before { box-shadow: inset 0 2px 0 var(--kw-on-sidebar); }
+.tree .drop-after { box-shadow: inset 0 -2px 0 var(--kw-on-sidebar); }
+.tree .drop-inside { outline: 2px dashed var(--kw-on-sidebar); outline-offset: -2px; }
+.move-linkers { max-height: 12rem; overflow-y: auto; margin: 0; padding-left: 1.25rem; }
 .sidebar .level { color: var(--kw-level-on-sidebar); }
 
 .area-main { flex: 1 1 35rem; min-width: 0; display: flex; flex-direction: column; }
@@ -483,7 +541,9 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
 /* Las palabras de una celda no se parten, y el código solo se corta en los espacios y después
    de "/"; si la tabla no cabe, se desplaza en su caja (lib/enhance.ts). */
 .prose :is(td, th) code .nobr { white-space: nowrap; }
-.table-scroll { margin: 0 0 1.125rem; overflow-x: auto; }
+/* relative: el texto sr-only de una celda (position: absolute) queda dentro del scroll y no
+   ensancha la página en el teléfono. */
+.table-scroll { position: relative; margin: 0 0 1.125rem; overflow-x: auto; }
 .table-scroll > table { margin: 0; }
 .prose th { padding: 0.5rem 0.75rem; border-bottom: 2px solid #d8dde3; color: var(--kw-text); font-size: inherit; }
 .prose td { padding: 0.5rem 0.75rem; color: var(--kw-text-body); }
@@ -587,10 +647,10 @@ th { font-size: 0.875rem; color: var(--kw-text-muted); font-weight: 600; }
   background: var(--kw-bg); color: var(--kw-text); font-size: 0.875rem;
 }
 .secondary:hover { background: var(--kw-hover); }
-@media (prefers-color-scheme: dark) {
-  .editor-source { background: #10141a; }
-  .conflict { background: #33250b; }
-  .conflict h2 { color: #fbe3b3; }
+@media screen {
+  :root[data-scheme='dark'] .editor-source { background: #10141a; }
+  :root[data-scheme='dark'] .conflict { background: #33250b; }
+  :root[data-scheme='dark'] .conflict h2 { color: #fbe3b3; }
 }
 
 /* Diff (SPEC §4.3): la línea cambiada con fondo suave, y lo que cambió dentro de ella más marcado. */
@@ -601,11 +661,11 @@ del.diff-line { background: #fdecea; color: #5c0b07; }
 .diff-skip { color: var(--kw-text-muted); font-style: italic; }
 ins .diff-hl { background: #a6e3b6; font-weight: 600; border-radius: 2px; }
 del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
-@media (prefers-color-scheme: dark) {
-  ins.diff-line { background: #12351f; color: #b6f2c7; }
-  del.diff-line { background: #3d1513; color: #ffc9c4; }
-  ins .diff-hl { background: #1f6b38; }
-  del .diff-hl { background: #7a2620; }
+@media screen {
+  :root[data-scheme='dark'] ins.diff-line { background: #12351f; color: #b6f2c7; }
+  :root[data-scheme='dark'] del.diff-line { background: #3d1513; color: #ffc9c4; }
+  :root[data-scheme='dark'] ins .diff-hl { background: #1f6b38; }
+  :root[data-scheme='dark'] del .diff-hl { background: #7a2620; }
 }
 
 /* Diff con números de línea (bandeja de propuestas, §5.2) */
@@ -699,10 +759,10 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 .template-editor .cm-scroller { min-height: 16rem; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
 .form-actions .primary { margin-top: 0; }
-@media (prefers-color-scheme: dark) {
-  .proposal-row[aria-current='true'] { background: #15233a; }
-  .proposal-note { background: #33250b; color: #fbe3b3; }
-  .proposal-note.clash { background: #3a1513; color: #ffd2cd; }
+@media screen {
+  :root[data-scheme='dark'] .proposal-row[aria-current='true'] { background: #15233a; }
+  :root[data-scheme='dark'] .proposal-note { background: #33250b; color: #fbe3b3; }
+  :root[data-scheme='dark'] .proposal-note.clash { background: #3a1513; color: #ffd2cd; }
 }
 
 /* ===== Pantallas angostas: columnas apiladas ===== */
@@ -789,9 +849,9 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 }
 .tb-tip p { margin: 0 0 0.375rem; }
 .tb-tip .link { color: inherit; font-weight: 600; text-decoration: underline; }
-@media (prefers-color-scheme: dark) {
-  .tb-tip { background: #33250b; color: #fbe3b3; }
-  .tb-tip::before { border-bottom-color: #33250b; }
+@media screen {
+  :root[data-scheme='dark'] .tb-tip { background: #33250b; color: #fbe3b3; }
+  :root[data-scheme='dark'] .tb-tip::before { border-bottom-color: #33250b; }
 }
 .tb {
   display: inline-grid; place-items: center; min-width: 2.25rem; height: 2.25rem; padding: 0 0.375rem;
@@ -815,11 +875,11 @@ del .diff-hl { background: #f6b8b2; font-weight: 600; border-radius: 2px; }
 .callout-tip { background: #edf8f0; }
 .callout-warning { background: #fff7ea; color: #5c3b00; }
 .callout-danger { background: #fdeeed; color: #5c0b07; }
-@media (prefers-color-scheme: dark) {
-  .callout, .callout-note { background: #15233a; }
-  .callout-tip { background: #12301c; }
-  .callout-warning { background: #33250b; color: #fbe3b3; }
-  .callout-danger { background: #3a1513; color: #ffd2cd; }
+@media screen {
+  :root[data-scheme='dark'] .callout, :root[data-scheme='dark'] .callout-note { background: #15233a; }
+  :root[data-scheme='dark'] .callout-tip { background: #12301c; }
+  :root[data-scheme='dark'] .callout-warning { background: #33250b; color: #fbe3b3; }
+  :root[data-scheme='dark'] .callout-danger { background: #3a1513; color: #ffd2cd; }
 }
 
 /* Las que no caben pasan a otra fila: un nombre ya no se parte por letra (ver .prose). */
@@ -882,7 +942,7 @@ kbd { padding: 0.0625rem 0.375rem; border: 1px solid var(--kw-border); border-bo
 .search-dialog li[aria-selected='true'] a { background: var(--kw-hover); }
 .snippet { display: block; font-size: 0.875rem; color: var(--kw-text-muted); }
 mark { background: #fff1a8; color: inherit; }
-@media (prefers-color-scheme: dark) { mark { background: #5c4d00; } }
+@media screen { :root[data-scheme='dark'] mark { background: #5c4d00; } }
 .results { margin: 0; padding-left: 1.25rem; }
 .results li { margin-bottom: 1.125rem; }
 .results .snippet { margin: 0.25rem 0 0; }
@@ -991,12 +1051,12 @@ mark { background: #fff1a8; color: inherit; }
 .ldap-steps .fail .ldap-status { color: var(--kw-state-error); }
 .ldap-user-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; }
 .ldap-user-form .field { flex: 1 1 16rem; margin: 0; }
-.ldap-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.75rem 0; }
+.ldap-facts, .facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.75rem 0; }
 /* "Gestionado por AD: grupo" debajo del rol (§8.3.2). */
 td .managed { display: block; }
 .ldap-sync .conflict-actions { margin-bottom: 0.75rem; }
-.ldap-facts dt { color: var(--kw-text-muted); }
-.ldap-facts dd { margin: 0; overflow-wrap: anywhere; }
+.ldap-facts dt, .facts dt { color: var(--kw-text-muted); }
+.ldap-facts dd, .facts dd { margin: 0; overflow-wrap: anywhere; }
 .ldap-access { margin: 0; padding-left: 1.25rem; }
 .ldap-dn { display: block; font-family: var(--kw-font-mono); font-size: 0.75rem; overflow-wrap: anywhere; }
 .ldap-rules table { width: 100%; }
@@ -1004,17 +1064,6 @@ td .managed { display: block; }
 .ldap-groups .check { align-items: flex-start; }
 .ldap-preview p { margin: 0.25rem 0; }
 
-/* Mi perfil (SPEC §8.5.2): una columna sin cajas, como Apariencia. */
-.profile { max-width: 36rem; }
-.profile h2 { margin: 1.75rem 0 0.25rem; }
-.profile fieldset { display: grid; gap: 0.125rem; margin: 0; padding: 0; border: 0; }
-.profile-photo { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: flex-start; }
-.profile-photo .field { flex: 1 1 18rem; }
-.profile-photo h2 { margin-top: 0; }
-.profile-photo .link { justify-self: start; }
-.profile-value { font-weight: 400; }
-.prefs-panel { display: grid; gap: 0.75rem; font-size: 0.875rem; }
-.lang-options { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 img.avatar { object-fit: cover; }
 .avatar.large { width: 5rem; height: 5rem; font-size: 1.75rem; }
 
@@ -1127,6 +1176,7 @@ button.picker-toggle:hover { background: var(--kw-hover); }
 .setting-fields :is(input, select, textarea) { font-weight: 400; }
 .setting-fields :is(input:not([type]), input[type='text'], input[type='email'], input[type='url'], input[type='password'], textarea, select) { width: 100%; }
 .setting-fields textarea { resize: vertical; }
+.setting-fields code { overflow-wrap: anywhere; }
 .setting-fields fieldset { display: grid; gap: 0.375rem; margin: 0; padding: 0; border: 0; }
 .setting-fields legend { margin-bottom: 0.375rem; padding: 0; font-weight: 600; font-size: 0.875rem; }
 .setting-fields small { font-weight: 400; }
@@ -1185,6 +1235,9 @@ label.check-hint { align-items: flex-start; gap: 0.625rem; }
 .row-actions .dropdown { display: inline-block; }
 .row-actions .dropdown-panel { text-align: left; }
 .row-actions .menu { min-width: 17rem; }
+/* Respaldos: Restaurar y Borrar en la misma línea, para que todas las filas midan lo mismo. */
+.backup-actions { width: auto; white-space: nowrap; }
+.backup-actions .link { margin-right: 1.25rem; }
 .menu .menu-label { padding: 0.375rem 0.625rem 0.125rem; color: var(--kw-text-muted); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 .menu-sep { height: 1px; margin: 0.375rem 0; background: var(--kw-line); }
 
@@ -1195,8 +1248,45 @@ label.check-hint { align-items: flex-start; gap: 0.625rem; }
 }
 .savebar p { flex: 1; display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin: 0; font-size: 0.875rem; }
 
+/* Una tabla dentro de un ajuste (correo por categoría, passkeys) necesita más ancho. */
+.setting.setting-wide { grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr); }
+.admin-table .center { text-align: center; }
+
+/* ===== Mi perfil (diseño "Kudawiki — Mi perfil", SPEC §15) =====
+   El mismo molde que Administración; el menú lleva arriba la foto y el nombre de la persona. */
+.profile-nav-head { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+.profile-nav-head > div { display: grid; min-width: 0; }
+.profile-nav-head .sidebar-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-kicker { color: var(--kw-sidebar-muted); font-size: 0.75rem; }
+.profile-nav-back { margin: 0 1rem 0.25rem; }
+.nav-dot { flex: none; width: 8px; height: 8px; margin-left: auto; border-radius: 50%; background: var(--kw-state-warning); }
+.profile-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.25rem; }
+.profile-photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
+.profile-photo-actions .secondary { display: inline-flex; align-items: center; gap: 0.375rem; }
+.profile-value { font-weight: 400; }
+.locked-hint { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--kw-text-muted); font-size: 0.8125rem; }
+.profile-areas { margin: 0; }
+.profile-areas li { display: flex; gap: 1rem; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--kw-line); }
+.profile-areas li:last-child { border-bottom: 0; }
+.field-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.status-line { display: flex; flex-wrap: wrap; gap: 0.75rem 2.5rem; margin: 0; }
+.status-line dt { margin-bottom: 0.25rem; color: var(--kw-text-muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.status-line dd { margin: 0; }
+.choices-row { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.choices-row label.choice { border-top: 0; border-left: 1px solid var(--kw-line); }
+.choices-row label.choice:first-child { border-left: 0; }
+/* La categoría es el rótulo de la fila: texto normal, no el estilo de encabezado de columna. */
+.notif-table tbody th { padding: 0.625rem 0.75rem; font-size: 0.875rem; font-weight: 500; letter-spacing: 0; text-transform: none; white-space: normal; }
+.notif-table input { accent-color: var(--kw-accent); }
+
 @media (max-width: 75rem) {
-  .setting { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+  .setting, .setting.setting-wide { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+}
+@media (max-width: 40rem) {
+  .field-pair { grid-template-columns: minmax(0, 1fr); }
+  .choices-row { grid-auto-flow: row; }
+  .choices-row label.choice { border-left: 0; border-top: 1px solid var(--kw-line); }
+  .choices-row label.choice:first-child { border-top: 0; }
 }
 @media (max-width: 60rem) {
   .page-head { position: static; margin-inline: -1.25rem; padding-inline: 1.25rem; }
@@ -1220,3 +1310,24 @@ label.check-hint { align-items: flex-start; gap: 0.625rem; }
 .sealed-grants { margin-top: 1.25rem; display: grid; gap: 0.5rem; }
 .sealed-grants ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
 .sealed-grants li { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; }
+
+/* Traslado entre áreas (§4.13): origen y destino lado a lado en una pantalla ancha. */
+.transfer-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0 2rem; max-width: 48rem; }
+.transfer-form fieldset { display: grid; gap: 0.125rem; margin: 0; padding: 0; border: 0; }
+.transfer-form legend { font-weight: 600; margin-bottom: 0.5rem; }
+.transfer-form .form-actions { grid-column: 1 / -1; }
+
+/* Modo visual del editor (§4.2): una sola columna con el aspecto de la página publicada.
+   ProseMirror necesita pre-wrap para respetar los espacios que se escriben. */
+.editor-body.hidden-mode { display: none; }
+.editor-visual { flex: 1; min-height: 0; overflow: auto; padding: 0 1.5rem 2rem; }
+.visual .toolbar { position: sticky; top: 0; z-index: 1; background: var(--kw-bg); padding: 0.25rem 0; }
+.visual-host .ProseMirror { min-height: 60vh; outline: none; white-space: pre-wrap; word-wrap: break-word; max-width: 50rem; }
+.visual-host .ProseMirror:focus-visible { box-shadow: 0 0 0 2px var(--kw-focus, var(--kw-primary)); border-radius: 4px; }
+.visual-host .ProseMirror pre { white-space: pre; }
+.visual-host .ProseMirror-selectednode { outline: 2px solid var(--kw-primary); }
+.visual-host .ProseMirror-gapcursor { display: none; pointer-events: none; position: absolute; }
+.visual-host .ProseMirror-focused .ProseMirror-gapcursor { display: block; }
+.mode-switch { display: inline-flex; border: 1px solid var(--kw-border); border-radius: 6px; overflow: hidden; }
+.mode-switch button { border: 0; border-radius: 0; background: transparent; padding: 0.25rem 0.75rem; color: var(--kw-text-body); }
+.mode-switch button[aria-pressed='true'] { background: var(--kw-primary); color: var(--kw-on-primary); }

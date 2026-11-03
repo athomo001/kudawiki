@@ -214,10 +214,12 @@ func iconVariants(src source) ([]asset, error) {
 // Cada PNG es cuadrado; su lado sale de la cabecera IHDR.
 func encodeICO(pngs ...[]byte) []byte {
 	var b bytes.Buffer
+	// #nosec G115 -- dos o tres PNG propios
 	binary.Write(&b, binary.LittleEndian, [3]uint16{0, 1, uint16(len(pngs))})
 	offset := 6 + 16*len(pngs)
 	for _, p := range pngs {
 		side := binary.BigEndian.Uint32(p[16:20])
+		// #nosec G115 -- íconos de hasta 256 px generados por nosotros; .ico guarda 256 como 0
 		binary.Write(&b, binary.LittleEndian, struct {
 			W, H, Colors, Reserved uint8
 			Planes, Bits           uint16

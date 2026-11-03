@@ -12,8 +12,6 @@ import (
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/search"
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/text"
 )
 
 var (
@@ -31,10 +29,7 @@ var tagRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} _-]*$`)
 // Links devuelve las rutas a las que enlaza el contenido con [[…]] (SPEC §4.7). Sale del
 // mismo parser que el render: un [[x]] dentro de un bloque de código no es un enlace.
 func Links(markdown string) []string {
-	src := []byte(markdown)
-	pc := parser.NewContext()
-	pc.Set(optionsKey, &Options{})
-	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(pc))
+	doc, _ := parse(markdown, &Options{})
 	seen := map[string]bool{}
 	var out []string
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -106,6 +101,33 @@ func (s *Service) SetTags(ctx context.Context, sc repo.Scope, slug string, tags 
 	}
 	s.record(ctx, sc, audit.PageUpdate, p.ID, map[string]any{"fields": []string{"tags"}})
 	return nil
+}
+
+// maxOrder: una carpeta con más hijas se ordena por ruta; arrastrar entre miles no tiene sentido.
+const maxOrder = 1000
+
+// Order fija el orden manual de las hijas de una carpeta del árbol (§15, B7); parent "" es la
+// raíz. Es presentación, como el ícono: no crea revisión ni va a la auditoría, pero en un
+// subárbol que exige propuesta tampoco se cambia directo.
+func (s *Service) Order(ctx context.Context, sc repo.Scope, parent string, slugs []string) error {
+	if (parent != "" && !ValidSlug(parent)) || len(slugs) == 0 || len(slugs) > maxOrder {
+		return ErrInvalidMove
+	}
+	seen := make(map[string]bool, len(slugs))
+	for _, slug := range slugs {
+		rest, ok := strings.CutPrefix(slug, parent+"/")
+		if parent == "" {
+			rest, ok = slug, true
+		}
+		if !ok || !ValidSlug(slug) || strings.Contains(rest, "/") || seen[slug] {
+			return ErrInvalidMove
+		}
+		seen[slug] = true
+	}
+	if err := s.direct(ctx, sc, slugs...); err != nil {
+		return err
+	}
+	return s.store.SetOrder(ctx, sc, slugs)
 }
 
 // Move mueve la página y sus subpáginas a otra ruta: deja alias en las rutas viejas y

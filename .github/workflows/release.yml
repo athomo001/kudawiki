@@ -1,0 +1,83 @@
+name: release
+
+# Al empujar una etiqueta v* (SPEC §13.9, §21.2.2): binarios Linux, SBOM CycloneDX, sumas
+# SHA-256 firmadas y la imagen firmada con su SBOM adjunto (§13.11). Firma sin llave de cosign:
+# el certificado dice qué flujo y qué etiqueta la firmaron, y no hay llave privada que custodiar.
+# El release queda en borrador: las notas (migraciones, si se puede saltar versiones, si hay que
+# reindexar, avisos de seguridad) las escribe el dueño antes de publicarlo.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # crear el release y subir sus archivos
+      packages: write   # publicar la imagen en ghcr.io
+      id-token: write   # el token OIDC con que cosign firma sin llave
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/.node-version
+
+      # Lo mismo que el CI: no se publica nada que no lo pase.
+      - run: make test
+      - run: make lint
+      - run: make audit
+
+      - name: Binarios
+        run: |
+          mkdir dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/kudawiki-linux-$arch" ./cmd/kudawiki
+          done
+
+      # Del código y no del binario: así entran también las librerías de la UI embebida (pnpm-lock).
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/kudawiki-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sumas firmadas
+        working-directory: dist
+        run: |
+          sha256sum kudawiki-* > SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+
+      # La etapa final del Dockerfile solo copia: compilar para arm64 no necesita emulación.
+      - name: Imagen firmada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --use
+          docker buildx build --platform linux/amd64,linux/arm64 --push \
+            -t "$image:$GITHUB_REF_NAME" --metadata-file meta.json .
+          digest=$(jq -r '."containerimage.digest"' meta.json)
+          cosign sign --yes "$image@$digest"
+          cosign attest --yes --type cyclonedx --predicate dist/kudawiki-sbom.cdx.json "$image@$digest"
+          echo "$image@$digest" > dist/IMAGE
+
+      - name: Release en borrador
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "Notas por escribir (ver CHANGELOG.md)."

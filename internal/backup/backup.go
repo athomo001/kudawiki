@@ -42,6 +42,7 @@ const (
 	Manual     Kind = "manual"      // kudawiki backup
 	PreMigrate Kind = "pre-migrate" // antes de migrar, solo la base (§13.9)
 	PreRotate  Kind = "pre-rotate"  // antes de rotar la MASTER_KEY, solo la base: storage/ no cambia (§6.5)
+	PreReset   Kind = "pre-reset"   // antes de "Borrar todo" desde el panel, completo y verificado (F8-B)
 )
 
 // Manifest va al final del archivo: lo que tiene, de qué esquema es y el hash de cada parte.
@@ -359,4 +360,22 @@ func InUse(dbPath string) (bool, error) {
 		return true, nil // ocupada (SQLITE_BUSY o LOCKED)
 	}
 	return mode != "delete", nil
+}
+
+// Extract verifica el archivo y lo deja en dir (que tiene que existir y estar vacía): la base en
+// dir/wiki.db y los archivos en dir/storage/. Es para probar una restauración sin tocar la
+// instalación (§21.2.4).
+func Extract(archivePath, dir string) (Manifest, error) {
+	return walk(archivePath, func(name string, r io.Reader) error {
+		dst := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, r)
+		return errors.Join(err, out.Close())
+	})
 }

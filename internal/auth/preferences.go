@@ -14,6 +14,7 @@ var ErrInvalidPreferences = errors.New("invalid_preferences")
 type Preferences struct {
 	Locale       *string
 	ReadingPrefs *repo.ReadingPrefs
+	EditorMode   *string
 }
 
 // SetPreferences guarda el idioma y las preferencias de lectura de la persona misma (SPEC §15).
@@ -23,14 +24,17 @@ func (s *Service) SetPreferences(ctx context.Context, userID string, p Preferenc
 	if err != nil {
 		return err
 	}
-	locale, prefs := u.Locale, u.ReadingPrefs
+	locale, prefs, mode := u.Locale, u.ReadingPrefs, u.EditorMode
 	if p.Locale != nil {
 		locale = *p.Locale
 	}
 	if p.ReadingPrefs != nil {
 		prefs = *p.ReadingPrefs
 	}
-	if locale != "es" && locale != "en" {
+	if p.EditorMode != nil {
+		mode = *p.EditorMode
+	}
+	if (locale != "es" && locale != "en") || (mode != "markdown" && mode != "visual") {
 		return ErrInvalidPreferences
 	}
 	switch prefs.Font {
@@ -38,5 +42,5 @@ func (s *Service) SetPreferences(ctx context.Context, userID string, p Preferenc
 	default:
 		return ErrInvalidPreferences
 	}
-	return s.store.SetPreferences(ctx, userID, locale, prefs)
+	return s.store.SetPreferences(ctx, userID, locale, prefs, mode)
 }

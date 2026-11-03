@@ -11,9 +11,8 @@
 
 </div>
 
-> [!WARNING]
-> **Proyecto en preparación — Ultra Alpha.**
-> Por ahora solo se está armando la infraestructura y el diseño de lo que se construirá en los próximos días. Todavía no hay código funcional, ni releases, ni instrucciones de instalación. Todo lo descrito aquí puede cambiar.
+> [!NOTE]
+> **Camino a v1.0.** Las fases F1 a F8 están construidas y la auditoría interna con pentest no dejó hallazgos altos abiertos. Falta etiquetar la versión. Antes de instalar en producción, leer [SECURITY.md](SECURITY.md) y la guía de operación (`docs/operacion/`).
 
 ---
 
@@ -40,19 +39,19 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 - **Historial de versiones** de cada página, con diffs y reversión.
 - **Despliegue simple:** un solo ejecutable que incluye backend, base de datos y frontend, corriendo en un solo contenedor Docker.
 
-## Funcionalidades planificadas
+## Algunas funcionalidades
 
 - Modo **borrador con aprobación**: un usuario propone cambios a un documento y su superior los aprueba, rechaza o ajusta.
 - **Niveles de privacidad** jerárquicos: un nivel superior puede leer lo de los niveles inferiores, pero no al revés.
 - **Borradores privados**: documentación personal que solo ve su autor (y el superadmin).
 - **Documentos ultra seguros**: protegidos con una contraseña propia del documento, distinta de la del usuario.
 
-## Stack tecnológico previsto
+## Stack tecnológico
 
 | Capa | Tecnología |
 | :--- | :--- |
 | Backend | Go (librería estándar + router `chi`) |
-| Markdown | `goldmark` (CommonMark + tablas + sanitización) |
+| Markdown | `goldmark` (CommonMark + tablas) + `bluemonday` (sanitización) + `chroma` (código); editor visual Milkdown |
 | Base de datos | SQLite embebido (modo WAL) + búsqueda FTS5 |
 | Frontend | Svelte (SPA compilada con Vite; Node 26 LTS y pnpm solo para el build) |
 | Distribución | Binario único con frontend y migraciones embebidas (`go:embed`), en un solo contenedor Docker |
@@ -62,14 +61,15 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | Fase | Estado |
 | :--- | :--- |
 | F0 · Diseño y especificación | 🟡 En curso |
-| F1 · Esqueleto | 🟡 Falta el CI en GitHub |
+| F1 · Esqueleto | 🟡 Falta ver el CI verde en GitHub (primer push) |
 | F2 · Wiki con aislamiento | ✅ Hecha |
 | F3 · Niveles, auditoría y respaldos | ✅ Hecha |
 | F4 · Propuestas y notificaciones | ✅ Hecha |
 | F5 · Espacio personal y vigencia | ✅ Hecha |
 | F6 · Identidad, AD y 2FA | ✅ Hecha |
 | F7 · Documentos sellados | ✅ Hecha |
-| F8 · Endurecimiento y v1.0 | ⚪ Pendiente |
+| F8 · Endurecimiento y v1.0 | ✅ Hecha (falta etiquetar v1.0) |
+| F8-B · Faltantes antes de v1.0 | ✅ Hecha: respaldos y borrar todo en el panel, borrar y descargar respaldos, modos de color, Mi perfil |
 
 Detalle de cada fase en [FASES.md](FASES.md) · cambios en [CHANGELOG.md](CHANGELOG.md) · mapa del producto en [spec/MAPA.md](spec/MAPA.md) · especificación completa en [spec/SPEC.md](spec/SPEC.md).
 
@@ -89,7 +89,7 @@ Queda en <http://localhost:8080>. Respalda el volumen `keys` (la llave maestra) 
 
 ### Respaldos
 
-Kudawiki se respalda sola cada día a las 03:00 (`KUDAWIKI_BACKUP_TIME`) en el volumen `data` (`/data/backups`), y guarda 7 diarios, 4 semanales y 6 mensuales. Antes de cada actualización que cambia la base, hace además un respaldo propio (`kudawiki-pre-migrate-…`). Cada respaldo trae la base y los archivos subidos, con el SHA-256 de cada parte; **la llave maestra no va adentro**.
+Kudawiki se respalda sola cada día a las 03:00 (`KUDAWIKI_BACKUP_TIME`) en el volumen `data` (`/data/backups`), y guarda 7 diarios, 4 semanales y 6 mensuales. Antes de cada actualización que cambia la base, hace además un respaldo propio (`kudawiki-pre-migrate-…`); de esos quedan los 3 últimos. Los demás se borran desde *Administración → Respaldos*, donde también se descargan. Cada respaldo trae la base y los archivos subidos, con el SHA-256 de cada parte; **la llave maestra no va adentro**.
 
 ```sh
 docker compose exec kudawiki /kudawiki backup                 # uno ahora
@@ -99,9 +99,9 @@ docker compose run --rm kudawiki audit verify                  # la cadena de au
 docker compose up -d
 ```
 
-En otra máquina, se monta el archivo: `docker compose run --rm -v "$PWD/<archivo>.tar.zst:/restore.tar.zst:ro" kudawiki restore /restore.tar.zst`. Lo que había antes no se borra: queda en `/data/before-restore-<hora>`. Los respaldos viven en el mismo volumen que los datos: **copiarlos fuera del servidor es tarea de quien opera** hasta que llegue el destino externo (F8).
+En otra máquina, se monta el archivo: `docker compose run --rm -v "$PWD/<archivo>.tar.zst:/restore.tar.zst:ro" kudawiki restore /restore.tar.zst`. Lo que había antes no se borra: queda en `/data/before-restore-<hora>`. Con un destino S3 compatible configurado (`backup.remote.*`), cada respaldo se sube cifrado fuera del servidor y una vez por semana se restaura uno de prueba en una carpeta temporal. Sin destino externo, los respaldos quedan en el mismo volumen que los datos y **copiarlos fuera es tarea de quien opera**. RPO, RTO y el procedimiento completo están en `docs/operacion/respaldos-y-recuperacion.md`.
 
-Para revisar la salud del contenido (enlaces rotos, archivos que faltan, índice de búsqueda): `docker compose exec kudawiki /kudawiki doctor`, o la pantalla **Salud** del admin del área y del superadmin.
+Para revisar la salud del contenido (enlaces rotos, archivos que faltan, índice de búsqueda): `docker compose exec kudawiki /kudawiki doctor`, o la pantalla **Salud** del admin del área y del superadmin. Para revisar la instalación (permisos, llave maestra, TLS, 2FA de los admins, respaldos): `docker compose exec kudawiki /kudawiki doctor --security`.
 
 ### Marca de la empresa
 
@@ -127,7 +127,7 @@ docker compose exec kudawiki /kudawiki admin create-superadmin soporte@acme.cl "
 docker compose exec kudawiki /kudawiki admin revoke-sessions --all      # o un correo
 ```
 
-Para desarrollar: `make test` (compila la UI con pnpm y corre los tests), `make lint`, `make audit`, y `make load` (prueba de carga con 50 000 páginas; deja el resultado en `docs/rendimiento.md`). Las pruebas contra directorios reales (Samba AD, OpenLDAP, 389 DS y FreeIPA en contenedores) se corren con `sh test/ldap/run.sh`: la primera vez FreeIPA tarda varios minutos en instalarse.
+Para desarrollar: `make test` (compila la UI con pnpm y corre los tests), `make lint`, `make audit` (govulncheck, gosec y pnpm audit), `make e2e` (Playwright con Chrome contra el binario real: flujos y accesibilidad), y `make load` (prueba de carga con 50 000 páginas; deja el resultado en `docs/rendimiento.md`). Las pruebas contra directorios reales (Samba AD, OpenLDAP, 389 DS y FreeIPA en contenedores) se corren con `sh test/ldap/run.sh`: la primera vez FreeIPA tarda varios minutos en instalarse.
 
 ## Licencia
 

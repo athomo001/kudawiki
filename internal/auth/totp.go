@@ -419,6 +419,7 @@ func matchTOTP(secret []byte, code string, now time.Time) (int64, bool) {
 // totpCode es HOTP (RFC 4226 §5.3) sobre el número de paso.
 func totpCode(secret []byte, step int64) string {
 	var msg [8]byte
+	// #nosec G115 -- el paso sale de la hora actual: siempre positivo
 	binary.BigEndian.PutUint64(msg[:], uint64(step))
 	m := hmac.New(sha1.New, secret)
 	m.Write(msg[:])

@@ -37,22 +37,56 @@ var (
 	WsCreate           = Action{"ws.create"}
 	WsUpdate           = Action{"ws.update"}
 	BackupRun          = Action{"backup.run"}
-	WsMemberAdd        = Action{"ws.member_add"}
-	WsMemberRemove     = Action{"ws.member_remove"}
-	WsMemberRole       = Action{"ws.member_role_change"}
-	PageCreate         = Action{"page.create"}
-	PageUpdate         = Action{"page.update"}
-	PageRevert         = Action{"page.revert"}
-	PageMove           = Action{"page.move"}
-	PageLevelChange    = Action{"page.level_change"}
-	PageDelete         = Action{"page.delete"}
-	PageRestore        = Action{"page.restore"}
-	PagePurge          = Action{"page.purge"}
-	PageRead           = Action{"page.read"}             // solo páginas N3 (§11.1)
-	PathUnavailable    = Action{"page.path_unavailable"} // §19.35
-	MediaUpload        = Action{"media.upload"}
-	MediaDelete        = Action{"media.delete"}
-	RevisionPurge      = Action{"revision.purge"} // la retención del historial del área (§4.3)
+	// Exportar la auditoría (JSONL/CSV desde el panel, paquete de evidencia desde la consola, §11, §21.2.7).
+	AuditExport = Action{"audit.export"}
+	// El respaldo fuera del servidor y su verificación (§13.3, §21.2.4); backup.failed es
+	// cualquiera de los pasos que falló, con meta.step.
+	BackupUpload = Action{"backup.upload"}
+	BackupVerify = Action{"backup.verify"}
+	BackupFailed = Action{"backup.failed"}
+	// F8-B: la configuración de los respaldos desde el panel y "Borrar todo".
+	BackupSettingsUpdate = Action{"backup.settings_update"}
+	SiteReset            = Action{"site.reset"}
+	BackupDelete         = Action{"backup.delete"}   // F8-B.6: borrar un respaldo desde el panel
+	BackupDownload       = Action{"backup.download"} // F8-B.7: bajarlo desde el panel, sin cifrar
+	// La revisión periódica de accesos (§21.2.7): quién confirmó la lista y el aviso al vencer.
+	AccessReviewConfirm = Action{"access_review.confirm"}
+	AccessReviewDue     = Action{"access_review.due"}
+	// Ciclo de vida de un área (§3.5) y su slug (B17).
+	WsArchive       = Action{"ws.archive"}
+	WsUnarchive     = Action{"ws.unarchive"}
+	WsDeactivate    = Action{"ws.deactivate"}
+	WsReactivate    = Action{"ws.reactivate"}
+	WsDeleteRequest = Action{"ws.delete_request"}
+	WsDeleteCancel  = Action{"ws.delete_cancel"}
+	WsPurge         = Action{"ws.purge"}
+	WsSlugChange    = Action{"ws.slug_change"}
+	// Traslado entre áreas (§4.13): uno en cada área, unidos por meta.transfer.
+	PageTransferOut = Action{"page.transfer_out"}
+	PageTransferIn  = Action{"page.transfer_in"}
+	// Exportar e importar un área como Markdown (§13.8).
+	WsExport = Action{"ws.export"}
+	WsImport = Action{"ws.import"}
+	// Datos personales (§13.10): la purga por retención (cuántos, no de quién) y la exportación
+	// de lo que la wiki tiene de una persona.
+	PrivacyRetention = Action{"privacy.retention"}
+	PrivacyExport    = Action{"privacy.export"}
+	WsMemberAdd      = Action{"ws.member_add"}
+	WsMemberRemove   = Action{"ws.member_remove"}
+	WsMemberRole     = Action{"ws.member_role_change"}
+	PageCreate       = Action{"page.create"}
+	PageUpdate       = Action{"page.update"}
+	PageRevert       = Action{"page.revert"}
+	PageMove         = Action{"page.move"}
+	PageLevelChange  = Action{"page.level_change"}
+	PageDelete       = Action{"page.delete"}
+	PageRestore      = Action{"page.restore"}
+	PagePurge        = Action{"page.purge"}
+	PageRead         = Action{"page.read"}             // solo páginas N3 (§11.1)
+	PathUnavailable  = Action{"page.path_unavailable"} // §19.35
+	MediaUpload      = Action{"media.upload"}
+	MediaDelete      = Action{"media.delete"}
+	RevisionPurge    = Action{"revision.purge"} // la retención del historial del área (§4.3)
 	// Anuncios del inicio del área (§4.17).
 	AnnouncementCreate = Action{"announcement.create"}
 	AnnouncementDelete = Action{"announcement.delete"}
@@ -199,6 +233,10 @@ var All = []Action{
 	SealedCreate, SealedUnlock, SealedUnlockFailed, SealedAdminOpen, SealedPurge, SealedOwnerTransfer, SealedPasswordSet, SealedGrant, SealedRevoke, VaultSet,
 	SealedDeclassify, SealedResetRequest, SealedResetApprove, SealedResetComplete,
 	MasterKeyRotate, MasterKeySplit, MasterKeyCombine,
+	AuditExport, BackupUpload, BackupVerify, BackupFailed, BackupSettingsUpdate, SiteReset, BackupDelete, BackupDownload,
+	AccessReviewConfirm, AccessReviewDue,
+	WsArchive, WsUnarchive, WsDeactivate, WsReactivate, WsDeleteRequest, WsDeleteCancel, WsPurge, WsSlugChange,
+	PageTransferOut, PageTransferIn, WsExport, WsImport, PrivacyRetention, PrivacyExport,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.
@@ -210,6 +248,12 @@ type actorKey struct{}
 // recibir la IP ni el nombre como parámetros.
 func WithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, actorKey{}, a)
+}
+
+// WithActorFrom pasa el actor de from a ctx: una tarea que sigue después de la petición (un
+// respaldo pedido desde el panel) vive con ctx pero se registra a nombre de quien la pidió.
+func WithActorFrom(ctx, from context.Context) context.Context {
+	return WithActor(ctx, actorFrom(from))
 }
 
 func actorFrom(ctx context.Context) Actor {

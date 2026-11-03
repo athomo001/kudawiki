@@ -122,7 +122,7 @@ func TestSidebarFollowsPrimary(t *testing.T) {
 // la etiqueta ni inyecte otra regla.
 func TestCSSIsOnlyVariables(t *testing.T) {
 	css := Derive(Colors{Primary: "#f5c400", Header: "#f0f0f0", Sidebar: "#123456"}).CSS()
-	if !regexp.MustCompile(`^(:root\{(--kw-[a-z-]+:(#[0-9a-f]{6}|rgb\([0-9 ./]+\));)+\}|@media \(prefers-color-scheme: dark\)\{|\})+$`).MatchString(css) {
+	if !regexp.MustCompile(`^(:root(\[data-scheme='dark'\])?\{(--kw-[a-z-]+:(#[0-9a-f]{6}|rgb\([0-9 ./]+\));)+\}|@media screen\{|\})+$`).MatchString(css) {
 		t.Errorf("unexpected css: %s", css)
 	}
 }

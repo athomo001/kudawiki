@@ -528,11 +528,15 @@ func (s *Service) link(n repo.Notification) string {
 		return area + "/reads"
 	case "share_pending", "share_ended":
 		return area + "/shares"
+	case "access_review_due":
+		return area + "/access-review"
 	case "shared_received":
 		var p payload
 		_ = json.Unmarshal([]byte(n.Payload), &p)
 		return area + "/shared/" + p.Share
-	case "sealed_admin_access", "sealed_reset_approved":
+	case "proposal_transferred":
+		return area + "/proposals"
+	case "sealed_admin_access", "sealed_reset_approved", "sealed_transferred":
 		var p payload
 		_ = json.Unmarshal([]byte(n.Payload), &p)
 		return s.baseURL + "/sealed/" + p.Sealed

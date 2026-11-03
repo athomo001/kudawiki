@@ -105,6 +105,7 @@ type store interface {
 	SetPageReview(ctx context.Context, s repo.Scope, pageID, ownerID string, days int) error
 	OwnerRank(ctx context.Context, s repo.Scope, userID string) (int, error)
 	MovePages(ctx context.Context, s repo.Scope, actorID, from, to string, rewrite repo.Rewrite) (string, int, error)
+	SetOrder(ctx context.Context, s repo.Scope, slugs []string) error
 	SetLevel(ctx context.Context, s repo.Scope, actorID, slug string, level int) (string, int, error)
 	DeletePages(ctx context.Context, s repo.Scope, actorID, slug string) (string, int, error)
 	RestorePages(ctx context.Context, s repo.Scope, actorID, id string) (int, error)
@@ -317,6 +318,10 @@ func withinLines(dmp *diffmatchpatch.DiffMatchPatch, lines []DiffLine) {
 	}
 }
 
+// maxWordTokens: las palabras distintas que caben desde U+E000 hasta el último punto de código.
+// Más allá, rune() daría valores inválidos y el diff mezclaría palabras (gosec G115).
+const maxWordTokens = 0x10FFFF - 0xE000
+
 // lineParts devuelve los tramos de la línea vieja y de la nueva, por palabras completas: por
 // caracteres, "falla" → "conecta" marcaría "fall" y dejaría la "a" igual. Si no tienen nada en
 // común, marcar toda la línea no aporta: no devuelve tramos.
@@ -325,11 +330,17 @@ func lineParts(dmp *diffmatchpatch.DiffMatchPatch, from, to string) (old, cur []
 	// DiffLinesToChars con las líneas; así el diff no corta palabras.
 	var tokens []string
 	ids := map[string]rune{}
+	overflow := false
 	encode := func(s string) string {
 		var b strings.Builder
 		for _, tok := range wordRe.FindAllString(s, -1) {
 			id, ok := ids[tok]
+			if !ok && len(tokens) >= maxWordTokens {
+				overflow = true
+				return ""
+			}
 			if !ok {
+				// #nosec G115 -- tokens se corta antes de salir del rango de rune (maxWordTokens)
 				id = rune(0xE000 + len(tokens)) // área de uso privado: no choca con el texto
 				ids[tok] = id
 				tokens = append(tokens, tok)
@@ -339,6 +350,9 @@ func lineParts(dmp *diffmatchpatch.DiffMatchPatch, from, to string) (old, cur []
 		return b.String()
 	}
 	a, b := encode(from), encode(to)
+	if overflow {
+		return nil, nil // una línea así no se marca por palabras: el diff por líneas igual la muestra
+	}
 	decode := func(s string) string {
 		var out strings.Builder
 		for _, r := range s {

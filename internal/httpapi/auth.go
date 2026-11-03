@@ -79,18 +79,25 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	// Los slugs viejos de sus áreas (B17): la interfaz lleva una URL vieja a la nueva.
+	aliases, err := a.Read.MembershipAliases(r.Context(), u.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	areas := make([]map[string]any, len(ms))
 	for i, m := range ms {
 		// viewers_can_propose: la interfaz le ofrece a un lector "Proponer un cambio" (§19.5).
 		// require_change_summary: el editor marca el resumen como obligatorio (§4.3).
 		// watermark_n2: el lector ve la marca de agua también en las páginas N2 (§4.15).
 		areas[i] = map[string]any{"slug": m.Slug, "name": m.Name, "description": m.Description, "role": m.Role,
-			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary, "watermark_n2": m.WatermarkN2}
+			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary, "watermark_n2": m.WatermarkN2,
+			"archived": m.Status == "archived", "aliases": append([]string{}, aliases[m.ID]...)}
 	}
 	a.json(w, http.StatusOK, map[string]any{
 		// auth_source: una cuenta del directorio no cambia aquí su nombre ni su contraseña (§8.6.3).
 		"id": u.ID, "email": u.Email, "full_name": u.FullName, "auth_source": u.AuthSource,
-		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
+		"locale": u.Locale, "reading_prefs": u.ReadingPrefs, "editor_mode": u.EditorMode, "is_global_admin": u.IsGlobalAdmin, "workspaces": areas,
 		"has_avatar": u.HasAvatar, "personal": map[string]string{"slug": own.Slug},
 		// mfa_setup_required: la interfaz muestra solo la configuración del 2FA (§8.1); una passkey
 		// lo cumple igual que el TOTP.
@@ -106,6 +113,7 @@ func (a api) setPreferences(w http.ResponseWriter, r *http.Request) {
 		FullName     *string            `json:"full_name"`
 		Locale       *string            `json:"locale"`
 		ReadingPrefs *repo.ReadingPrefs `json:"reading_prefs"`
+		EditorMode   *string            `json:"editor_mode"`
 	}
 	if !a.decode(w, r, &in) {
 		return
@@ -116,7 +124,7 @@ func (a api) setPreferences(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := a.Auth.SetPreferences(r.Context(), currentUser(r).ID, auth.Preferences{Locale: in.Locale, ReadingPrefs: in.ReadingPrefs}); err != nil {
+	if err := a.Auth.SetPreferences(r.Context(), currentUser(r).ID, auth.Preferences{Locale: in.Locale, ReadingPrefs: in.ReadingPrefs, EditorMode: in.EditorMode}); err != nil {
 		a.fail(w, r, err)
 		return
 	}

@@ -8,9 +8,19 @@
   import SearchBox from './SearchBox.svelte';
   import ReadingPrefsForm from './ReadingPrefsForm.svelte';
   import NotificationBell from './NotificationBell.svelte';
+  import { scheme, nextScheme, cycleScheme } from '../lib/scheme.svelte';
 
-  // Barra superior del diseño aprobado (SPEC §15): logo, área, búsqueda, idioma, lectura,
-  // notificaciones (§12.1) y usuario.
+  const schemeIcon = { light: 'sun', dark: 'moon', rose: 'flower' } as const;
+
+  // El círculo nace donde se hizo clic; con el teclado (detail 0), en el centro del botón.
+  function onScheme(e: MouseEvent) {
+    const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (e.detail > 0) cycleScheme(e.clientX, e.clientY);
+    else cycleScheme(b.left + b.width / 2, b.top + b.height / 2);
+  }
+
+  // Barra superior del diseño aprobado (SPEC §15): logo, área, búsqueda, idioma, lectura, modo de
+  // color (B4), notificaciones (§12.1) y usuario.
   let {
     me,
     area,
@@ -39,7 +49,9 @@
       {/snippet}
       <ul class="menu">
         {#each me.workspaces as w (w.slug)}
-          <li><a href={`/w/${w.slug}`} aria-current={w.slug === area?.slug ? 'true' : undefined}>{w.name}</a></li>
+          <li><a href={`/w/${w.slug}`} aria-current={w.slug === area?.slug ? 'true' : undefined}
+              >{w.name}{#if w.archived}<small class="muted"> · {t('area.archived')}</small>{/if}</a
+            ></li>
         {/each}
       </ul>
     </Dropdown>
@@ -64,6 +76,12 @@
         <p class="muted small">{t('prefs.note')}</p>
       </section>
     </Dropdown>
+
+    <button type="button" class="topbar-btn topbar-icon" onclick={onScheme}
+      aria-label={t('scheme.toggle', { current: t(`scheme.${scheme.current}`), next: t(`scheme.${nextScheme(scheme.current)}`) })}
+      title={t('scheme.toggle', { current: t(`scheme.${scheme.current}`), next: t(`scheme.${nextScheme(scheme.current)}`) })}>
+      <Icon name={schemeIcon[scheme.current]} size={20} />
+    </button>
 
     <NotificationBell />
 

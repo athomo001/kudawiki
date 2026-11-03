@@ -1,0 +1,36 @@
+# Dependencias al día (SPEC §21.2.2): una revisión al mes, agrupada por ecosistema para que sea
+# un solo PR que leer. Las actualizaciones de seguridad no esperan al mes: Dependabot las abre
+# apenas sale el aviso (hay que tener activadas las "security updates" del repositorio).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      go:
+        patterns: ['*']
+
+  # El ecosistema "npm" de Dependabot lee y actualiza pnpm-lock.yaml (solo pnpm, SPEC §15).
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: monthly
+    groups:
+      ui:
+        patterns: ['*']
+
+  # Las acciones van fijadas por SHA; Dependabot sube el SHA y el comentario con la versión.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Las imágenes base del Dockerfile, fijadas por digest.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly

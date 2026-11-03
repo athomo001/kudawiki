@@ -46,6 +46,7 @@ type Secret struct {
 }
 
 // secretsFrom son todas las columnas cifradas con la MASTER_KEY; ?1 es la versión.
+// #nosec G101 -- nombres de columnas cifradas, no credenciales
 const secretsFrom = `SELECT 'sealed', page_id, wrapped_dek FROM sealed_keys WHERE holder_type = 'master' AND key_version %[1]s ?1
 	UNION ALL SELECT 'totp', id, totp_secret_enc FROM users WHERE totp_secret_enc IS NOT NULL AND totp_key_version %[1]s ?1
 	UNION ALL SELECT 'setting', key, secret_enc FROM site_settings WHERE secret_enc IS NOT NULL AND key_version %[1]s ?1
@@ -107,5 +108,11 @@ var resealSQL = map[string]string{
 // queda en el WAL.
 func (r *Repo) TruncateWAL(ctx context.Context) error {
 	_, err := r.db.Write.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
+
+// Optimize deja que SQLite actualice las estadísticas que usa para planear las consultas (§13.4).
+func (r *Repo) Optimize(ctx context.Context) error {
+	_, err := r.db.Write.ExecContext(ctx, `PRAGMA optimize`)
 	return err
 }

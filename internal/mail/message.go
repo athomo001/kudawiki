@@ -37,6 +37,9 @@ var templates = map[string]int{
 	"new_login":                 3, // §8.2: IP o navegador nuevo; de seguridad, no desactivable
 	"two_factor_changed":        3, // §8.1: de seguridad, no desactivable
 	"ldap_sync_aborted":         2, // §8.3.4: a los superadmins; la sincronización no aplicó nada
+	"backup_failed":             2, // §21.2.4: a los superadmins; un respaldo, su subida o su prueba falló
+	"access_review_global":      2, // §21.2.7: a los superadmins; toca revisar admins y superadmins
+	"area_delete_sealed":        2, // §3.5: a quien tiene un sellado de un área que se va a borrar sin ser de ella
 	// Avisos (§5.3, §12.1): nunca llevan contenido de la página, solo su título.
 	"proposal_pending":      2,
 	"proposal_reminder":     2,
@@ -63,6 +66,9 @@ var templates = map[string]int{
 	"sealed_admin_access":   2, // §6.2: de la cuenta, no desactivable
 	"sealed_purged":         1, // §6.1
 	"sealed_reset_approved": 2, // §6.3: de la cuenta, no desactivable
+	"access_review_due":     2, // §21.2.7: de la cuenta, no desactivable
+	"proposal_transferred":  2, // §4.13: la página se trasladó y la propuesta quedó retirada
+	"sealed_transferred":    2, // §4.13: de la cuenta, no desactivable
 	"digest":                1,
 }
 
@@ -72,7 +78,8 @@ var lineTemplates = map[string]bool{
 	"proposal_rebase": true, "page_changed": true, "page_deleted": true, "review_due": true, "review_reminder": true,
 	"read_request": true, "read_reminder": true, "quiz_assigned": true, "quiz_reminder": true, "quiz_extra_attempts": true, "quiz_failed_out": true,
 	"ownership_received": true, "share_pending": true, "share_approved": true, "share_rejected": true, "shared_received": true, "share_ended": true,
-	"sealed_admin_access": true, "sealed_purged": true, "sealed_reset_approved": true,
+	"sealed_admin_access": true, "sealed_purged": true, "sealed_reset_approved": true, "access_review_due": true,
+	"proposal_transferred": true, "sealed_transferred": true,
 }
 
 // content es la descripción de un correo: de ella salen el HTML y el texto plano, así nunca

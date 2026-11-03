@@ -9,7 +9,19 @@
   // Administración → Áreas (SPEC §14.2, §15, diseño "Kudawiki — Administración"): todas las áreas
   // con sus miembros, admins, páginas y última edición. Crear un área abre un diálogo; el nombre
   // de cada una lleva a su ficha (nombre, descripción y miembros), sin ser miembro.
-  type Area = { id: string; slug: string; name: string; description: string; members: number; admins: string[]; pages: number; last_edit?: string };
+  type Area = {
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    members: number;
+    admins: string[];
+    pages: number;
+    last_edit?: string;
+    // Ciclo de vida (§3.5): lo que no está activa se marca junto al nombre.
+    status: 'active' | 'archived' | 'deactivated';
+    delete_at?: string;
+  };
 
   // onchanged recarga la sesión: un área nueva puede aparecer en el selector.
   let { onchanged }: { onchanged: () => void } = $props();
@@ -70,7 +82,9 @@
     <tbody>
       {#each areas as a (a.id)}
         <tr>
-          <td><a href={`/admin/areas/${a.id}`}><strong>{a.name}</strong></a> <span class="muted mono">/{a.slug}</span></td>
+          <td><a href={`/admin/areas/${a.id}`}><strong>{a.name}</strong></a> <span class="muted mono">/{a.slug}</span>
+            {#if a.delete_at}<br /><small class="sev-error">{t('lifecycle.delete_pending_short', { date: formatDate(a.delete_at, locale()) })}</small>
+            {:else if a.status !== 'active'}<br /><small class="muted">{t(`lifecycle.${a.status}`)}</small>{/if}</td>
           <td class="muted">{a.description || '—'}</td>
           <td class="num">{a.members}</td>
           <td>{a.admins.join(', ') || '—'}</td>

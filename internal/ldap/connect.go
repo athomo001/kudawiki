@@ -53,6 +53,7 @@ func (c config) roots() (*x509.CertPool, error) {
 // el error queda con su tipo (CA desconocida, nombre, vencido) también con StartTLS, donde
 // go-ldap lo devuelve como texto. Es la verificación estándar de x509, la misma que haría tls.
 func (c config) tlsConfig(host string, pool *x509.CertPool, p *peer) *tls.Config {
+	// #nosec G402 -- la verificación la hace VerifyConnection; sin ella, solo con insecure_skip_verify explícito y avisado (§8.6.4)
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		ServerName:         host,

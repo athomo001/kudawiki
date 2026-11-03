@@ -102,6 +102,7 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// #nosec G115 -- largo de un hash Argon2id guardado por nosotros (32 bytes)
 	got := derive(password, salt, t, m, p, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

@@ -6,8 +6,6 @@ import (
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/search"
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/text"
 )
 
 // IndexDoc arma lo que se indexa de una página (SPEC §9.1): texto plano sin sintaxis ni URLs,
@@ -96,10 +94,7 @@ type extracted struct {
 //   - Un "[[secret:" que el parser no reconoció (sin "]]" en la misma línea, o cruzando
 //     párrafos) queda como texto común: se publicaría la contraseña tal cual.
 func checkSecrets(markdown string) error {
-	src := []byte(markdown)
-	pc := parser.NewContext()
-	pc.Set(optionsKey, &Options{})
-	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(pc))
+	doc, src := parse(markdown, &Options{})
 	var found error
 	inSecret := 0
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -145,10 +140,7 @@ func inlineText(block ast.Node, src []byte) string {
 }
 
 func extract(markdown string) extracted {
-	src := []byte(markdown)
-	pc := parser.NewContext()
-	pc.Set(optionsKey, &Options{})
-	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(pc))
+	doc, src := parse(markdown, &Options{})
 
 	var content, headings, code strings.Builder
 	var sections []sectionMark

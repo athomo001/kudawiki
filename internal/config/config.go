@@ -24,17 +24,38 @@ type Config struct {
 	BaseURL       string `yaml:"base_url"`
 	DataDir       string `yaml:"data_dir"`
 	MasterKeyFile string `yaml:"master_key_file"`
-	Upload        struct {
+	// TLS: la wiki termina TLS ella misma con este certificado (§21.2.1). Vacío: HTTP plano, que
+	// fuera de localhost solo vale detrás de un proxy que termina TLS (base_url https://).
+	TLS struct {
+		CertFile string `yaml:"cert_file"`
+		KeyFile  string `yaml:"key_file"`
+	} `yaml:"tls"`
+	// TrustProxy: hay un proxy inverso delante; la IP de quien pide sale de X-Forwarded-For y una
+	// petición que llegó al proxy por http se redirige a base_url (§21.2.1, §14.5).
+	TrustProxy bool `yaml:"trust_proxy"`
+	Upload     struct {
 		MaxBytes int64 `yaml:"max_bytes"`
 	} `yaml:"upload"`
 	Trash struct {
 		RetentionDays int `yaml:"retention_days"`
 	} `yaml:"trash"`
+	// Quizzes.RetentionDays: cuánto se guardan los resultados de cuestionarios y las aperturas de
+	// páginas con acuse, que son datos de desempeño (§13.10).
+	Quizzes struct {
+		RetentionDays int `yaml:"retention_days"`
+	} `yaml:"quizzes"`
 	// Audit.PseudonymizeAfterDays: a los cuántos días de completada una baja se reemplaza la
 	// copia del actor por un seudónimo (§13.10, §19.17).
+	// Audit.Forward: copia de cada evento fuera de la wiki (§11.2): "" (ninguna), "stdout" (la
+	// salida del servicio, que guardan journald o Docker) o "syslog" (Audit.Syslog.Address).
 	Audit struct {
-		RetentionDays         int `yaml:"retention_days"`
-		PseudonymizeAfterDays int `yaml:"pseudonymize_after_days"`
+		RetentionDays         int    `yaml:"retention_days"`
+		PseudonymizeAfterDays int    `yaml:"pseudonymize_after_days"`
+		Forward               string `yaml:"forward"`
+		Syslog                struct {
+			Address string `yaml:"address"` // tls://host:6514, o tcp:// y udp:// hacia la misma máquina
+			CAFile  string `yaml:"ca_file"`
+		} `yaml:"syslog"`
 	} `yaml:"audit"`
 	// Offboarding.GraceDays: el período de gracia de la baja de usuarios (§8.4, §19.15).
 	Offboarding struct {
@@ -47,6 +68,23 @@ type Config struct {
 		KeepDaily   int    `yaml:"keep_daily"`
 		KeepWeekly  int    `yaml:"keep_weekly"`
 		KeepMonthly int    `yaml:"keep_monthly"`
+		// KeyFile: la llave que cifra la copia que sale del servidor (§13.3, §21.2.4), aparte de la
+		// MASTER_KEY. Vacío: backup.key junto a la MASTER_KEY.
+		KeyFile string `yaml:"key_file"`
+		// Remote: el destino S3-compatible. La clave secreta va en un archivo, nunca en este YAML
+		// ni en una variable (se verían con docker inspect).
+		Remote struct {
+			Endpoint            string `yaml:"endpoint"`
+			Region              string `yaml:"region"`
+			Bucket              string `yaml:"bucket"`
+			Prefix              string `yaml:"prefix"`
+			AccessKeyID         string `yaml:"access_key_id"`
+			SecretAccessKeyFile string `yaml:"secret_access_key_file"`
+			PathStyle           bool   `yaml:"path_style"`
+		} `yaml:"remote"`
+		// Set son las claves que fija el archivo o una variable (time, keep_daily, remote.bucket…):
+		// esas ganan sobre Administración → Respaldos y se ven bloqueadas (F8-B, §13.1).
+		Set map[string]bool `yaml:"-"`
 	} `yaml:"backup"`
 	// Branding: la marca de la empresa (SPEC §15.1). Lo que esté aquí gana sobre el panel y se
 	// muestra bloqueado; nil es "no está en el archivo". La valida el paquete branding.
@@ -96,6 +134,26 @@ type Config struct {
 	Approval struct {
 		RemindAfterDays int `yaml:"remind_after_days"`
 	} `yaml:"approval"`
+	// AccessReview.IntervalDays: cada cuánto se confirma la lista de miembros de cada área y la
+	// de admins y superadmins (§21.2.7). Un trimestre por omisión.
+	AccessReview struct {
+		IntervalDays int `yaml:"interval_days"`
+	} `yaml:"access_review"`
+	// Workspaces.DeleteGraceDays: cuánto pasa entre pedir el borrado de un área y su purga; en
+	// ese tiempo nadie la ve y el superadmin puede cancelarlo (§3.5).
+	Workspaces struct {
+		DeleteGraceDays int `yaml:"delete_grace_days"`
+	} `yaml:"workspaces"`
+	// Metrics.AllowCIDRs: las redes que pueden leer /metrics (§13.5), como la del Prometheus;
+	// vacío, /metrics no responde a nadie.
+	Metrics struct {
+		AllowCIDRs []string `yaml:"allow_cidrs"`
+	} `yaml:"metrics"`
+	// Time.NTPServer: el servidor NTP contra el que /readyz y Salud miden el desfase del reloj
+	// (§21.2.5); vacío, no se mide.
+	Time struct {
+		NTPServer string `yaml:"ntp_server"`
+	} `yaml:"time"`
 }
 
 // LDAP son las claves de auth.ldap que el archivo puede fijar.
@@ -182,6 +240,22 @@ func (c Config) RemindAfter() time.Duration {
 	return time.Duration(c.Approval.RemindAfterDays) * 24 * time.Hour
 }
 
+// DeleteGrace es el plazo entre pedir el borrado de un área y su purga (§3.5).
+func (c Config) DeleteGrace() time.Duration {
+	return time.Duration(c.Workspaces.DeleteGraceDays) * 24 * time.Hour
+}
+
+// AccessReviewEvery es el plazo de la revisión de accesos (§21.2.7).
+func (c Config) AccessReviewEvery() time.Duration {
+	return time.Duration(c.AccessReview.IntervalDays) * 24 * time.Hour
+}
+
+// QuizRetention es cuánto se guardan los resultados de cuestionarios y las aperturas de páginas
+// con acuse (SPEC §13.10).
+func (c Config) QuizRetention() time.Duration {
+	return time.Duration(c.Quizzes.RetentionDays) * 24 * time.Hour
+}
+
 // TrashRetention es cuánto queda algo en la papelera antes de la purga (SPEC §4.5).
 func (c Config) TrashRetention() time.Duration {
 	return time.Duration(c.Trash.RetentionDays) * 24 * time.Hour
@@ -213,15 +287,18 @@ func Load(path string) (Config, error) {
 	c.Upload.MaxBytes = 25 << 20        // 25 MB (SPEC §4.4)
 	c.Trash.RetentionDays = 30          // SPEC §4.5
 	c.Audit.RetentionDays = 730         // 2 años (SPEC §11.1)
+	c.Quizzes.RetentionDays = 730       // 2 años (SPEC §13.10)
 	c.Audit.PseudonymizeAfterDays = 365 // 1 año tras la baja (SPEC §19.17)
 	c.Offboarding.GraceDays = 30        // SPEC §8.4, §19.15
 	c.Backup.Time = "03:00"             // SPEC §13.3
 	c.Backup.KeepDaily, c.Backup.KeepWeekly, c.Backup.KeepMonthly = 7, 4, 6
 	c.Auth.Local.PasswordReset = true // SPEC §8.5.1
 	c.Auth.Local.ResetTTL, c.Auth.Local.InviteTTL = "30m", "168h"
-	c.Auth.TOTP.EnforceFor = "none" // SPEC §8.1, decidido el 2026-11-02
-	c.Notify.EmailDelay = "10m"     // SPEC §12.1
-	c.Approval.RemindAfterDays = 3  // SPEC §5.3
+	c.Auth.TOTP.EnforceFor = "none"   // SPEC §8.1, decidido el 2026-11-02
+	c.Notify.EmailDelay = "10m"       // SPEC §12.1
+	c.Approval.RemindAfterDays = 3    // SPEC §5.3
+	c.AccessReview.IntervalDays = 90  // SPEC §21.2.7
+	c.Workspaces.DeleteGraceDays = 30 // SPEC §3.5
 
 	explicit := path != ""
 	if !explicit {
@@ -237,16 +314,38 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
 
+	// Una lista separada por comas: "10.0.0.0/8, 192.168.1.10/32".
+	if v, ok := os.LookupEnv("KUDAWIKI_METRICS_ALLOW_CIDRS"); ok {
+		c.Metrics.AllowCIDRs = nil
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				c.Metrics.AllowCIDRs = append(c.Metrics.AllowCIDRs, s)
+			}
+		}
+	}
 	for env, dst := range map[string]*string{
-		"KUDAWIKI_LISTEN":                &c.Listen,
-		"KUDAWIKI_BASE_URL":              &c.BaseURL,
-		"KUDAWIKI_DATA_DIR":              &c.DataDir,
-		"KUDAWIKI_MASTER_KEY_FILE":       &c.MasterKeyFile,
-		"KUDAWIKI_BACKUP_TIME":           &c.Backup.Time,
-		"KUDAWIKI_AUTH_LOCAL_RESET_TTL":  &c.Auth.Local.ResetTTL,
-		"KUDAWIKI_AUTH_LOCAL_INVITE_TTL": &c.Auth.Local.InviteTTL,
-		"KUDAWIKI_AUTH_TOTP_ENFORCE_FOR": &c.Auth.TOTP.EnforceFor,
-		"KUDAWIKI_NOTIFY_EMAIL_DELAY":    &c.Notify.EmailDelay,
+		"KUDAWIKI_LISTEN":                               &c.Listen,
+		"KUDAWIKI_BASE_URL":                             &c.BaseURL,
+		"KUDAWIKI_DATA_DIR":                             &c.DataDir,
+		"KUDAWIKI_MASTER_KEY_FILE":                      &c.MasterKeyFile,
+		"KUDAWIKI_TLS_CERT_FILE":                        &c.TLS.CertFile,
+		"KUDAWIKI_TLS_KEY_FILE":                         &c.TLS.KeyFile,
+		"KUDAWIKI_BACKUP_TIME":                          &c.Backup.Time,
+		"KUDAWIKI_TIME_NTP_SERVER":                      &c.Time.NTPServer,
+		"KUDAWIKI_AUTH_LOCAL_RESET_TTL":                 &c.Auth.Local.ResetTTL,
+		"KUDAWIKI_AUTH_LOCAL_INVITE_TTL":                &c.Auth.Local.InviteTTL,
+		"KUDAWIKI_AUTH_TOTP_ENFORCE_FOR":                &c.Auth.TOTP.EnforceFor,
+		"KUDAWIKI_NOTIFY_EMAIL_DELAY":                   &c.Notify.EmailDelay,
+		"KUDAWIKI_AUDIT_FORWARD":                        &c.Audit.Forward,
+		"KUDAWIKI_BACKUP_KEY_FILE":                      &c.Backup.KeyFile,
+		"KUDAWIKI_BACKUP_REMOTE_ENDPOINT":               &c.Backup.Remote.Endpoint,
+		"KUDAWIKI_BACKUP_REMOTE_REGION":                 &c.Backup.Remote.Region,
+		"KUDAWIKI_BACKUP_REMOTE_BUCKET":                 &c.Backup.Remote.Bucket,
+		"KUDAWIKI_BACKUP_REMOTE_PREFIX":                 &c.Backup.Remote.Prefix,
+		"KUDAWIKI_BACKUP_REMOTE_ACCESS_KEY_ID":          &c.Backup.Remote.AccessKeyID,
+		"KUDAWIKI_BACKUP_REMOTE_SECRET_ACCESS_KEY_FILE": &c.Backup.Remote.SecretAccessKeyFile,
+		"KUDAWIKI_AUDIT_SYSLOG_ADDRESS":                 &c.Audit.Syslog.Address,
+		"KUDAWIKI_AUDIT_SYSLOG_CA_FILE":                 &c.Audit.Syslog.CAFile,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			*dst = v
@@ -324,6 +423,20 @@ func Load(path string) (Config, error) {
 		}
 		c.Auth.LDAP.Sync.MaxRemovalRatio = &f
 	}
+	if v, ok := os.LookupEnv("KUDAWIKI_BACKUP_REMOTE_PATH_STYLE"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_BACKUP_REMOTE_PATH_STYLE: %w", err)
+		}
+		c.Backup.Remote.PathStyle = b
+	}
+	if v, ok := os.LookupEnv("KUDAWIKI_TRUST_PROXY"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_TRUST_PROXY: %w", err)
+		}
+		c.TrustProxy = b
+	}
 	if v, ok := os.LookupEnv("KUDAWIKI_AUTH_LOCAL_PASSWORD_RESET"); ok {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -352,6 +465,20 @@ func Load(path string) (Config, error) {
 		}
 		c.Trash.RetentionDays = n
 	}
+	if v, ok := os.LookupEnv("KUDAWIKI_WORKSPACES_DELETE_GRACE_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_WORKSPACES_DELETE_GRACE_DAYS: %w", err)
+		}
+		c.Workspaces.DeleteGraceDays = n
+	}
+	if v, ok := os.LookupEnv("KUDAWIKI_ACCESS_REVIEW_INTERVAL_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("KUDAWIKI_ACCESS_REVIEW_INTERVAL_DAYS: %w", err)
+		}
+		c.AccessReview.IntervalDays = n
+	}
 	if v, ok := os.LookupEnv("KUDAWIKI_APPROVAL_REMIND_AFTER_DAYS"); ok {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -369,6 +496,7 @@ func Load(path string) (Config, error) {
 	for env, dst := range map[string]*int{
 		"KUDAWIKI_AUDIT_PSEUDONYMIZE_AFTER_DAYS": &c.Audit.PseudonymizeAfterDays,
 		"KUDAWIKI_OFFBOARDING_GRACE_DAYS":        &c.Offboarding.GraceDays,
+		"KUDAWIKI_QUIZZES_RETENTION_DAYS":        &c.Quizzes.RetentionDays,
 	} {
 		if v, ok := os.LookupEnv(env); ok {
 			n, err := strconv.Atoi(v)
@@ -378,7 +506,79 @@ func Load(path string) (Config, error) {
 			*dst = n
 		}
 	}
+	if c.Backup.KeyFile == "" {
+		c.Backup.KeyFile = filepath.Join(filepath.Dir(c.MasterKeyFile), "backup.key")
+	}
+	c.Backup.Set = backupSet(raw)
 	return c, c.validate()
+}
+
+// backupEnv es la variable de cada clave de backup que se puede cambiar desde el panel.
+var backupEnv = map[string]string{
+	"time": "KUDAWIKI_BACKUP_TIME", "keep_daily": "", "keep_weekly": "", "keep_monthly": "",
+	"remote.endpoint": "KUDAWIKI_BACKUP_REMOTE_ENDPOINT", "remote.region": "KUDAWIKI_BACKUP_REMOTE_REGION",
+	"remote.bucket": "KUDAWIKI_BACKUP_REMOTE_BUCKET", "remote.prefix": "KUDAWIKI_BACKUP_REMOTE_PREFIX",
+	"remote.access_key_id":          "KUDAWIKI_BACKUP_REMOTE_ACCESS_KEY_ID",
+	"remote.secret_access_key_file": "KUDAWIKI_BACKUP_REMOTE_SECRET_ACCESS_KEY_FILE",
+	"remote.path_style":             "KUDAWIKI_BACKUP_REMOTE_PATH_STYLE",
+}
+
+// backupSet dice qué claves de backup trae el archivo (raw) o una variable de entorno. El valor
+// por defecto (03:00, 7/4/6) no cuenta: ese lo puede cambiar el panel.
+func backupSet(raw []byte) map[string]bool {
+	var doc struct {
+		Backup map[string]any `yaml:"backup"`
+	}
+	_ = yaml.Unmarshal(raw, &doc) // ya se leyó sin error arriba
+	set := map[string]bool{}
+	for key, env := range backupEnv {
+		if env != "" {
+			if _, ok := os.LookupEnv(env); ok {
+				set[key] = true
+				continue
+			}
+		}
+		top, sub, nested := strings.Cut(key, ".")
+		if !nested {
+			_, set[key] = doc.Backup[top]
+		} else if m, ok := doc.Backup[top].(map[string]any); ok {
+			_, set[key] = m[sub]
+		}
+		if !set[key] {
+			delete(set, key)
+		}
+	}
+	return set
+}
+
+// BackupSecret lee la clave secreta del destino S3 de su archivo, sin el salto de línea final.
+func (c Config) BackupSecret() (string, error) {
+	b, err := os.ReadFile(c.Backup.Remote.SecretAccessKeyFile)
+	if err != nil {
+		return "", fmt.Errorf("backup.remote.secret_access_key_file: %w", err)
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
+}
+
+// ErrInsecureHTTP: base_url no es https:// fuera de localhost (§21.2.1).
+var ErrInsecureHTTP = errors.New("base_url must be https:// outside localhost; put TLS in front (tls.cert_file or a proxy with trust_proxy) or start with --insecure-http")
+
+// CheckTransport aplica el TLS obligatorio de §21.2.1: fuera de localhost la wiki no arranca si
+// base_url no es https://, salvo que quien opera lo pida explícitamente con --insecure-http; en
+// ese caso devuelve el aviso que se deja en cada arranque. Con TLS propio, base_url tiene que
+// ser https:// también en localhost: si no, las cookies y HSTS saldrían mal.
+func (c Config) CheckTransport(insecureHTTP bool) (warning string, err error) {
+	u, _ := url.Parse(c.BaseURL) // ya validada
+	if c.TLS.CertFile != "" && u.Scheme != "https" {
+		return "", errors.New("tls.cert_file is set, so base_url must be https://")
+	}
+	if u.Scheme == "https" || c.IsLocal() {
+		return "", nil
+	}
+	if !insecureHTTP {
+		return "", ErrInsecureHTTP
+	}
+	return "serving over plain HTTP outside localhost (--insecure-http): passwords and sessions travel in clear", nil
 }
 
 // IsLocal: la instalación solo se usa desde la misma máquina (desarrollo). Relaja la política
@@ -426,12 +626,31 @@ func (c Config) validate() error {
 	if c.Approval.RemindAfterDays < 1 || c.Approval.RemindAfterDays > 90 {
 		return fmt.Errorf("approval.remind_after_days must be between 1 and 90, got %d", c.Approval.RemindAfterDays)
 	}
+	if c.Workspaces.DeleteGraceDays < 1 || c.Workspaces.DeleteGraceDays > 365 {
+		return fmt.Errorf("workspaces.delete_grace_days must be between 1 and 365, got %d", c.Workspaces.DeleteGraceDays)
+	}
+	if c.AccessReview.IntervalDays < 30 || c.AccessReview.IntervalDays > 365 {
+		return fmt.Errorf("access_review.interval_days must be between 30 and 365, got %d", c.AccessReview.IntervalDays)
+	}
 	// 0 días de gracia: la baja se completa en la próxima pasada del job diario.
 	if c.Offboarding.GraceDays < 0 || c.Offboarding.GraceDays > 365 {
 		return fmt.Errorf("offboarding.grace_days must be between 0 and 365, got %d", c.Offboarding.GraceDays)
 	}
+	// Menos de un mes no deja ver si un procedimiento se entendió; la cota de arriba es la de §13.10.
+	if c.Quizzes.RetentionDays < 30 {
+		return fmt.Errorf("quizzes.retention_days must be at least 30, got %d", c.Quizzes.RetentionDays)
+	}
 	if c.Audit.PseudonymizeAfterDays < 1 {
 		return fmt.Errorf("audit.pseudonymize_after_days must be positive, got %d", c.Audit.PseudonymizeAfterDays)
+	}
+	if !slices.Contains([]string{"", "stdout", "syslog"}, c.Audit.Forward) {
+		return fmt.Errorf(`audit.forward must be "", "stdout" or "syslog", got %q`, c.Audit.Forward)
+	}
+	if c.Audit.Forward == "syslog" && c.Audit.Syslog.Address == "" {
+		return errors.New("audit.forward is syslog: set audit.syslog.address")
+	}
+	if (c.TLS.CertFile == "") != (c.TLS.KeyFile == "") {
+		return errors.New("tls.cert_file and tls.key_file go together")
 	}
 	if c.Listen == "" || c.DataDir == "" || c.MasterKeyFile == "" {
 		return errors.New("listen, data_dir and master_key_file are required")

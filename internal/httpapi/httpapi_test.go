@@ -17,13 +17,17 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/athomo001/kudawiki/internal/accessreview"
+	"github.com/athomo001/kudawiki/internal/areaio"
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
+	"github.com/athomo001/kudawiki/internal/backups"
 	"github.com/athomo001/kudawiki/internal/branding"
 	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
@@ -31,6 +35,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
 	"github.com/athomo001/kudawiki/internal/media"
+	"github.com/athomo001/kudawiki/internal/metrics"
 	"github.com/athomo001/kudawiki/internal/middleware"
 	"github.com/athomo001/kudawiki/internal/notify"
 	"github.com/athomo001/kudawiki/internal/offboarding"
@@ -42,6 +47,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
+	"github.com/athomo001/kudawiki/internal/transfer"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
 	"github.com/oklog/ulid/v2"
@@ -67,6 +73,7 @@ type fixture struct {
 	offboarding *offboarding.Service
 	clock       *time.Time
 	storage     string // data_dir/storage: los tests de sellados miran qué quedó en el disco
+	backupDir   string // los respaldos de Administración → Respaldos (F8-B)
 }
 
 // unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
@@ -112,10 +119,24 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		offboarding.Config{Grace: 30 * 24 * time.Hour, PseudonymizeAfter: 365 * 24 * time.Hour}, func() time.Time { return clock }, slog.New(slog.DiscardHandler))
 	directory.SetOffboarding(leaving)
 	directory.SetMail(mailer, origin)
-	h := New(Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
-		Shares:   shares.NewService(store, rec, slog.New(slog.DiscardHandler)),
-		Sealed:   sealed.NewService(store, files, rec, testKey, slog.New(slog.DiscardHandler), func() time.Time { return clock }),
-		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, StorageDir: storage,
+	// La red de las direcciones de httptest (192.0.2.0/24, RFC 5737) puede leer /metrics.
+	collector, err := metrics.New([]string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Los respaldos van a una carpeta del test; la llave de respaldo no existe hasta que un test
+	// la crea (backupKey).
+	backupDir := t.TempDir()
+	saves := backups.NewService(store, rec, testKey, backups.Options{DB: db.Read, StorageDir: storage, Dir: backupDir,
+		KeyFile: filepath.Join(backupDir, "backup.key"), Now: time.Now, Log: slog.New(slog.DiscardHandler)})
+	h := New(Deps{Metrics: collector, Backups: saves, RenderCache: wiki.NewRenderCache(1 << 20), Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour, Audit: rec,
+		Shares:       shares.NewService(store, rec, slog.New(slog.DiscardHandler)),
+		AccessReview: accessreview.NewService(store, rec, mailer, 90*24*time.Hour, base.String(), time.Now),
+		Lifecycle:    workspace.NewLifecycle(store, rec, mailer, storage, 30*24*time.Hour, time.Now, slog.New(slog.DiscardHandler)),
+		Transfer:     transfer.NewService(store, files, rec, slog.New(slog.DiscardHandler)),
+		AreaIO:       areaio.NewService(store, pages, files, rec, time.Now),
+		Sealed:       sealed.NewService(store, files, rec, testKey, slog.New(slog.DiscardHandler), func() time.Time { return clock }),
+		Personal:     personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
@@ -141,7 +162,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 	}
 
-	f := fixture{h: h, db: db, storage: storage, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}, spent: map[string]int{},
+	f := fixture{h: h, db: db, storage: storage, backupDir: backupDir, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}, spent: map[string]int{},
 		offboarding: leaving, clock: &clock}
 	for name := range users {
 		w := f.do("", "POST", "/api/auth/login", `{"email":"`+name+`@empresa.cl","password":"`+password+`"}`)

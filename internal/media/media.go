@@ -349,3 +349,28 @@ func cleanName(name string) string {
 	}
 	return name
 }
+
+// MoveFiles lleva archivos de un área a otra en el disco: el traslado de páginas (§4.13). Mueve
+// el archivo, su miniatura y el .enc de un sellado, el que exista de cada id. Un id que no está
+// se salta: doctor lo encuentra como archivo faltante.
+func (s *Service) MoveFiles(fromWs, toWs string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(s.dir, "ws_"+toWs), 0o700); err != nil {
+		return err
+	}
+	var errs error
+	for _, id := range ids {
+		for _, p := range [][2]string{
+			{s.path(fromWs, id, false), s.path(toWs, id, false)},
+			{s.path(fromWs, id, true), s.path(toWs, id, true)},
+			{s.encPath(fromWs, id), s.encPath(toWs, id)},
+		} {
+			if err := os.Rename(p[0], p[1]); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = errors.Join(errs, err)
+			}
+		}
+	}
+	return errs
+}

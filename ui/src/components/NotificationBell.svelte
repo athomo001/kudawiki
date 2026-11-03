@@ -78,6 +78,6 @@
     {:else}
       <p class="muted notif-empty">{t('notif.empty')}</p>
     {/if}
-    <p class="notif-foot"><a href="/me/profile#notifications">{t('notif.prefs_link')}</a></p>
+    <p class="notif-foot"><a href="/me/profile/notifications">{t('notif.prefs_link')}</a></p>
   </section>
 </Dropdown>

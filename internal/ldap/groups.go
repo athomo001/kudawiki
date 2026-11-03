@@ -111,8 +111,10 @@ func sidBytes(s string) ([]byte, bool) {
 	if err1 != nil || err2 != nil || len(parts)-3 > 15 {
 		return nil, false
 	}
+	// #nosec G115 -- rev se leyó con 8 bits y hay a lo más 15 subautoridades
 	b := []byte{byte(rev), byte(len(parts) - 3)}
 	for i := 5; i >= 0; i-- {
+		// #nosec G115 -- auth se leyó con 48 bits: se escribe byte a byte
 		b = append(b, byte(auth>>(8*i)))
 	}
 	for _, p := range parts[3:] {

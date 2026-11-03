@@ -13,6 +13,8 @@ services:
     ports: ["127.0.0.1:8080:8080"]
     environment:
       KUDAWIKI_BASE_URL: ${KUDAWIKI_BASE_URL:-http://localhost:8080}
+      # Detrás de un proxy inverso que termina TLS (SPEC §21.2.1).
+      KUDAWIKI_TRUST_PROXY: ${KUDAWIKI_TRUST_PROXY:-false}
     volumes:
       - data:/data
       - keys:/keys:ro          # la MASTER_KEY: aparte de /data y de los backups

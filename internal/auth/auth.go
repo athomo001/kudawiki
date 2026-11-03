@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/audit"
@@ -21,7 +22,10 @@ import (
 const (
 	sessionIdle     = 12 * time.Hour     // SPEC §8.2
 	sessionAbsolute = 7 * 24 * time.Hour // SPEC §8.2
-	touchEvery      = time.Minute        // no escribir en cada request: hay un solo escritor (§13.4)
+	// SessionIdle y SessionAbsolute: la purga diaria borra con ellos las sesiones vencidas (§13.10).
+	SessionIdle     = sessionIdle
+	SessionAbsolute = sessionAbsolute
+	touchEvery      = time.Minute // no escribir en cada request: hay un solo escritor (§13.4)
 
 	loginMaxAttempts = 10 // SPEC §8.2: 10 intentos / 15 min por IP+email
 	loginWindow      = 15 * time.Minute
@@ -57,7 +61,7 @@ type store interface {
 	ResetTokenUser(ctx context.Context, tokenHash string, now time.Time) (string, error)
 	CompleteReset(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
 	ListUsers(ctx context.Context) ([]repo.User, error)
-	SetPreferences(ctx context.Context, userID, locale string, prefs repo.ReadingPrefs) error
+	SetPreferences(ctx context.Context, userID, locale string, prefs repo.ReadingPrefs, editorMode string) error
 	// Recuperación por consola (SPEC §13.6).
 	DeleteSessions(ctx context.Context, userID string) (int64, error)
 	SetPassword(ctx context.Context, userID, passwordHash string) error
@@ -99,6 +103,10 @@ type Service struct {
 	mfa       SecondFactor
 	rp        *webauthn.WebAuthn // nil si base_url no admite passkeys (§8.1)
 	directory Directory          // nil sin LDAP (§8.6)
+
+	// unknownResets cuenta los pedidos de restablecimiento a correos que no existen: no van a la
+	// auditoría (cualquiera podría llenarla, §11.2), pero un pico se ve en /metrics (§8.5, B12).
+	unknownResets atomic.Int64
 
 	mu         sync.Mutex
 	attempts   map[string]attempt

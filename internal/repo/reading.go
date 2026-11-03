@@ -268,7 +268,7 @@ func (r *Repo) ReadNotices(ctx context.Context, now time.Time, window time.Durat
 		 FROM read_requests r
 		 JOIN pages p ON p.id = r.page_id
 		 JOIN workspace_members m ON m.workspace_id = r.workspace_id
-		 WHERE r.closed_at IS NULL AND p.deleted_at IS NULL AND `+recipientSQL+`
+		 WHERE r.closed_at IS NULL AND p.deleted_at IS NULL`+activeAreaOf("r")+` AND `+recipientSQL+`
 		   AND (r.notified_at IS NULL OR (r.reminded_at IS NULL AND r.due_at > ? AND r.due_at <= ?
 		     AND julianday(r.due_at) - julianday(r.notified_at) > ?))
 		   AND NOT EXISTS (SELECT 1 FROM read_acknowledgements a WHERE a.request_id = r.id AND a.user_id = m.user_id)

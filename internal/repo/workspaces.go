@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 // Scope es el contexto que valida WorkspaceBoundary: toda función sobre el contenido o los
@@ -45,7 +46,14 @@ type Workspace struct {
 	QuizzesEnabled bool
 	// WatermarkN2: la marca de agua de N3 y sellados también en sus páginas N2 (§4.15).
 	WatermarkN2 bool
+	// Ciclo de vida (§3.5): active, archived o deactivated; DeleteAt, si se pidió borrarla, la
+	// fecha en que se purga.
+	Status   string
+	DeleteAt *time.Time
 }
+
+// Visible dice si el área se ve desde /w/{slug}: ni desactivada ni con el borrado pedido.
+func (w Workspace) Visible() bool { return w.Status != "deactivated" && w.DeleteAt == nil }
 
 // Membership es un área vista por uno de sus miembros.
 type Membership struct {
@@ -92,7 +100,11 @@ func (r *Repo) UpdateWorkspace(ctx context.Context, s Scope, w Workspace) error 
 
 const workspaceColumns = `w.id, w.slug, w.name, w.description, w.approval_mode, w.viewers_can_propose,
 	w.require_change_summary, coalesce(w.revisions_keep_last, 0), coalesce(w.revisions_keep_days, 0), coalesce(w.default_review_days, 0),
-	w.kind, coalesce(w.owner_user_id, ''), w.quizzes_enabled, w.watermark_n2`
+	w.kind, coalesce(w.owner_user_id, ''), w.quizzes_enabled, w.watermark_n2, w.status, w.delete_at`
+
+// visibleArea es la condición de §3.5 en SQL: lo que no cumple da el mismo 404 que un área que
+// no existe.
+const visibleArea = ` AND w.status != 'deactivated' AND w.delete_at IS NULL`
 
 // ListWorkspaces y WorkspaceByID son del panel del superadmin, que administra áreas sin ser miembro.
 // Traen también los espacios personales (Kind): el panel los deja afuera y doctor los revisa.
@@ -110,20 +122,27 @@ func (r *Repo) WorkspaceByID(ctx context.Context, id string) (Workspace, error) 
 
 func scanWorkspace(row scanner) (Workspace, error) {
 	var w Workspace
-	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description, &w.ApprovalMode, &w.ViewersCanPropose, &w.RequireChangeSummary, &w.KeepLast, &w.KeepDays, &w.ReviewDays, &w.Kind, &w.OwnerID, &w.QuizzesEnabled, &w.WatermarkN2)
+	var del sql.NullTime
+	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description, &w.ApprovalMode, &w.ViewersCanPropose, &w.RequireChangeSummary, &w.KeepLast, &w.KeepDays, &w.ReviewDays, &w.Kind, &w.OwnerID, &w.QuizzesEnabled, &w.WatermarkN2, &w.Status, &del)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Workspace{}, ErrNotFound
+	}
+	if del.Valid {
+		w.DeleteAt = &del.Time
 	}
 	return w, err
 }
 
-// MembershipBySlug es la consulta de la frontera de área: área inexistente y área sin
-// membresía dan el mismo ErrNotFound, en una sola consulta, para que no se distingan (SPEC §3.3).
+// MembershipBySlug es la consulta de la frontera de área: área inexistente, sin membresía,
+// desactivada o por borrar dan el mismo ErrNotFound, en una sola consulta, para que no se
+// distingan (SPEC §3.3, §3.5). El slug viejo de un área renombrada también sirve (B17), salvo
+// que hoy lo use otra.
 func (r *Repo) MembershipBySlug(ctx context.Context, slug, userID string) (Membership, error) {
 	return scanMembership(r.db.Read.QueryRowContext(ctx,
 		`SELECT `+workspaceColumns+`, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
-		 WHERE w.slug = ? AND m.user_id = ?`, slug, userID))
+		 WHERE m.user_id = ?2 AND (w.slug = ?1 OR (w.id = (SELECT workspace_id FROM workspace_aliases WHERE slug = ?1)
+		   AND NOT EXISTS (SELECT 1 FROM workspaces WHERE slug = ?1)))`+visibleArea, slug, userID))
 }
 
 // Memberships lista las áreas de una persona (para /auth/me), sin su espacio personal, que no va
@@ -132,7 +151,7 @@ func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, er
 	rows, err := r.db.Read.QueryContext(ctx,
 		`SELECT `+workspaceColumns+`, m.role FROM workspaces w
 		 JOIN workspace_members m ON m.workspace_id = w.id
-		 WHERE m.user_id = ? AND w.kind = 'area' ORDER BY w.name`, userID)
+		 WHERE m.user_id = ? AND w.kind = 'area'`+visibleArea+` ORDER BY w.name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,10 +160,14 @@ func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, er
 
 func scanMembership(row scanner) (Membership, error) {
 	var m Membership
+	var del sql.NullTime
 	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.ApprovalMode, &m.ViewersCanPropose,
-		&m.RequireChangeSummary, &m.KeepLast, &m.KeepDays, &m.ReviewDays, &m.Kind, &m.OwnerID, &m.QuizzesEnabled, &m.WatermarkN2, &m.Role)
+		&m.RequireChangeSummary, &m.KeepLast, &m.KeepDays, &m.ReviewDays, &m.Kind, &m.OwnerID, &m.QuizzesEnabled, &m.WatermarkN2, &m.Status, &del, &m.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Membership{}, ErrNotFound
+	}
+	if del.Valid {
+		m.DeleteAt = &del.Time
 	}
 	return m, err
 }

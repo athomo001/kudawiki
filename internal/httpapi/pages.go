@@ -1,7 +1,11 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +39,7 @@ func (a api) pageRoutes(r chi.Router) {
 	r.Get("/search", a.search)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/search-misses", a.searchMisses)
 	r.With(a.requireRank(repo.RoleRank("admin"))).Get("/audit", a.areaAudit)
+	r.With(a.requireRank(repo.RoleRank("admin")), noStore).Get("/audit/export", a.exportAreaAudit)
 	r.Group(func(r chi.Router) {
 		r.Use(a.requireRank(repo.RoleRank("editor")))
 		r.Put("/pages/*", a.savePage)
@@ -45,6 +50,7 @@ func (a api) pageRoutes(r chi.Router) {
 		r.Delete("/media/{id}", a.deleteMedia)
 		r.Patch("/meta/*", a.setMeta)
 		r.Post("/move/*", a.move)
+		r.Put("/order", a.setOrder)
 		r.Delete("/pages/*", a.deletePage)
 		// La papelera: el admin ve toda; un editor, lo que él borró (§4.5, §19.38).
 		r.Get("/trash", a.trash)
@@ -55,23 +61,35 @@ func (a api) pageRoutes(r chi.Router) {
 // renderOptions arma el contexto del render desde el árbol del Scope: [[children]] lista solo
 // las hijas visibles, y un enlace a una página que quien lee no ve sale roto (SPEC §4.10, §17).
 func (a api) renderOptions(r *http.Request, slug, markdown string) wiki.Options {
+	opts, _ := a.renderContext(r, slug, markdown)
+	return opts
+}
+
+// renderContext es renderOptions más una huella de todo lo que cambia el resultado: la base de
+// los enlaces y el árbol que ve quien lee. Es parte de la clave de la caché del HTML (B11): sin
+// el árbol en la clave, alguien de nivel 1 podría recibir el HTML que se armó para un admin.
+// "" si el árbol no se pudo leer: entonces no se guarda.
+func (a api) renderContext(r *http.Request, slug, markdown string) (wiki.Options, string) {
 	opts := wiki.Options{Base: "/w/" + chi.URLParam(r, "ws")}
+	h := sha256.New()
+	io.WriteString(h, opts.Base)
 	if !strings.Contains(markdown, "[[") {
-		return opts
+		return opts, hex.EncodeToString(h.Sum(nil))
 	}
 	refs, err := a.Read.Tree(r.Context(), scopeOf(r))
 	if err != nil {
-		return opts // sin el árbol, los enlaces no se marcan: el resto de la página igual se lee
+		return opts, "" // sin el árbol, los enlaces no se marcan: el resto de la página igual se lee
 	}
 	visible := make(map[string]bool, len(refs))
 	opts.Exists = func(s string) bool { return visible[s] }
 	for _, ref := range refs {
+		fmt.Fprintf(h, "\x00%s\x00%s\x00%s\x00%s", ref.Slug, ref.Title, ref.Description, ref.Icon)
 		visible[ref.Slug] = true
 		if rest, ok := strings.CutPrefix(ref.Slug, slug+"/"); ok && slug != "" && !strings.Contains(rest, "/") {
 			opts.Children = append(opts.Children, wiki.Child{Slug: ref.Slug, Title: ref.Title, Description: ref.Description, Icon: ref.Icon})
 		}
 	}
-	return opts
+	return opts, hex.EncodeToString(h.Sum(nil))
 }
 
 // page busca la página del slug de la ruta dentro del Scope; si no está, 404 uniforme.
@@ -108,10 +126,17 @@ func (a api) getPage(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	html, toc, err := wiki.Render(p.Markdown, a.renderOptions(r, p.Slug, p.Markdown))
-	if err != nil {
-		a.fail(w, r, err)
-		return
+	opts, fp := a.renderContext(r, p.Slug, p.Markdown)
+	key := fmt.Sprintf("%s:%d:%s", p.ID, p.Revision, fp)
+	html, toc, hit := a.RenderCache.Get(key)
+	if !hit {
+		if html, toc, err = wiki.Render(p.Markdown, opts); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		if fp != "" {
+			a.RenderCache.Put(key, html, toc)
+		}
 	}
 	watch, err := a.Notify.WatchOf(r.Context(), scopeOf(r), currentUser(r).ID, p)
 	if err != nil {
@@ -219,6 +244,9 @@ func (a api) refs(w http.ResponseWriter, r *http.Request, refs []repo.PageRef, e
 	out := make([]map[string]any, len(refs))
 	for i, p := range refs {
 		out[i] = map[string]any{"slug": p.Slug, "title": p.Title, "level": p.MinRank, "description": p.Description, "icon": p.Icon}
+		if p.Position > 0 {
+			out[i]["position"] = p.Position
+		}
 	}
 	a.json(w, http.StatusOK, out)
 }
@@ -319,6 +347,22 @@ func (a api) move(w http.ResponseWriter, r *http.Request) {
 	}
 	// Mover bajo una página de más nivel sube el de las movidas (§3.2): las que dejan N1 dejan de compartirse.
 	a.Shares.Sweep(r.Context(), scopeOf(r), currentUser(r).ID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setOrder fija el orden manual de las hijas de una carpeta del árbol (§15, B7).
+func (a api) setOrder(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Parent string   `json:"parent"`
+		Slugs  []string `json:"slugs"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if err := a.Wiki.Order(r.Context(), scopeOf(r), in.Parent, in.Slugs); err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

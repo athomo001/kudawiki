@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/repo"
 )
 
@@ -69,4 +71,74 @@ func (a api) areaAudit(w http.ResponseWriter, r *http.Request) {
 	f.WsSlug = ""
 	es, err := a.Read.AreaAudit(r.Context(), scopeOf(r), currentUser(r).ID, f)
 	a.auditJSON(w, r, es, err, false)
+}
+
+// exportAudit baja la auditoría del superadmin en JSONL o CSV (§11), con los mismos filtros de la
+// pantalla y todas las páginas. Con la IP, como su vista.
+func (a api) exportAudit(w http.ResponseWriter, r *http.Request) {
+	a.writeAuditExport(w, r, "", true, func(f repo.AuditFilter) ([]repo.AuditEntry, error) {
+		return a.Read.AuditEvents(r.Context(), f)
+	})
+}
+
+// exportAreaAudit es la del admin del área: el mismo filtro de repo que su vista (§11.2), sin IP.
+func (a api) exportAreaAudit(w http.ResponseWriter, r *http.Request) {
+	sc, viewer := scopeOf(r), currentUser(r).ID
+	a.writeAuditExport(w, r, sc.WsID, false, func(f repo.AuditFilter) ([]repo.AuditEntry, error) {
+		f.WsSlug = ""
+		return a.Read.AreaAudit(r.Context(), sc, viewer, f)
+	})
+}
+
+const exportBatch = 1000
+
+func (a api) writeAuditExport(w http.ResponseWriter, r *http.Request, wsID string, withIP bool, fetch func(repo.AuditFilter) ([]repo.AuditEntry, error)) {
+	format := r.URL.Query().Get("format")
+	if format != "jsonl" && format != "csv" {
+		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
+		return
+	}
+	f := auditFilter(r)
+	f.Before, f.Limit = 0, exportBatch
+	first, err := fetch(f)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	ctype := "application/x-ndjson"
+	if format == "csv" {
+		ctype = "text/csv; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Content-Disposition", `attachment; filename="kudawiki-audit-`+time.Now().UTC().Format("20060102-150405")+"."+format+`"`)
+	var out audit.EventWriter
+	if format == "csv" {
+		out = audit.NewCSV(w)
+	} else {
+		out = audit.NewJSONL(w)
+	}
+	n := 0
+	for batch := first; len(batch) > 0; {
+		for _, e := range batch {
+			if err := out.Write(audit.Export(e, withIP)); err != nil {
+				return // la conexión se cortó: ya no hay a quién responderle
+			}
+			n++
+		}
+		if len(batch) < exportBatch {
+			break
+		}
+		f.Before = batch[len(batch)-1].ID
+		if batch, err = fetch(f); err != nil {
+			a.Log.Error("audit export failed midway", "err", err)
+			return
+		}
+	}
+	if out.Close() != nil {
+		return
+	}
+	q := r.URL.Query()
+	a.Audit.Record(r.Context(), audit.Event{Action: audit.AuditExport, WsID: wsID, TargetType: "audit",
+		Meta: map[string]any{"format": format, "events": n, "from": q.Get("from"), "to": q.Get("to"),
+			"filtered": q.Get("actor") != "" || q.Get("action") != "" || q.Get("ws") != ""}})
 }

@@ -61,6 +61,9 @@
   <label>{t('history.from')} <input type="date" bind:value={filter.from} /></label>
   <label>{t('history.to')} <input type="date" bind:value={filter.to} /></label>
   <button type="submit" class="primary">{t('audit.filter')}</button>
+  <!-- Con los mismos filtros, todas las páginas (§11); el servidor lo deja en la auditoría. -->
+  <a class="secondary" href={`/api${endpoint}/export?format=jsonl&${query()}`} download>{t('audit.export_jsonl')}</a>
+  <a class="secondary" href={`/api${endpoint}/export?format=csv&${query()}`} download>{t('audit.export_csv')}</a>
 </form>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 

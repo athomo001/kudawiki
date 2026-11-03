@@ -20,6 +20,10 @@ Thumbs.db
 # Generados
 ui/node_modules/
 ui/dist/
+# Pruebas E2E (ui/e2e): sesiones guardadas, trazas y reportes.
+ui/e2e/.auth/
+ui/test-results/
+ui/playwright-report/
 bin/
 
 # Certificados de prueba de los directorios de F6 (test/ldap/certs.sh los genera).

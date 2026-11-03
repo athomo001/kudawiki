@@ -17,6 +17,7 @@ func (a api) homeRoutes(r chi.Router) {
 	r.Get("/me/review-queue", a.ownReviews)
 	r.Get("/me/read-requests", a.myReadRequests)
 	r.Get("/me/quizzes", a.myQuizzes)
+	r.Get("/me/areas/export", a.exportMyAreas)
 }
 
 func (a api) watching(w http.ResponseWriter, r *http.Request) {

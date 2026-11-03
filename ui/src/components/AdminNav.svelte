@@ -12,7 +12,9 @@
       items: [
         { href: '/admin/users', label: 'admin.people', icon: 'people', also: ['/admin'] },
         { href: '/admin/areas', label: 'admin.areas', icon: 'grid' },
+        { href: '/admin/transfer', label: 'transfer.title', icon: 'folder' },
         { href: '/admin/ldap', label: 'ldap.title', icon: 'server' },
+        { href: '/admin/access-review', label: 'access_review.title', icon: 'check' },
       ],
     },
     {
@@ -20,6 +22,7 @@
       items: [
         { href: '/admin/appearance', label: 'appearance.title', icon: 'palette' },
         { href: '/admin/email', label: 'smtp.title', icon: 'mail' },
+        { href: '/admin/backups', label: 'backups.title', icon: 'archive' },
         { href: '/admin/templates', label: 'templates.global_title', icon: 'template' },
       ],
     },

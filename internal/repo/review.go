@@ -116,7 +116,7 @@ func (r *Repo) DueReviews(ctx context.Context, now time.Time) ([]DueReview, erro
 		FROM pages p
 		JOIN users u ON u.id = p.owner_id AND u.is_active = 1
 		JOIN workspace_members m ON m.workspace_id = p.workspace_id AND m.user_id = p.owner_id
-		WHERE p.deleted_at IS NULL AND `+rankSQL+` >= p.min_rank AND `+reviewDueSQL+` <= ?
+		WHERE p.deleted_at IS NULL`+activeAreaOf("p")+` AND `+rankSQL+` >= p.min_rank AND `+reviewDueSQL+` <= ?
 		ORDER BY p.workspace_id, p.owner_id, p.slug`, sqlTime(now))
 	if err != nil {
 		return nil, err

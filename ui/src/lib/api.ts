@@ -25,11 +25,16 @@ export type Area = {
   watermark_n2?: boolean;
   personal?: boolean;
   audit?: boolean;
+  // Ciclo de vida (§3.5): archivada es solo lectura para todos; aliases son sus slugs viejos (B17).
+  archived?: boolean;
+  aliases?: string[];
 };
 
 // Preferencias de lectura de SPEC §15; se aplican en todas las áreas.
 export type ReadingPrefs = { font: 'default' | 'dyslexic' | 'legible'; wide: boolean };
 
+// Modo del editor de cada persona (§4.2): el contenido siempre se guarda en Markdown.
+export type EditorMode = 'markdown' | 'visual';
 export type Me = {
   id: string;
   email: string;
@@ -38,6 +43,7 @@ export type Me = {
   auth_source: 'local' | 'ldap';
   locale: 'es' | 'en';
   reading_prefs: ReadingPrefs;
+  editor_mode: EditorMode;
   is_global_admin: boolean;
   workspaces: Area[];
   has_avatar: boolean;
@@ -70,7 +76,7 @@ export type TOTPSetup = { secret: string; uri: string; qr: string[] };
 // role es el efectivo: el más alto entre el manual y el que da un grupo del directorio (§8.3.2).
 export type Member = { user_id: string; email: string; full_name: string; role: Role; manual_role?: Role; ldap_role?: Role; ldap_group?: string };
 export type Level = 1 | 2 | 3;
-export type PageRef = { slug: string; title: string; level?: Level; description?: string; icon?: string };
+export type PageRef = { slug: string; title: string; level?: Level; description?: string; icon?: string; position?: number };
 export type Heading = { level: number; id: string; text: string };
 export type Page = {
   slug: string;
@@ -296,7 +302,10 @@ export type NotificationKind =
   | 'share_ended'
   | 'sealed_admin_access'
   | 'sealed_purged'
-  | 'sealed_reset_approved';
+  | 'sealed_reset_approved'
+  | 'access_review_due'
+  | 'proposal_transferred'
+  | 'sealed_transferred';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -329,13 +338,14 @@ export type NotificationPrefs = {
 // A dónde lleva un aviso: las mismas rutas que arma el correo (internal/notify).
 export function notificationHref(n: Notification): string {
   const area = `/w/${n.area.slug}`;
-  if (n.kind === 'proposal_pending' || n.kind === 'proposal_reminder') return `${area}/proposals`;
+  if (n.kind === 'proposal_pending' || n.kind === 'proposal_reminder' || n.kind === 'proposal_transferred') return `${area}/proposals`;
   if (n.kind.startsWith('proposal_')) return `${area}/proposals/${n.proposal}`;
   if (n.kind === 'review_reminder') return `${area}/review`;
   if (n.kind === 'quiz_failed_out') return `${area}/reads`;
   if (n.kind === 'share_pending' || n.kind === 'share_ended') return `${area}/shares`;
+  if (n.kind === 'access_review_due') return `${area}/access-review`;
   if (n.kind === 'shared_received') return `${area}/shared/${n.share}`;
-  if (n.kind === 'sealed_admin_access' || n.kind === 'sealed_reset_approved') return `/sealed/${n.sealed}`;
+  if (n.kind === 'sealed_admin_access' || n.kind === 'sealed_reset_approved' || n.kind === 'sealed_transferred') return `/sealed/${n.sealed}`;
   return n.page ? `${area}/p/${n.page}` : area;
 }
 export type RevisionMeta = {
@@ -565,11 +575,12 @@ export function codeOf(e: unknown): string {
   return e instanceof ApiError ? e.code : 'internal';
 }
 
-export const canEdit = (a: Area) => a.role !== 'viewer';
+// Un área archivada no deja escribir a nadie (§3.5): el servidor responde area_archived.
+export const canEdit = (a: Area) => a.role !== 'viewer' && !a.archived;
 // isPersonalSlug: la ruta de un espacio personal empieza con "~" (§7); un área no puede.
 export const isPersonalSlug = (slug: string) => slug.startsWith('~');
 // canWrite: puede abrir el editor, para publicar o para proponer (un lector, si el área lo deja).
-export const canWrite = (a: Area) => canEdit(a) || a.viewers_can_propose;
+export const canWrite = (a: Area) => canEdit(a) || (a.viewers_can_propose && !a.archived);
 
 // Puntaje de un cuestionario: 66,7 en español, 66.7 en inglés (llega redondeado a un decimal).
 export const formatPercent = (n: number, locale: string) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(n);

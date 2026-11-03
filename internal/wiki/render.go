@@ -13,7 +13,6 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/text"
 )
 
 // Heading es una entrada del índice lateral del lector (SPEC §15).
@@ -45,6 +44,9 @@ var policy = func() *bluemonday.Policy {
 	p.AllowAttrs("type").Matching(regexp.MustCompile(`^checkbox$`)).OnElements("input")
 	p.AllowAttrs("checked", "disabled").OnElements("input")
 	p.AllowElements("section", "details", "summary", "kbd")
+	// El <label> de las tareas (accesibilidad): bluemonday quita un elemento sin atributos si no
+	// se le permite así de forma explícita.
+	p.AllowNoAttrs().OnElements("label")
 	// Solo números: es la línea de origen que pone markSourceLines, no algo que escriba el autor.
 	p.AllowAttrs("data-line").Matching(regexp.MustCompile(`^[0-9]{1,7}$`)).Globally()
 	return p
@@ -52,10 +54,7 @@ var policy = func() *bluemonday.Policy {
 
 // Render convierte Markdown en HTML saneado y devuelve el índice (h2 y h3).
 func Render(markdown string, opts Options) (string, []Heading, error) {
-	src := []byte(markdown)
-	pc := parser.NewContext()
-	pc.Set(optionsKey, &opts)
-	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(pc))
+	doc, src := parse(markdown, &opts)
 	if opts.SourceLines {
 		markSourceLines(doc, src)
 	}

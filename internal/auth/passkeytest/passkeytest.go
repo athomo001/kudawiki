@@ -65,11 +65,13 @@ func (a *Authenticator) Create(options []byte) []byte {
 	cose = append(append(cose, 0x22, 0x58, 0x20), y...)
 	auth := a.authData(0x40) // AT: lleva la credencial
 	auth = append(auth, make([]byte, 16)...)
+	// #nosec G115 -- solo pruebas; ids y datos de unos pocos bytes
 	auth = binary.BigEndian.AppendUint16(auth, uint16(len(a.id)))
 	auth = append(append(auth, a.id...), cose...)
 	// {"fmt": "none", "attStmt": {}, "authData": auth}
 	att := []byte{0xa3, 0x63, 'f', 'm', 't', 0x64, 'n', 'o', 'n', 'e', 0x67, 'a', 't', 't', 'S', 't', 'm', 't', 0xa0,
 		0x68, 'a', 'u', 't', 'h', 'D', 'a', 't', 'a', 0x59}
+	// #nosec G115 -- solo pruebas; ids y datos de unos pocos bytes
 	att = append(binary.BigEndian.AppendUint16(att, uint16(len(auth))), auth...)
 	return a.response(map[string]any{
 		"clientDataJSON":    b64(a.clientData("webauthn.create", o.PublicKey.Challenge)),

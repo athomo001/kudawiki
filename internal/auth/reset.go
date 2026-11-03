@@ -98,6 +98,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, ip, email string) er
 		defer cancel()
 		u, err := s.store.UserByEmail(ctx, email)
 		if errors.Is(err, repo.ErrNotFound) {
+			s.unknownResets.Add(1)
 			return // nada que mandar, y nada en la auditoría: cualquiera podría llenarla (§11.2)
 		}
 		if err != nil {
@@ -297,3 +298,7 @@ func (s *Service) logError(msg string, err error) {
 		s.email.Log.Error(msg, "err", err)
 	}
 }
+
+// UnknownResets es cuántos restablecimientos se pidieron para correos que no existen desde que
+// arrancó el servidor (/metrics, §13.5).
+func (s *Service) UnknownResets() int64 { return s.unknownResets.Load() }

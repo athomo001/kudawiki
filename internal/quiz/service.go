@@ -63,6 +63,7 @@ type Service struct {
 }
 
 func NewService(s store, rec *audit.Recorder, now func() time.Time) *Service {
+	// #nosec G404 -- solo revuelve el orden de preguntas y opciones: no es un secreto
 	return &Service{store: s, audit: rec, now: now, rand: rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))}
 }
 

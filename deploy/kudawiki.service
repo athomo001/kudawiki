@@ -1,0 +1,37 @@
+# Kudawiki con systemd: la alternativa a Docker (SPEC §13.11, §21.2.6). Ver
+# docs/operacion/instalacion.md. Se instala en /etc/systemd/system/kudawiki.service.
+[Unit]
+Description=Kudawiki
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kudawiki
+Group=kudawiki
+ExecStart=/usr/local/bin/kudawiki serve --config /etc/kudawiki/kudawiki.yaml
+Restart=on-failure
+RestartSec=5
+# Deja terminar los pedidos en curso y el respaldo que esté corriendo.
+TimeoutStopSec=60
+
+# Endurecimiento (SPEC §21.2.6): sin privilegios ni capacidades, el sistema de archivos de solo
+# lectura salvo los datos. La MASTER_KEY (/etc/kudawiki) queda de solo lectura para el servicio.
+# Sin capacidades no puede escuchar en 443: listen en un puerto alto (:8443) o detrás de un proxy.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/kudawiki
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

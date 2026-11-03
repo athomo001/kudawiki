@@ -15,6 +15,7 @@
     type Template,
     type MediaFile,
     type Level,
+    type EditorMode,
     type Page,
     type PageRef,
     type PresenceEditor,
@@ -34,6 +35,7 @@
   import MarkdownGuide from '../components/MarkdownGuide.svelte';
   import EditorToolbar from '../components/EditorToolbar.svelte';
   import FileBrowser from '../components/FileBrowser.svelte';
+  import type VisualEditorType from '../components/VisualEditor.svelte';
 
   // Editor a pantalla completa, con el diseño aprobado (SPEC §15). Sin slug es una página nueva.
   // Guardar envía base_revision: si otra persona guardó antes, el servidor responde 409 con su
@@ -48,7 +50,50 @@
     selfId,
     refs,
     onsaved,
-  }: { area: Area; slug?: string; proposal?: string; selfId: string; refs: PageRef[]; onsaved: () => void } = $props();
+    editorMode = 'markdown',
+    oneditormode,
+  }: {
+    area: Area;
+    slug?: string;
+    proposal?: string;
+    selfId: string;
+    refs: PageRef[];
+    onsaved: () => void;
+    editorMode?: EditorMode;
+    oneditormode?: (m: EditorMode) => void;
+  } = $props();
+
+  // Modo visual (§4.2): Milkdown se alterna con el Markdown, no es otra columna. CodeMirror sigue
+  // montado y es la fuente del contenido: lo que escribe el modo visual se le pasa, y si el
+  // contenido cambia por otro lado (plantilla, borrador, conflicto) el modo visual se rearma.
+  // svelte-ignore state_referenced_locally
+  let mode = $state<EditorMode>(editorMode);
+  let visualKey = $state(0);
+  let visual = $state<VisualEditorType>();
+  let syncing = false; // el cambio de CodeMirror lo escribió el modo visual: no rearmarlo
+  const loadVisual = () => import('../components/VisualEditor.svelte');
+
+  function setMode(m: EditorMode) {
+    if (m === mode) return;
+    if (mode === 'visual') visual?.flush(); // antes de que el modo visual se desmonte
+    mode = m;
+    if (m === 'visual') visualKey++;
+    else tick().then(() => view?.focus());
+    oneditormode?.(m);
+  }
+
+  function fromVisual(md: string) {
+    if (!view || md === markdown) return;
+    syncing = true;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: md } });
+    syncing = false;
+  }
+
+  // writeHere escribe en el cursor del modo que está a la vista.
+  function writeHere(text: string) {
+    if (mode === 'visual' && visual) visual.insertMarkdown(text);
+    else view?.dispatch(view.state.replaceSelection(text));
+  }
 
   let title = $state('');
   // Ruta de la página: en una nueva es dónde se crea; en una existente, cambiarla la mueve al
@@ -143,7 +188,7 @@
         const body = new FormData();
         body.append('file', file);
         const m = await api<Upload>('POST', `/w/${area.slug}/media`, body);
-        view?.dispatch(view.state.replaceSelection(`${mediaMarkdown(m)}\n`));
+        writeHere(`${mediaMarkdown(m)}\n`);
       } catch (e) {
         error = errorText(codeOf(e));
       }
@@ -296,6 +341,7 @@
   async function save(e?: SubmitEvent) {
     e?.preventDefault();
     if (busy) return;
+    if (mode === 'visual') visual?.flush(); // lo último tecleado todavía no llegó a CodeMirror
     busy = true;
     error = '';
     // Un autoguardado en camino llegaría después y dejaría un borrador de lo ya publicado.
@@ -371,7 +417,8 @@
   async function insert(text: string, block: boolean) {
     guide = false;
     if (!view) return;
-    if (block) insertBlock(view, text);
+    if (mode === 'visual') writeHere(text);
+    else if (block) insertBlock(view, text);
     else view.dispatch(view.state.replaceSelection(text));
     await tick();
     view.focus();
@@ -414,7 +461,7 @@
   async function pickFile(f: MediaFile) {
     browsing = false;
     if (!view) return;
-    view.dispatch(view.state.replaceSelection(mediaMarkdown(f)));
+    writeHere(mediaMarkdown(f));
     await tick();
     view.focus();
   }
@@ -443,7 +490,11 @@
   onMount(() => {
     const mount = (doc: string) => {
       view = createEditor(host, doc, t('editor.source'), {
-        onChange: (v) => ((markdown = v), schedulePreview()),
+        onChange: (v) => {
+          markdown = v;
+          schedulePreview();
+          if (mode === 'visual' && !syncing) visualKey++;
+        },
         onSave: () => save(),
         onFiles: attach,
         pages: () => refs,
@@ -592,8 +643,12 @@
   {#if contentOnly && !approving}<p class="editor-note">{t('editor.propose_note')}</p>{/if}
   <!-- Como en el diseño aprobado: el formato a la izquierda, idioma y nivel a la derecha. -->
   <div class="editor-bar">
-    <EditorToolbar view={() => view} onimage={() => picker?.click()} onfiles={() => (browsing = true)} />
+    {#if mode === 'markdown'}<EditorToolbar view={() => view} onimage={() => picker?.click()} onfiles={() => (browsing = true)} />{:else}<span></span>{/if}
     <div class="editor-bar-end">
+      <div class="mode-switch" role="group" aria-label={t('editor.mode')}>
+        <button type="button" aria-pressed={mode === 'markdown'} onclick={() => setMode('markdown')}>{t('editor.mode_markdown')}</button>
+        <button type="button" aria-pressed={mode === 'visual'} onclick={() => setMode('visual')}>{t('editor.mode_visual')}</button>
+      </div>
       <label>
         {t('page.lang')}
         <select bind:value={lang}><option value="es">{t('lang.es')}</option><option value="en">{t('lang.en')}</option></select>
@@ -642,7 +697,16 @@
   {/if}
   {#if error}<p class="error banner" role="alert">{error}</p>{/if}
 
-  <div class="editor-body" bind:this={body}>
+  {#if mode === 'visual'}
+    <section class="editor-visual" aria-label={t('editor.mode_visual')}>
+      {#await loadVisual() then { default: VisualEditor }}
+        {#key visualKey}
+          <VisualEditor bind:this={visual} {markdown} label={t('editor.mode_visual')} onchange={fromVisual} onfiles={attach} onimage={() => picker?.click()} />
+        {/key}
+      {/await}
+    </section>
+  {/if}
+  <div class="editor-body" class:hidden-mode={mode === 'visual'} bind:this={body}>
     <section class="editor-source" aria-label={t('editor.source')}>
       <div class="cm-host" bind:this={host}></div>
     </section>

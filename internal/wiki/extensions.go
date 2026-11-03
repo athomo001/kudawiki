@@ -10,6 +10,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -50,6 +51,7 @@ var (
 	kindMath      = ast.NewNodeKind("Math")
 	kindMermaid   = ast.NewNodeKind("Mermaid")
 	kindBlockList = ast.NewNodeKind("BlockList")
+	kindTaskLabel = ast.NewNodeKind("TaskLabel")
 )
 
 // ----- Nodos -----
@@ -113,6 +115,10 @@ type blockList struct {
 	items []listItem
 }
 
+// taskLabel envuelve la casilla de una tarea y su texto: sin él, un lector de pantalla anuncia
+// "casilla, no marcada" sin decir de qué (accesibilidad, F8.15).
+type taskLabel struct{ ast.BaseInline }
+
 // listItem es una línea de [[toc]] o de [[children]]; note es la descripción de la hija (§4.1).
 type listItem struct {
 	href, text, note string
@@ -125,6 +131,7 @@ func (n *wikiToken) Kind() ast.NodeKind { return kindWikiToken }
 func (n *math) Kind() ast.NodeKind      { return kindMath }
 func (n *mermaid) Kind() ast.NodeKind   { return kindMermaid }
 func (n *blockList) Kind() ast.NodeKind { return kindBlockList }
+func (n *taskLabel) Kind() ast.NodeKind { return kindTaskLabel }
 
 func (n *callout) Dump(src []byte, l int)   { ast.DumpHelper(n, src, l, nil, nil) }
 func (n *directive) Dump(src []byte, l int) { ast.DumpHelper(n, src, l, nil, nil) }
@@ -132,6 +139,7 @@ func (n *wikiToken) Dump(src []byte, l int) { ast.DumpHelper(n, src, l, nil, nil
 func (n *math) Dump(src []byte, l int)      { ast.DumpHelper(n, src, l, nil, nil) }
 func (n *mermaid) Dump(src []byte, l int)   { ast.DumpHelper(n, src, l, nil, nil) }
 func (n *blockList) Dump(src []byte, l int) { ast.DumpHelper(n, src, l, nil, nil) }
+func (n *taskLabel) Dump(src []byte, l int) { ast.DumpHelper(n, src, l, nil, nil) }
 
 // ----- :::tabs, ::: tab Linux, :::steps, :::details Título, :::secret y el cierre ::: -----
 
@@ -148,6 +156,17 @@ func (directiveParser) Open(parent ast.Node, reader text.Reader, _ parser.Contex
 	line, seg := reader.PeekLine()
 	m := directiveOpen.FindSubmatch(util.TrimRightSpace(line))
 	if m == nil {
+		return nil, parser.NoChildren
+	}
+	// Pasado el tope, la línea queda como texto: goldmark recorre los bloques abiertos en cada
+	// línea y miles de :::tabs anidados cuestan su cuadrado (limits.go).
+	depth := 0
+	for p := parent; p != nil; p = p.Parent() {
+		if _, ok := p.(*directive); ok {
+			depth++
+		}
+	}
+	if depth >= maxNesting {
 		return nil, parser.NoChildren
 	}
 	for p := parent; p != nil; p = p.Parent() {
@@ -195,10 +214,18 @@ type wikiTokenParser struct{}
 
 func (wikiTokenParser) Trigger() []byte { return []byte{'['} }
 
+// maxWikiToken es lo más largo que puede ser un [[…]]. Buscar el cierre en todo el resto de la
+// línea desde cada "[[" costaba el cuadrado del largo de la línea (pentest de F8.15, §17). Un
+// [[secret:…]] más largo queda sin reconocer y checkSecrets rechaza la página: no se publica.
+const maxWikiToken = 4 << 10
+
 func (wikiTokenParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) ast.Node {
 	line, _ := block.PeekLine()
-	end := bytes.Index(line, []byte("]]"))
-	if !bytes.HasPrefix(line, []byte("[[")) || end < 3 {
+	if !bytes.HasPrefix(line, []byte("[[")) {
+		return nil
+	}
+	end := bytes.Index(line[:min(len(line), maxWikiToken)], []byte("]]"))
+	if end < 3 {
 		return nil
 	}
 	block.Advance(end + 2)
@@ -294,6 +321,7 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 	src := reader.Source()
 	opts, _ := pc.Get(optionsKey).(*Options)
 	var lists []*blockList
+	var tasks []*extast.TaskCheckBox
 	var replace []func()
 
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -305,6 +333,8 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 			if id, ok := n.AttributeString("id"); ok && (n.Level == 2 || n.Level == 3) {
 				opts.toc = append(opts.toc, Heading{Level: n.Level, ID: string(id.([]byte)), Text: string(n.Lines().Value(src))})
 			}
+		case *extast.TaskCheckBox:
+			tasks = append(tasks, n)
 		case *wikiToken:
 			n.base, n.plain = opts.Base, opts.LinksAsText
 			n.broken = opts.Exists != nil && n.target() != "" && !opts.Exists(n.target())
@@ -344,6 +374,17 @@ func (transformer) Transform(doc *ast.Document, reader text.Reader, pc parser.Co
 	}
 	for _, f := range replace {
 		f()
+	}
+	// La casilla y todo lo que le sigue en la línea pasan a ser el contenido de un <label>.
+	for _, cb := range tasks {
+		parent, label := cb.Parent(), &taskLabel{}
+		parent.InsertBefore(parent, cb, label)
+		for n := ast.Node(cb); n != nil; {
+			next := n.NextSibling()
+			parent.RemoveChild(parent, n)
+			label.AppendChild(label, n)
+			n = next
+		}
 	}
 }
 
@@ -434,6 +475,14 @@ func wikijsCallout(bq *ast.Blockquote, src []byte) string {
 type extRenderer struct{}
 
 func (extRenderer) RegisterFuncs(r renderer.NodeRendererFuncRegisterer) {
+	r.Register(kindTaskLabel, func(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			w.WriteString("<label>")
+		} else {
+			w.WriteString("</label>")
+		}
+		return ast.WalkContinue, nil
+	})
 	r.Register(kindCallout, func(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 		// El título ("Nota", "Atención"…) lo pone la hoja de estilos según el idioma de la
 		// interfaz: el HTML no depende de quién lee.

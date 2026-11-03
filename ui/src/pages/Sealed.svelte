@@ -302,7 +302,7 @@
         <button type="submit" class="primary" disabled={busy}>{t('sealed.set_password')}</button>
       </form>
     {:else if doc.grant && !usePassword && !doc.has_vault}
-      <p>{t('sealed.needs_vault')} <a href="/me/profile#vault-title">{t('vault.title')}</a></p>
+      <p>{t('sealed.needs_vault')} <a href="/me/profile/vault">{t('vault.title')}</a></p>
     {:else if doc.is_author && doc.reset === 'approved'}
       <p>{t('sealed.reset_approved')}</p>
       <form class="stack sealed-form" onsubmit={completeReset}>

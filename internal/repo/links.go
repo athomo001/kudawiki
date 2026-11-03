@@ -207,6 +207,11 @@ func (r *Repo) MovePages(ctx context.Context, s Scope, actorID, from, to string,
 			return "", 0, err
 		}
 	}
+	// En la carpeta nueva, la posición de la vieja no significa nada: vuelve al orden por ruta.
+	// Las subpáginas conservan el suyo, que es entre ellas.
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET position = NULL WHERE id = ?`, rootID); err != nil {
+		return "", 0, err
+	}
 	if err := rewriteLinkers(ctx, tx, s, actorID, "[["+from+"]] → [["+to+"]]", moves, rewrite); err != nil {
 		return "", 0, err
 	}

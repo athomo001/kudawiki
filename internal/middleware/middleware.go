@@ -4,7 +4,9 @@ package middleware
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -84,6 +86,35 @@ func SecurityHeaders(https bool) func(http.Handler) http.Handler {
 			h.Set("X-Robots-Tag", "noindex") // wiki interna: nunca indexable (SPEC §20.4)
 			if https {
 				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Proxy aplica trust_proxy (§21.2.1). La IP de quien pide pasa a ser la última de
+// X-Forwarded-For, la que agregó el proxy: las anteriores las escribe quien quiera. Así el rate
+// limit, la auditoría y las sesiones ven a la persona y no al proxy. Y una petición que llegó
+// al proxy por http (X-Forwarded-Proto) se redirige a base_url. Sin trust_proxy no se toca
+// nada: esas cabeceras las puede mandar cualquiera.
+func Proxy(trust bool, base string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if !trust {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") && strings.HasPrefix(base, "https://") {
+				http.Redirect(w, r, base+r.URL.RequestURI(), http.StatusPermanentRedirect)
+				return
+			}
+			if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+				last := xff[len(xff)-1]
+				if i := strings.LastIndexByte(last, ','); i >= 0 {
+					last = last[i+1:]
+				}
+				if ip := net.ParseIP(strings.TrimSpace(last)); ip != nil {
+					r.RemoteAddr = net.JoinHostPort(ip.String(), "0")
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

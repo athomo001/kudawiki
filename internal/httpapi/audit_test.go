@@ -106,3 +106,50 @@ func TestFailedLoginsDoNotFloodTheAudit(t *testing.T) {
 		t.Error("attempts against a nonexistent email were audited")
 	}
 }
+
+// §11: la exportación JSONL/CSV es la misma vista con el mismo filtro de repo; el admin del área
+// no recibe IPs ni eventos de otra área, el superadmin sí las IPs; nadie más exporta, y exportar
+// queda en la auditoría.
+func TestAuditExport(t *testing.T) {
+	f := newFixture(t)
+	create(t, f, "editorTI", "red")
+	f.do("adminFin", "PUT", "/api/w/finanzas/pages/plan", `{"title":"Plan secreto","markdown":"x","base_revision":0}`)
+
+	w := f.do("adminTI", "GET", "/api/w/ti/audit/export?format=jsonl", "")
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-ndjson" || !strings.Contains(w.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("area export: %d %v", w.Code, w.Header())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"action":"page.create"`) || !strings.Contains(body, `"page":"red"`) || strings.Contains(body, `"ip"`) || strings.Contains(body, "adminFin") {
+		t.Errorf("area export:\n%s", body)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		var e map[string]any
+		if err := json.Unmarshal([]byte(line), &e); err != nil || e["hash"] == "" || e["meta_json"] == nil {
+			t.Errorf("not a full JSONL event: %s", line)
+		}
+	}
+	if w := f.do("adminTI", "GET", "/api/w/ti/audit/export?format=csv&action=page.create", ""); w.Code != http.StatusOK ||
+		!strings.HasPrefix(w.Body.String(), "id,at,action,") || strings.Count(w.Body.String(), "\n") != 2 {
+		t.Errorf("filtered csv: %d\n%s", w.Code, w.Body)
+	}
+	if c := f.do("adminTI", "GET", "/api/w/ti/audit/export?format=xml", "").Code; c != http.StatusBadRequest {
+		t.Errorf("unknown format: %d", c)
+	}
+	for _, who := range []string{"editorTI", "adminFin"} {
+		if c := f.do(who, "GET", "/api/w/ti/audit/export?format=jsonl", "").Code; c != http.StatusNotFound {
+			t.Errorf("%s exports the TI audit: %d", who, c)
+		}
+	}
+	if c := f.do("adminTI", "GET", "/api/admin/audit/export?format=jsonl", "").Code; c != http.StatusNotFound {
+		t.Errorf("an area admin exports the global audit: %d", c)
+	}
+
+	all := f.do("super", "GET", "/api/admin/audit/export?format=jsonl", "").Body.String()
+	if !strings.Contains(all, `"ip":`) || !strings.Contains(all, "auth.login") || strings.Contains(all, "Plan secreto") || strings.Contains(all, `"page":`) {
+		t.Errorf("superadmin export:\n%s", all)
+	}
+	if e := find(auditOf(t, f, "adminTI", "/api/w/ti/audit"), "audit.export", "adminTI"); e == nil || e.Meta["format"] != "csv" || e.Meta["filtered"] != true {
+		t.Errorf("the export is not audited: %+v", e)
+	}
+}
