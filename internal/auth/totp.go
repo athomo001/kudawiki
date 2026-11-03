@@ -54,7 +54,7 @@ const (
 // la consola (`kudawiki admin`) no la carga y solo borra.
 // BaseURL decide si hay passkeys: su host es el RP ID (§8.1).
 type SecondFactor struct {
-	Key     []byte
+	Key     crypto.MasterKey // cifra el secreto TOTP
 	Enforce MFAPolicy
 	BaseURL string
 }
@@ -126,11 +126,11 @@ func (s *Service) BeginTOTP(ctx context.Context, u repo.User, issuer string) (TO
 	if _, err := rand.Read(secret); err != nil {
 		return TOTPSetup{}, err
 	}
-	enc, err := crypto.Seal(s.mfa.Key, secret, totpAAD(u.ID))
+	enc, err := crypto.Seal(s.mfa.Key.Key, secret, TOTPAAD(u.ID))
 	if err != nil {
 		return TOTPSetup{}, err
 	}
-	if err := s.store.SetPendingTOTP(ctx, u.ID, enc, crypto.MasterKeyVersion); errors.Is(err, repo.ErrConflict) {
+	if err := s.store.SetPendingTOTP(ctx, u.ID, enc, s.mfa.Key.Version); errors.Is(err, repo.ErrConflict) {
 		return TOTPSetup{}, ErrTOTPEnabled
 	} else if err != nil {
 		return TOTPSetup{}, err
@@ -394,14 +394,15 @@ func (s *Service) useTOTP(ctx context.Context, userID, code string) (bool, error
 }
 
 func (s *Service) openTOTP(userID string, t repo.TOTP) ([]byte, error) {
-	if t.KeyVersion != crypto.MasterKeyVersion {
+	if t.KeyVersion != s.mfa.Key.Version {
 		return nil, fmt.Errorf("totp secret of %s was sealed with master key version %d", userID, t.KeyVersion)
 	}
-	return crypto.Open(s.mfa.Key, t.SecretEnc, totpAAD(userID))
+	return crypto.Open(s.mfa.Key.Key, t.SecretEnc, TOTPAAD(userID))
 }
 
-// totpAAD ata el secreto a su persona: copiado a otra fila no se abre.
-func totpAAD(userID string) []byte { return []byte("totp|" + userID) }
+// TOTPAAD ata el secreto a su persona: copiado a otra fila no se abre. Exportada para que la
+// rotación de la MASTER_KEY (§6.5) use la misma.
+func TOTPAAD(userID string) []byte { return []byte("totp|" + userID) }
 
 // matchTOTP busca el paso cuyo código coincide, con la tolerancia de reloj; devuelve el paso
 // para que no se pueda volver a usar.

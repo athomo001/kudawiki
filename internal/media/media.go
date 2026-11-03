@@ -88,9 +88,8 @@ func (s *Service) Upload(ctx context.Context, sc repo.Scope, actorID, filename s
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return repo.Media{}, err
 	}
-	m.MimeType = http.DetectContentType(head[:n])
-	if !allowed[m.MimeType] || (strings.HasPrefix(m.MimeType, "text/") && looksLikeMarkup(head[:n])) {
-		return repo.Media{}, ErrUnsupportedType
+	if m.MimeType, err = sniff(head[:n]); err != nil {
+		return repo.Media{}, err
 	}
 
 	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -261,12 +260,65 @@ func copyFile(src, dst string) error {
 
 func (s *Service) Remove(wsID, id string) error {
 	var errs error
-	for _, thumb := range []bool{false, true} {
-		if err := os.Remove(s.path(wsID, id, thumb)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	// El .enc es el de un sellado (F7.6): el mismo id no puede ser de los dos, así que se prueba.
+	for _, p := range []string{s.path(wsID, id, false), s.path(wsID, id, true), s.encPath(wsID, id)} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = errors.Join(errs, err)
 		}
 	}
 	return errs
+}
+
+// sniff es el tipo por el contenido, si está en la lista blanca (SPEC §4.4).
+func sniff(head []byte) (string, error) {
+	mime := http.DetectContentType(head)
+	if !allowed[mime] || (strings.HasPrefix(mime, "text/") && looksLikeMarkup(head)) {
+		return "", ErrUnsupportedType
+	}
+	return mime, nil
+}
+
+// ReadUpload lee un archivo para un sellado (F7.6): las mismas reglas de tipo y tamaño que Upload,
+// pero en memoria, porque se cifra entero con la DEK antes de tocar el disco. Devuelve el nombre
+// ya limpio para mostrar.
+func (s *Service) ReadUpload(filename string, body io.Reader) (name, mime string, data []byte, err error) {
+	data, err = io.ReadAll(io.LimitReader(body, s.maxBytes+1))
+	if err != nil {
+		return "", "", nil, err
+	}
+	if int64(len(data)) > s.maxBytes {
+		return "", "", nil, ErrTooLarge
+	}
+	if mime, err = sniff(data[:min(len(data), 512)]); err != nil {
+		return "", "", nil, err
+	}
+	return cleanName(filename), mime, data, nil
+}
+
+// encPath: storage/ws_<área>/<id>.enc, la media de los sellados (SPEC §13.2).
+func (s *Service) encPath(wsID, id string) string { return s.path(wsID, id, false) + ".enc" }
+
+// PutEncrypted guarda un archivo ya cifrado de un sellado. Nunca pisa uno que existe.
+func (s *Service) PutEncrypted(wsID, id string, data []byte) error {
+	dst := s.encPath(wsID, id)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(dst)
+		return err
+	}
+	return f.Close()
+}
+
+// ReadEncrypted devuelve el archivo cifrado de un sellado; descifrarlo es cosa de quien tiene la DEK.
+func (s *Service) ReadEncrypted(wsID, id string) ([]byte, error) {
+	return os.ReadFile(s.encPath(wsID, id))
 }
 
 // looksLikeMarkup atrapa SVG y HTML que el sniffing toma por texto plano (sin <?xml ni

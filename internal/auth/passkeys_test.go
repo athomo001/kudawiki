@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/auth/passkeytest"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/repo"
 )
 
@@ -18,7 +19,7 @@ const passkeyOrigin = "https://wiki.empresa.cl"
 func passkeyService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	t.Helper()
 	s, r, c := totpService(t)
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAdmins, BaseURL: passkeyOrigin})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, Enforce: MFAAdmins, BaseURL: passkeyOrigin})
 	return s, r, c
 }
 
@@ -56,13 +57,13 @@ func TestPasskeysAvailable(t *testing.T) {
 		"https://wiki.empresa.cl": true, "http://localhost:8080": true,
 		"http://wiki.empresa.cl": false, "https://10.0.0.5": false, "http://127.0.0.1:8080": false, "https://[::1]:8443": false,
 	} {
-		s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), BaseURL: base})
+		s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, BaseURL: base})
 		if got := s.PasskeysAvailable(); got != want {
 			t.Errorf("%s: available = %v, want %v", base, got, want)
 		}
 	}
 	// El orden del map es al azar: la última base_url de la vuelta no sirve para esto.
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), BaseURL: "http://wiki.empresa.cl"})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, BaseURL: "http://wiki.empresa.cl"})
 	if _, err := s.BeginPasskey(ctx, ana, "x", "Wiki"); !errors.Is(err, ErrPasskeysUnavailable) {
 		t.Errorf("begin without passkeys: %v", err)
 	}
@@ -205,7 +206,7 @@ func TestPasskeySecondStep(t *testing.T) {
 		t.Errorf("methods = %v", res.Methods)
 	}
 	// Si la instalación pierde las passkeys (base_url sin https), no se ofrecen.
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), BaseURL: "http://10.0.0.5"})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, BaseURL: "http://10.0.0.5"})
 	if res, _ := s.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword); strings.Join(res.Methods, ",") != "totp" {
 		t.Errorf("methods without passkeys = %v", res.Methods)
 	}

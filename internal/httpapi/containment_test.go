@@ -29,6 +29,13 @@ const trashed = "kwpapelera"
 // los miembros de "ti" y nadie más. La otra página de "finanzas" (kwleakfin) sigue sin verse.
 const sharedMark = "kwajena"
 
+// Un sellado de editorTI (§6): sealedMark va en su título y su contenido, que nunca salen de las
+// rutas del área; sealedSlug, en su ruta, que ven solo el autor y los admins del área.
+const (
+	sealedMark = "kwsellado"
+	sealedSlug = "kwsellslug"
+)
+
 type seeded struct {
 	slug       map[int]string // nivel → ruta; 0 = ruta inexistente
 	media      map[int]string // nivel → URL de su media
@@ -81,6 +88,9 @@ func seed(t *testing.T, f fixture) seeded {
 	}
 	s.trashID, s.trashMedia = seedTrash(t, f)
 	s.shared, s.sharedFile, s.rejected = seedShares(t, f)
+	if w := f.do("editorTI", "POST", "/api/w/ti/sealed", `{"slug":"sellado/`+sealedSlug+`","title":"`+sealedMark+`","markdown":"`+sealedMark+`","password":"una clave bien larga"}`); w.Code != http.StatusCreated {
+		t.Fatalf("seed sealed: %d %s", w.Code, w.Body)
+	}
 	// Propuestas con la marca de su página: solo las ve su autor (adminTI) y el admin del área.
 	for lvl := 1; lvl <= 3; lvl++ {
 		s.proposal[lvl] = propose(t, f, `{"slug":"`+s.slug[lvl]+`","title":"Propuesta `+leaks[lvl]+`","markdown":"Cambio `+leaks[lvl]+`","base_revision":1}`)
@@ -340,6 +350,10 @@ func probes(s seeded, lvl int) []probe {
 		{"/api/w/{ws}/shared/{id}/media/{media}", "GET", "/api/w/ti/shared/" + s.shared + "/media/" + s.sharedFile, "", 1, false, 200},
 		{"/api/w/{ws}/search", "GET", "/api/w/ti/search?q=" + sharedMark, "", 1, false, 200},
 		{"/api/w/{ws}/shared/{id}", "DELETE", "/api/w/ti/shared/no-existe", "", 4, false, 0},
+		// Sellados (§6): la lista del árbol la pide cualquier miembro; sellar uno sin contraseña se
+		// rechaza y no cambia nada. Lo de cada documento, por id, se prueba en TestSealed.
+		{"/api/w/{ws}/sealed", "GET", "/api/w/ti/sealed", "", 1, false, 200},
+		{"/api/w/{ws}/sealed", "POST", "/api/w/ti/sealed", `{"slug":"sellado/otro","title":"x","markdown":"x","password":""}`, 2, false, 422},
 	}
 }
 
@@ -391,6 +405,13 @@ func TestContainmentMatrix(t *testing.T) {
 		if strings.Contains(all, "/w/finanzas") || strings.Contains(all, "guia") {
 			t.Errorf("%s received the source path of a shared article", who)
 		}
+		// De un sellado no sale nunca el contenido; su ruta, solo para el autor y los admins del área.
+		if strings.Contains(all, sealedMark) {
+			t.Errorf("%s received the content of a sealed document", who)
+		}
+		if seen, want := strings.Contains(all, sealedSlug), who == "adminTI" || who == "editorTI"; seen != want {
+			t.Errorf("%s sees the path of a sealed document: %v, want %v", who, seen, want)
+		}
 		// Lo borrado solo aparece en la papelera, y ahí solo para el admin y para quien lo borró.
 		if strings.Contains(all, trashed) {
 			t.Errorf("%s received a page in the trash outside the trash", who)
@@ -424,8 +445,17 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 	// Las passkeys son de cada persona y su login va sin sesión: TestPasskeys. La baja de usuarios y
 	// el superadmin desde el panel son del superadmin: TestOffboarding, TestOffboardingNow y TestSuperadminToggle.
 	// La conexión al directorio y las reglas de mapeo son del superadmin: TestLDAPAdmin y TestLDAPMappings.
+	// Cada sellado, por id, tiene su propio 404 uniforme (quién sabe que existe): TestSealed. Los
+	// accesos, la bóveda y "mis sellados" son de cada persona: TestSealedGrants. Desclasificar,
+	// restablecer la contraseña y la lista de todos los sellados: TestSealedDeclassify y TestSealedPasswordReset.
+	// Sus archivos, con el documento abierto: TestSealedFiles.
 	// Vincular, desanclar, sincronizar, el estado y la depuración también: TestLDAPLinkAndDetach y TestLDAPSync.
 	elsewhere := []string{
+		"GET /api/sealed/{id}", "PUT /api/sealed/{id}", "DELETE /api/sealed/{id}", "POST /api/sealed/{id}/unlock", "GET /api/sealed/{id}/history",
+		"GET /api/sealed/{id}/grants", "POST /api/sealed/{id}/grants", "DELETE /api/sealed/{id}/grants/{user_id}", "GET /api/me/sealed", "POST /api/me/vault",
+		"POST /api/sealed/{id}/declassify", "POST /api/sealed/{id}/password-reset", "POST /api/sealed/{id}/password-reset/approve",
+		"POST /api/sealed/{id}/password-reset/complete", "GET /api/admin/sealed",
+		"POST /api/sealed/{id}/files", "GET /api/sealed/{id}/files/{file_id}",
 		"POST /api/admin/users/{id}/link-ldap", "POST /api/admin/workspaces/{id}/members/{user_id}/detach",
 		"GET /api/admin/ldap/status", "POST /api/admin/ldap/sync", "POST /api/admin/ldap/sync/preview", "PUT /api/admin/ldap/debug",
 		"GET /api/admin/ldap/config", "PUT /api/admin/ldap/config", "POST /api/admin/ldap/test",

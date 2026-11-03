@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/oklog/ulid/v2"
 )
@@ -28,7 +29,7 @@ func TestTOTPCodeRFC6238(t *testing.T) {
 func totpService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	t.Helper()
 	s, r, c := newService(t)
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAdmins})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, Enforce: MFAAdmins})
 	hash, _ := HashPassword(goodPassword)
 	if err := r.CreateUser(context.Background(), repo.User{ID: ulid.Make().String(), Email: "beto@empresa.cl", FullName: "Beto",
 		PasswordHash: hash, IsActive: true, Locale: "es"}); err != nil {
@@ -241,7 +242,7 @@ func TestTOTPEnforceAll(t *testing.T) {
 	if need, _ := s.NeedsMFASetup(ctx, beto); need {
 		t.Error("admins policy: a reader does not need it")
 	}
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32), Enforce: MFAAll})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, Enforce: MFAAll})
 	if need, _ := s.NeedsMFASetup(ctx, beto); !need {
 		t.Error("all policy: everybody needs it")
 	}
@@ -252,7 +253,7 @@ func TestTOTPEnforceAll(t *testing.T) {
 func TestTOTPEnforceNone(t *testing.T) {
 	ctx := context.Background()
 	s, r, c := totpService(t)
-	s.SetSecondFactor(SecondFactor{Key: bytes.Repeat([]byte{7}, 32)})
+	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}})
 	ana, _ := r.UserByEmail(ctx, "ana@empresa.cl")
 	if need, _ := s.NeedsMFASetup(ctx, ana); need {
 		t.Error("none policy: the superadmin does not need it")

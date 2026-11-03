@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError, canEdit, canWrite, codeOf, isPersonalSlug, type Area as AreaT, type Me, type ReadingPrefs } from './lib/api';
+  import { viewer } from './lib/watermark.svelte';
   import { setLocale, errorText, t } from './lib/i18n/index.svelte';
   import { applyPrefs } from './lib/prefs';
   import { navigate, route } from './lib/router.svelte';
@@ -22,6 +23,8 @@
   import Directory from './pages/Directory.svelte';
   import SiteFooter from './components/SiteFooter.svelte';
   import Area from './pages/Area.svelte';
+  import Sealed from './pages/Sealed.svelte';
+  import SealedList from './pages/SealedList.svelte';
   import Invite from './pages/Invite.svelte';
   import Forgot from './pages/Forgot.svelte';
   import Reset from './pages/Reset.svelte';
@@ -43,6 +46,8 @@
     error = '';
     try {
       me = await api<Me>('GET', '/auth/me');
+      viewer.name = me.full_name;
+      viewer.email = me.email;
     } catch (e) {
       me = null;
       // 401 es el estado normal sin sesión; cualquier otra cosa se muestra.
@@ -87,6 +92,9 @@
   // es una ruta más que no existe.
   const admin = $derived(!!me?.is_global_admin && (route.path === '/admin' || route.path.startsWith('/admin/')));
   const adminArea = $derived(route.path.match(/^\/admin\/areas\/([0-9A-Z]{26})(\/members)?$/));
+  // Un sellado fuera de su área (§6): el superadmin no es miembro, y el aviso al autor lleva aquí.
+  // Si quien lo abre es del área, se ve dentro de ella, con su árbol.
+  const sealedPath = $derived(route.path.match(/^\/sealed\/([0-9A-Z]{26})$/));
   const ldapTab = $derived(route.path.match(/^\/admin\/ldap(?:\/(rules|sync|test))?$/));
   // El espacio personal (§7) no viene entre las áreas: el propio se arma con el rol de su dueño
   // (admin) y uno ajeno, solo para el superadmin, como lector y en modo auditoría. Si no existe,
@@ -181,6 +189,8 @@
               <Templates endpoint="/admin/templates" context={site} global />
             {:else if route.path === '/admin/health'}
               <Health endpoint="/admin/health" context={supervision} global />
+            {:else if route.path === '/admin/sealed'}
+              <SealedList context={supervision} />
             {:else if route.path === '/admin/audit'}
               <Audit endpoint="/admin/audit" context={supervision} global />
             {:else}
@@ -198,6 +208,8 @@
           <MyHome {me} />
         {:else if route.path === '/me/profile'}
           <Profile {me} {avatarRev} onprefs={savePrefs} onchanged={profileChanged} />
+        {:else if sealedPath}
+          <Sealed id={sealedPath[1] ?? ''} memberOf={[me.personal.slug, ...me.workspaces.map((w) => w.slug)]} />
         {:else}
           <NotFound />
         {/if}

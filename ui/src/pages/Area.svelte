@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, canEdit, canWrite, codeOf, type Area, type PageRef, type Proposal, type TagCount } from '../lib/api';
+  import { api, canEdit, canWrite, codeOf, type Area, type PageRef, type Proposal, type SealedRef, type TagCount } from '../lib/api';
   import { t, errorText, type Key } from '../lib/i18n/index.svelte';
   import Tree, { buildTree } from '../components/Tree.svelte';
   import Reader from './Reader.svelte';
@@ -22,6 +22,8 @@
   import Proposals from './Proposals.svelte';
   import Shared from './Shared.svelte';
   import Shares from './Shares.svelte';
+  import Sealed from './Sealed.svelte';
+  import SealedNew from './SealedNew.svelte';
   import NotFound from './NotFound.svelte';
   import SiteFooter from '../components/SiteFooter.svelte';
 
@@ -33,7 +35,7 @@
   let misses = $state<{ query: string; count: number }[]>([]);
   let error = $state('');
   const base = $derived(`/w/${area.slug}`);
-  const view = $derived(sub.match(/^(p|edit|history|tags|reads|quiz|quizzes|shared)\/(.+)$/));
+  const view = $derived(sub.match(/^(p|edit|history|tags|reads|quiz|quizzes|shared|sealed)\/(.+)$/));
   const kind = $derived(view?.[1]);
   const pageSlug = $derived(view?.[2] ?? '');
   // Bandeja de propuestas: proposals, proposals/{id} y proposals/{id}/edit (SPEC §5.2).
@@ -41,6 +43,8 @@
   let pending = $state(0);
   // Cuántos artículos le comparten otras áreas: "Compartido" aparece solo si hay alguno (§4.19).
   let sharedCount = $state(0);
+  // Los sellados que quien mira puede ver (§6.1): van en el árbol con su ruta; el título va cifrado.
+  let sealed = $state<SealedRef[]>([]);
   const titles = $derived(new Map(refs.map((r) => [r.slug, r.title])));
 
   // Migas de pan (SPEC §15): área / carpetas / página. Una carpeta que no es página va sin enlace.
@@ -63,6 +67,7 @@
     quizzes: 'quiz.title',
     audit: 'audit.title',
     shared: 'shared.title',
+    sealed: 'sealed.badge',
     search: 'search.open',
     new: 'page.new',
     history: 'page.history',
@@ -135,6 +140,14 @@
     }
   }
 
+  async function loadSealed() {
+    try {
+      sealed = await api<SealedRef[]>('GET', `${base}/sealed`);
+    } catch {
+      sealed = [];
+    }
+  }
+
   async function loadShared() {
     if (area.personal) return;
     try {
@@ -155,9 +168,11 @@
     misses = [];
     pending = 0;
     sharedCount = 0;
+    sealed = [];
     loadTree();
     loadPending();
     loadShared();
+    loadSealed();
     // "Lo que buscan y no encuentran" es solo para el admin del área (SPEC §9.6).
     if (area.role === 'admin') api<typeof misses>('GET', `${base}/search-misses`).then((m) => (misses = m)).catch(() => {});
   });
@@ -207,10 +222,22 @@
     {/if}
     <hr />
     <Tree nodes={buildTree(refs)} {base} current={pageSlug} />
+    {#if sealed.length}
+      <ul class="sealed-list" aria-label={t('sealed.list')}>
+        {#each sealed as s (s.id)}
+          <li>
+            <a class="nav-item" href={`${base}/sealed/${s.id}`} aria-current={kind === 'sealed' && pageSlug === s.id ? 'page' : undefined}>
+              <Icon name="lock" size={14} /> <span class="sealed-slug">{s.slug}</span>
+            </a>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     {#if canEdit(area)}
       <hr />
       <a class="nav-item" href={`${base}/files`} aria-current={sub === 'files' ? 'page' : undefined}><Icon name="files" size={16} /> {t('files.title')}</a>
       <a class="nav-item" href={`${base}/trash`} aria-current={sub === 'trash' ? 'page' : undefined}><Icon name="trash" size={16} /> {t('trash.title')}</a>
+      <a class="nav-item" href={`${base}/sealed/new`} aria-current={sub === 'sealed/new' ? 'page' : undefined}><Icon name="lock" size={16} /> {t('sealed.new')}</a>
       <!-- En el espacio personal nada vence, y no hay miembros ni configuración que tocar (§7). -->
       {#if !area.personal}
         <a class="nav-item" href={`${base}/review`} aria-current={sub === 'review' ? 'page' : undefined}><Icon name="check" size={16} /> {t('review.nav')}</a>
@@ -243,6 +270,8 @@
     {#if error}<p class="error banner" role="alert">{error}</p>{/if}
     {#if kind === 'p'}
       <Reader {area} slug={pageSlug} {refs} onmoved={loadTree} />
+    {:else if kind === 'sealed' && pageSlug !== 'new'}
+      <Sealed id={pageSlug} inArea ondeleted={loadSealed} />
     {:else if kind === 'shared' && !area.personal}
       <Shared {area} id={pageSlug} onchanged={loadShared} />
     {:else if proposalView && canWrite(area) && !area.personal}
@@ -255,12 +284,14 @@
           <SearchResults {area} />
         {:else if sub === 'shared' && !area.personal}
           <Shared {area} id="" onchanged={loadShared} />
+        {:else if sub === 'sealed/new' && canEdit(area) && !area.audit}
+          <SealedNew {area} oncreated={loadSealed} />
         {:else if sub === 'shares' && area.role === 'admin' && !area.personal}
           <Shares {area} context={adminContext} />
         {:else if kind === 'tags'}
           <TagPages {area} tag={decodeURIComponent(pageSlug)} />
         {:else if kind === 'history'}
-          <History {area} slug={pageSlug} onreverted={loadTree} />
+          <History {area} slug={pageSlug} level={refs.find((r) => r.slug === pageSlug)?.level} onreverted={loadTree} />
         {:else if sub === 'templates' && area.role === 'admin'}
           <Templates endpoint={`${base}/templates`} context={adminContext} />
         {:else if sub === 'files' && canEdit(area)}

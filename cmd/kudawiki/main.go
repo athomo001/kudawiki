@@ -3,7 +3,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,6 +37,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/jobs"
 	"github.com/athomo001/kudawiki/internal/ldap"
 	"github.com/athomo001/kudawiki/internal/mail"
+	"github.com/athomo001/kudawiki/internal/masterkey"
 	"github.com/athomo001/kudawiki/internal/media"
 	"github.com/athomo001/kudawiki/internal/notify"
 	"github.com/athomo001/kudawiki/internal/offboarding"
@@ -43,6 +47,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -62,6 +67,12 @@ commands:
                (serve applies them, after a backup)
   backup       make a backup now into <data_dir>/backups (the master key is not included)
   restore      "restore <file>": verify a backup and put it in place; the server must be stopped
+  masterkey    "masterkey rotate": replace the master key and re-encrypt what it protects, with the
+               server stopped and a backup first; if it is cut, run it again. The old key stays
+               as <key file>.v<N>: the older backups need it
+               "masterkey split --shares N --threshold K": print the key in N shares; any K rebuild it
+               "masterkey combine": read shares from stdin, check them against the database and
+               write the key file if it is missing
   ldap         "ldap sync [--dry-run]": sync accounts and area memberships with the directory now
                (--dry-run lists what it would do). Exit 1 if a safeguard aborted it
   doctor       check the content health (broken links, tree, media, search index);
@@ -107,6 +118,8 @@ func main() {
 			err = runBackup(ctx, cfg)
 		case "restore":
 			err = runRestore(cfg, fs.Arg(0))
+		case "masterkey":
+			err = runMasterKey(ctx, cfg, fs.Args())
 		case "doctor":
 			err = runDoctor(ctx, cfg, *wsSlug, *fix)
 		case "admin":
@@ -193,10 +206,9 @@ func readPassword() (string, error) {
 func runServe(ctx context.Context, cfg config.Config) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	// Sin llave no se arranca: sin ella la contraseña SMTP guardada y los sellados de F7 serían
-	// ilegibles (SPEC §6.3).
-	masterKey, err := crypto.LoadMasterKey(cfg.MasterKeyFile)
-	if err != nil {
+	// Sin llave no se arranca: sin ella la contraseña SMTP guardada y los sellados serían
+	// ilegibles (SPEC §6.3). Se mira antes de migrar; su versión, después (masterkey.Load).
+	if _, err := crypto.LoadMasterKey(cfg.MasterKeyFile); err != nil {
 		return fmt.Errorf("%w (run `kudawiki init` first)", err)
 	}
 	db, err := database.Open(cfg.DBPath())
@@ -217,6 +229,10 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	store := repo.New(db)
+	masterKey, err := masterkey.Load(ctx, store, cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
 	// Páginas sin indexar (las de antes de la búsqueda, o un índice dañado): se reconstruye al
 	// arrancar, porque el índice es derivado (SPEC §9.7).
 	if stale, err := store.IndexStale(ctx); err != nil {
@@ -253,7 +269,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	}
 	areas := workspace.NewService(store, rec, logger)
 	// La baja de usuarios (§8.4): la usan el panel, el job diario y la sincronización del directorio.
-	leaving := offboarding.NewService(store, files, rec, masterKey,
+	leaving := offboarding.NewService(store, files, rec, masterKey.Key,
 		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
 	directory, err := newDirectory(cfg, store, rec, masterKey, directoryDeps{areas: areas, leaving: leaving, mailer: mailer, log: logger})
 	if err != nil {
@@ -278,7 +294,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	jobsDone.Go(func() { mailer.Run(jobCtx, logger) })
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
-	notes := notify.NewService(store, mailer, props, masterKey, cfg.BaseURL, cfg.EmailDelay(), cfg.RemindAfter(), time.Now)
+	notes := notify.NewService(store, mailer, props, masterKey.Key, cfg.BaseURL, cfg.EmailDelay(), cfg.RemindAfter(), time.Now)
 	jobsDone.Go(func() { notes.Run(jobCtx, logger) })
 	// Completa las bajas que vencieron y seudonimiza la auditoría (§8.4, §13.10).
 	jobsDone.Go(func() { leaving.Daily(jobCtx) })
@@ -295,6 +311,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: editing,
 			Shares:   shares.NewService(store, rec, logger),
+			Sealed:   sealed.NewService(store, files, rec, masterKey, logger, time.Now),
 			Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving,
 			RemindAfter: cfg.RemindAfter(), Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, UI: kudawiki.UI(), BaseURL: base, TrashRetention: cfg.TrashRetention(), StorageDir: cfg.StorageDir(), Log: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -322,7 +339,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 // newDirectory arma el servicio del directorio con la configuración del archivo y lo que la
 // sincronización necesita: la baja de §8.4 y el aviso a los superadmins (§8.3.4). Lo usan serve
 // y `kudawiki ldap sync`.
-func newDirectory(cfg config.Config, store *repo.Repo, rec *audit.Recorder, masterKey []byte, deps directoryDeps) (*ldap.Service, error) {
+func newDirectory(cfg config.Config, store *repo.Repo, rec *audit.Recorder, masterKey crypto.MasterKey, deps directoryDeps) (*ldap.Service, error) {
 	areas, leaving, mailer, logger := deps.areas, deps.leaving, deps.mailer, deps.log
 	l := cfg.Auth.LDAP
 	bindPassword, err := cfg.LDAPBindPassword()
@@ -358,10 +375,6 @@ func runLDAPSync(ctx context.Context, cfg config.Config, args []string, dryRun b
 	if len(args) != 1 || args[0] != "sync" {
 		return errors.New("usage: kudawiki ldap sync [--dry-run]")
 	}
-	masterKey, err := crypto.LoadMasterKey(cfg.MasterKeyFile)
-	if err != nil {
-		return err
-	}
 	if _, err := os.Stat(cfg.DBPath()); err != nil {
 		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
 	}
@@ -377,6 +390,10 @@ func runLDAPSync(ctx context.Context, cfg config.Config, args []string, dryRun b
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	store := repo.New(db)
+	masterKey, err := masterkey.Load(ctx, store, cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
 	rec := audit.NewRecorder(store, time.Now, logger)
 	b := cfg.Branding
 	brand, err := branding.NewService(store, rec, branding.Patch{Title: b.Title, Company: b.Company, ColorPrimary: b.ColorPrimary,
@@ -392,7 +409,7 @@ func runLDAPSync(ctx context.Context, cfg config.Config, args []string, dryRun b
 		return err
 	}
 	files := media.NewService(store, rec, cfg.StorageDir(), cfg.Upload.MaxBytes)
-	leaving := offboarding.NewService(store, files, rec, masterKey,
+	leaving := offboarding.NewService(store, files, rec, masterKey.Key,
 		offboarding.Config{Grace: cfg.OffboardingGrace(), PseudonymizeAfter: cfg.PseudonymizeAfter()}, time.Now, logger)
 	directory, err := newDirectory(cfg, store, rec, masterKey,
 		directoryDeps{areas: workspace.NewService(store, rec, logger), leaving: leaving, mailer: mailer, log: logger})
@@ -768,5 +785,148 @@ func doctorFix(ctx context.Context, store *repo.Repo, cfg config.Config, areas [
 		}
 		fmt.Println("fixed: search index rebuilt")
 	}
+	return nil
+}
+
+var errUsageMasterKey = errors.New("usage: kudawiki masterkey rotate | split --shares N --threshold K | combine")
+
+// runMasterKey rota la MASTER_KEY y la reparte o reconstruye con Shamir (SPEC §6.5). Queda en la
+// auditoría como hecho desde la consola.
+func runMasterKey(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errUsageMasterKey
+	}
+	if args[0] == "rotate" {
+		// Con el servidor corriendo no: seguiría cifrando con la llave vieja filas que ya no la usan.
+		if used, err := backup.InUse(cfg.DBPath()); err != nil {
+			return err
+		} else if used {
+			return errors.New("the database is in use: stop `kudawiki serve` (or the container) before rotating the master key")
+		}
+	}
+	if _, err := os.Stat(cfg.DBPath()); err != nil {
+		return fmt.Errorf("no database at %s (run `kudawiki init` first)", cfg.DBPath())
+	}
+	db, err := database.Open(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if pending, err := db.Pending(ctx); err != nil {
+		return err
+	} else if len(pending) > 0 {
+		return errors.New("the database has pending migrations: start the server once to apply them")
+	}
+	store := repo.New(db)
+	rec := audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	switch {
+	case args[0] == "rotate" && len(args) == 1:
+		return rotateMasterKey(ctx, cfg, db, store, rec)
+	case args[0] == "split":
+		return splitMasterKey(ctx, cfg, store, rec, args[1:])
+	case args[0] == "combine" && len(args) == 1:
+		return combineMasterKey(ctx, cfg, store, rec, os.Stdin)
+	}
+	return errUsageMasterKey
+}
+
+func rotateMasterKey(ctx context.Context, cfg config.Config, db *database.DB, store *repo.Repo, rec *audit.Recorder) error {
+	r, err := masterkey.Rotate(ctx, store, cfg.MasterKeyFile, func() (string, error) {
+		path, err := backup.Create(ctx, db.Read, "", cfg.BackupDir(), backup.PreRotate, time.Now())
+		if err != nil {
+			return "", err
+		}
+		_, err = backup.Verify(path)
+		return path, err
+	})
+	if err != nil {
+		return err
+	}
+	rec.Record(ctx, audit.Event{Action: audit.MasterKeyRotate, TargetType: "master_key", TargetID: strconv.Itoa(r.To), System: "cli",
+		Meta: map[string]any{"from": r.From, "to": r.To, "resealed": r.Secrets, "backup": filepath.Base(r.Backup)}})
+	fmt.Printf("master key rotated: version %d -> %d (%d secrets re-encrypted)\n", r.From, r.To, r.Secrets)
+	if r.Backup != "" {
+		fmt.Println("backup before rotating:", r.Backup)
+	}
+	fmt.Printf("the old key is in %s: keep it with the backups made before now (they need it) and remove it from this server\n", r.Old)
+	fmt.Println("replace every other copy of the key; if it was split, run `kudawiki masterkey split` again and destroy the old shares")
+	fmt.Println("unsubscribe links in emails sent before now stop working")
+	return nil
+}
+
+// splitMasterKey imprime la llave vigente en partes de Shamir, una por línea: <x>-<hex>. Las
+// instrucciones van a stderr, para que stdout tenga solo las partes.
+func splitMasterKey(ctx context.Context, cfg config.Config, store *repo.Repo, rec *audit.Recorder, args []string) error {
+	sf := flag.NewFlagSet("masterkey split", flag.ContinueOnError)
+	shares := sf.Int("shares", 0, "how many shares")
+	threshold := sf.Int("threshold", 0, "how many shares rebuild the key")
+	if err := sf.Parse(args); err != nil || sf.NArg() > 0 {
+		return errUsageMasterKey
+	}
+	mk, err := masterkey.Load(ctx, store, cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
+	parts, err := crypto.Split(mk.Key, *shares, *threshold)
+	if err != nil {
+		return err
+	}
+	for _, p := range parts {
+		fmt.Printf("%d-%x\n", p[0], p[1:])
+	}
+	rec.Record(ctx, audit.Event{Action: audit.MasterKeySplit, TargetType: "master_key", TargetID: strconv.Itoa(mk.Version), System: "cli",
+		Meta: map[string]any{"shares": *shares, "threshold": *threshold}})
+	fmt.Fprintf(os.Stderr, "give each share to a different person; any %d of them rebuild the key with `kudawiki masterkey combine`.\n", *threshold)
+	fmt.Fprintln(os.Stderr, "each share is part of the key: never keep two together, on this server or next to the backups")
+	return nil
+}
+
+// combineMasterKey reconstruye la llave con las partes que llegan por in, una por línea hasta una
+// vacía o el final. La compara con la base antes de escribirla: con partes de menos o mal
+// copiadas Shamir da otra llave sin darse cuenta.
+func combineMasterKey(ctx context.Context, cfg config.Config, store *repo.Repo, rec *audit.Recorder, in io.Reader) error {
+	fmt.Fprintln(os.Stderr, "paste the shares, one per line, then an empty line:")
+	var parts [][]byte
+	sc := bufio.NewScanner(in)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			break
+		}
+		x, hexY, ok := strings.Cut(line, "-")
+		n, err := strconv.Atoi(x)
+		y, herr := hex.DecodeString(hexY)
+		if !ok || err != nil || herr != nil || n < 1 || n > 255 {
+			return fmt.Errorf("share %d is not <number>-<hex>", len(parts)+1)
+		}
+		parts = append(parts, append([]byte{byte(n)}, y...))
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	key, err := crypto.Combine(parts)
+	if err != nil {
+		return err
+	}
+	mk, err := masterkey.Check(ctx, store, key)
+	if errors.Is(err, masterkey.ErrUnknownKey) {
+		return errors.New("the shares do not rebuild this database's key: too few, mistyped, or from another installation")
+	} else if err != nil {
+		return err
+	}
+	written := false
+	if current, err := os.ReadFile(cfg.MasterKeyFile); err == nil {
+		if !bytes.Equal(current, key) {
+			return fmt.Errorf("%s holds a different key: move it away before writing the rebuilt one", cfg.MasterKeyFile)
+		}
+		fmt.Println("the shares rebuild the key, which is already at", cfg.MasterKeyFile)
+	} else if err := crypto.WriteMasterKey(cfg.MasterKeyFile, key); err != nil {
+		return err
+	} else {
+		written = true
+		fmt.Println("key rebuilt and written to", cfg.MasterKeyFile)
+	}
+	rec.Record(ctx, audit.Event{Action: audit.MasterKeyCombine, TargetType: "master_key", TargetID: strconv.Itoa(mk.Version), System: "cli",
+		Meta: map[string]any{"shares": len(parts), "written": written}})
 	return nil
 }

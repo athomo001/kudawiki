@@ -25,6 +25,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/ldap"
@@ -39,6 +40,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -64,6 +66,7 @@ type fixture struct {
 	// La baja de usuarios; los tests corren su job a mano (Run) y mueven su reloj (§8.4).
 	offboarding *offboarding.Service
 	clock       *time.Time
+	storage     string // data_dir/storage: los tests de sellados miran qué quedó en el disco
 }
 
 // unlimited: los tests hacen miles de peticiones desde la misma IP; el límite tiene su propio test.
@@ -86,31 +89,32 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mailer, err := mail.NewService(store, brand, rec, bytes.Repeat([]byte{1}, 32), mail.Patch{}, os.DirFS("../../ui/src/lib/i18n"), origin, time.Now)
+	mailer, err := mail.NewService(store, brand, rec, testKey, mail.Patch{}, os.DirFS("../../ui/src/lib/i18n"), origin, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	areas := workspace.NewService(store, rec, slog.Default())
-	directory, err := ldap.NewService(store, areas, rec, bytes.Repeat([]byte{1}, 32), ldap.Patch{}, time.Now, slog.New(slog.DiscardHandler))
+	directory, err := ldap.NewService(store, areas, rec, testKey, ldap.Patch{}, time.Now, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Sin SMTP configurado el correo está apagado: las invitaciones dan el enlace manual.
 	svc.SetEmail(auth.Email{Mail: mailer, BaseURL: origin, PasswordReset: true})
 	// El 2FA exigido a los admins: varias pruebas lo cubren. Sin exigencia es el default (§8.1).
-	svc.SetSecondFactor(auth.SecondFactor{Key: bytes.Repeat([]byte{1}, 32), Enforce: auth.MFAAdmins, BaseURL: origin})
+	svc.SetSecondFactor(auth.SecondFactor{Key: testKey, Enforce: auth.MFAAdmins, BaseURL: origin})
 	svc.SetDirectory(directory)
 	pages := wiki.NewService(store, rec)
 	props := proposals.NewService(store, pages, rec)
-	notes := notify.NewService(store, mailer, props, bytes.Repeat([]byte{1}, 32), origin, 10*time.Minute, 3*24*time.Hour, time.Now)
+	notes := notify.NewService(store, mailer, props, testKey.Key, origin, 10*time.Minute, 3*24*time.Hour, time.Now)
 	files := media.NewService(store, rec, storage, 1<<20)
 	clock := time.Now()
-	leaving := offboarding.NewService(store, files, rec, bytes.Repeat([]byte{1}, 32),
+	leaving := offboarding.NewService(store, files, rec, testKey.Key,
 		offboarding.Config{Grace: 30 * 24 * time.Hour, PseudonymizeAfter: 365 * 24 * time.Hour}, func() time.Time { return clock }, slog.New(slog.DiscardHandler))
 	directory.SetOffboarding(leaving)
 	directory.SetMail(mailer, origin)
 	h := New(Deps{Auth: svc, Workspaces: areas, Wiki: pages, Proposals: props, Notify: notes, Drafts: store, Presence: presence.NewHub(), RemindAfter: 3 * 24 * time.Hour,
 		Shares:   shares.NewService(store, rec, slog.New(slog.DiscardHandler)),
+		Sealed:   sealed.NewService(store, files, rec, testKey, slog.New(slog.DiscardHandler), func() time.Time { return clock }),
 		Personal: personal.NewService(store, pages, props, files, rec), Reading: reading.NewService(store, quizzes, rec, time.Now), Quizzes: quizzes, Offboarding: leaving, Media: files, Branding: brand, Mail: mailer, LDAP: directory, Read: store, DB: db, StorageDir: storage,
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
@@ -137,7 +141,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		}
 	}
 
-	f := fixture{h: h, db: db, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}, spent: map[string]int{},
+	f := fixture{h: h, db: db, storage: storage, cookies: map[string]*http.Cookie{}, users: users, notify: notes, totp: map[string]enrolled{}, spent: map[string]int{},
 		offboarding: leaving, clock: &clock}
 	for name := range users {
 		w := f.do("", "POST", "/api/auth/login", `{"email":"`+name+`@empresa.cl","password":"`+password+`"}`)
@@ -184,12 +188,18 @@ func (f fixture) enrollTOTP(t *testing.T, who string) enrolled {
 // reauth reautentica la sesión de una persona (§8.2), como lo haría el diálogo de la interfaz. El
 // código de la app de este paso ya se gastó al configurarlo: usa uno de recuperación, desde el
 // último, para no pisar los que los tests usan por índice.
+// testKey es la MASTER_KEY de las pruebas, de versión 1 como la de una instalación sin rotar.
+var testKey = crypto.MasterKey{Key: bytes.Repeat([]byte{1}, 32), Version: 1}
+
 func (f fixture) reauth(t *testing.T, who string) {
 	t.Helper()
-	codes := f.totp[who].codes
-	f.spent[who]++
-	code := codes[len(codes)-f.spent[who]]
-	if w := f.do(who, "POST", "/api/auth/reauth", `{"password":"`+password+`","code":"`+code+`"}`); w.Code != http.StatusNoContent {
+	// Sin 2FA (los editores y lectores del fixture), la reautenticación es solo la contraseña.
+	body := `{"password":"` + password + `"}`
+	if codes := f.totp[who].codes; len(codes) > 0 {
+		f.spent[who]++
+		body = `{"password":"` + password + `","code":"` + codes[len(codes)-f.spent[who]] + `"}`
+	}
+	if w := f.do(who, "POST", "/api/auth/reauth", body); w.Code != http.StatusNoContent {
 		t.Fatalf("reauth %s: %d %s", who, w.Code, w.Body)
 	}
 }
@@ -657,6 +667,17 @@ func TestAreaSettings(t *testing.T) {
 	if len(audit.Events) != 2 || strings.Contains(raw.String(), "Soporte") {
 		t.Errorf("audit (2 events, no text): %s", raw)
 	}
+	// Marca de agua en N2 (§4.15): apagada por defecto; el lector la recibe con sus áreas.
+	if body := f.do("viewerTI", "GET", "/api/auth/me", "").Body.String(); !strings.Contains(body, `"watermark_n2":false`) {
+		t.Errorf("watermark_n2 default: %s", body)
+	}
+	f.do("adminTI", "PATCH", "/api/w/ti/settings", `{"watermark_n2":true}`)
+	if body := f.do("viewerTI", "GET", "/api/auth/me", "").Body.String(); !strings.Contains(body, `"watermark_n2":true`) {
+		t.Errorf("watermark_n2 on: %s", body)
+	}
+	if body := f.do("adminTI", "GET", "/api/w/ti/settings", "").Body.String(); !strings.Contains(body, `"watermark_n2":true`) {
+		t.Errorf("settings watermark_n2: %s", body)
+	}
 }
 
 // §4.1: descripción corta e ícono por página. Se ven en la página, en el índice de hijas y en
@@ -846,12 +867,17 @@ func TestPageEditing(t *testing.T) {
 
 // upload sube un archivo como lo haría el editor al pegar una imagen.
 func (f fixture) upload(who, area, name string, data []byte) *httptest.ResponseRecorder {
+	return f.uploadTo(who, "/api/w/"+area+"/media", name, data)
+}
+
+// uploadTo sube un archivo a cualquier ruta que lo reciba como el campo "file".
+func (f fixture) uploadTo(who, path, name string, data []byte) *httptest.ResponseRecorder {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	part, _ := mw.CreateFormFile("file", name)
 	part.Write(data)
 	mw.Close()
-	r := httptest.NewRequest("POST", "/api/w/"+area+"/media", &body)
+	r := httptest.NewRequest("POST", path, &body)
 	r.Header.Set("Origin", origin)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 	r.AddCookie(f.cookies[who])

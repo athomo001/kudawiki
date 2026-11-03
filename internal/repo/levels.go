@@ -79,6 +79,15 @@ func (r *Repo) SetLevel(ctx context.Context, s Scope, actorID, slug string, leve
 	if level < anc {
 		return "", 0, ErrBelowParent
 	}
+	id, from, err := setLevel(ctx, tx, s, actorID, slug, level)
+	if err != nil {
+		return "", 0, err
+	}
+	return id, from, tx.Commit()
+}
+
+// setLevel es SetLevel dentro de tx, sin revisar el nivel de los padres.
+func setLevel(ctx context.Context, tx *sql.Tx, s Scope, actorID, slug string, level int) (string, int, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, slug, title, description, content_markdown, lang, min_rank, current_revision FROM pages
 		 WHERE workspace_id = ? AND deleted_at IS NULL AND min_rank <= ? AND (slug = ? OR (slug LIKE ? AND min_rank < ?))`,
@@ -115,7 +124,7 @@ func (r *Repo) SetLevel(ctx context.Context, s Scope, actorID, slug string, leve
 			return "", 0, err
 		}
 	}
-	return id, from, tx.Commit()
+	return id, from, nil
 }
 
 func levelName(rank int) string { return fmt.Sprintf("N%d", rank) }

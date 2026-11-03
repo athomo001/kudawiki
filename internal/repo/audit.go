@@ -98,12 +98,15 @@ func (r *Repo) AuditEvents(ctx context.Context, f AuditFilter) ([]AuditEntry, er
 }
 
 // AreaAudit es la vista del admin del área: solo eventos de su área, y la ruta actual de las
-// páginas que su Scope ve (§11.2: el filtro va en repo, no en la interfaz). Los eventos de
-// espacios personales y de sellados que §11.2 le oculta llegan con F5 y F7.
-func (r *Repo) AreaAudit(ctx context.Context, s Scope, f AuditFilter) ([]AuditEntry, error) {
+// páginas que su Scope ve (§11.2: el filtro va en repo, no en la interfaz). Los eventos sealed.*
+// que hizo otro admin del área o un superadmin no salen: esos accesos los ven solo el superadmin
+// y el autor (§11.2, §6.2). viewerID es quien mira.
+func (r *Repo) AreaAudit(ctx context.Context, s Scope, viewerID string, f AuditFilter) ([]AuditEntry, error) {
 	where, args := auditWhere(f)
-	where += ` AND a.workspace_id = ?`
-	args = append([]any{s.MaxRank}, append(args, s.WsID)...)
+	where += ` AND a.workspace_id = ? AND NOT (a.action LIKE 'sealed.%' AND a.actor_id IS NOT NULL AND a.actor_id <> ? AND (
+		a.actor_id IN (SELECT user_id FROM workspace_members WHERE workspace_id = a.workspace_id AND role = 'admin')
+		OR a.actor_id IN (SELECT id FROM users WHERE is_global_admin = 1)))`
+	args = append([]any{s.MaxRank}, append(args, s.WsID, viewerID)...)
 	return r.auditEntries(ctx, `SELECT `+auditColumns+`, '', COALESCE(p.slug, '') FROM audit_log a
 		LEFT JOIN pages p ON a.target_type = 'page' AND p.id = a.target_id AND p.workspace_id = a.workspace_id AND p.min_rank <= ?
 		WHERE `+where, f, args)

@@ -12,6 +12,7 @@ export class ApiError extends Error {
 export type Role = 'viewer' | 'editor' | 'admin';
 // viewers_can_propose: el área deja a sus lectores proponer cambios (SPEC §19.5).
 // require_change_summary: el área exige resumen al cambiar una página que existe (§4.3).
+// watermark_n2: la marca de agua también en sus páginas N2 (§4.15); no viene en los espacios personales.
 // personal: el espacio personal de quien entra (§7); audit: el de otra persona, que el superadmin
 // lee en modo auditoría. Los arma la interfaz: /auth/me no los lista entre las áreas.
 export type Area = {
@@ -21,6 +22,7 @@ export type Area = {
   role: Role;
   viewers_can_propose: boolean;
   require_change_summary: boolean;
+  watermark_n2?: boolean;
   personal?: boolean;
   audit?: boolean;
 };
@@ -43,6 +45,7 @@ export type Me = {
   totp: TOTPStatus;
   // Cuántas passkeys tiene y si esta instalación las admite (base_url con https, §8.1).
   passkeys: { count: number; available: boolean };
+  vault: boolean; // configuró su clave de bóveda (§6.3)
   // Se le exige el 2FA y no lo tiene: la interfaz muestra solo su configuración (SPEC §8.1).
   mfa_setup_required: boolean;
 };
@@ -290,7 +293,10 @@ export type NotificationKind =
   | 'share_approved'
   | 'share_rejected'
   | 'shared_received'
-  | 'share_ended';
+  | 'share_ended'
+  | 'sealed_admin_access'
+  | 'sealed_purged'
+  | 'sealed_reset_approved';
 export type Notification = {
   id: string;
   kind: NotificationKind;
@@ -305,6 +311,7 @@ export type Notification = {
   from?: string;
   target?: string;
   share?: string;
+  sealed?: string; // sellados (§6): el id del documento; title es su ruta, el título va cifrado
   count: number;
   read: boolean;
   updated_at: string;
@@ -328,6 +335,7 @@ export function notificationHref(n: Notification): string {
   if (n.kind === 'quiz_failed_out') return `${area}/reads`;
   if (n.kind === 'share_pending' || n.kind === 'share_ended') return `${area}/shares`;
   if (n.kind === 'shared_received') return `${area}/shared/${n.share}`;
+  if (n.kind === 'sealed_admin_access' || n.kind === 'sealed_reset_approved') return `/sealed/${n.sealed}`;
   return n.page ? `${area}/p/${n.page}` : area;
 }
 export type RevisionMeta = {
@@ -442,6 +450,41 @@ export type Share = {
 // Desde el destino: solo el artículo y el nombre del área de origen, nunca su ruta.
 export type SharedItem = { id: string; title: string; description: string; icon: string; area: { name: string }; updated_at: string };
 export type SharedArticle = SharedItem & { html: string; toc: Heading[] | null; lang: string; updated_by: string; owner: string };
+// Documentos sellados (§6). Cerrado, solo lo que se guarda en claro: la ruta, el área y el
+// autor; el título y el contenido van cifrados y llegan solo con el documento abierto en la sesión.
+export type SealedRef = { id: string; slug: string };
+export type SealedDoc = {
+  id: string;
+  slug: string;
+  area: { slug: string; name: string; personal: boolean };
+  author: string;
+  is_author: boolean;
+  locked: boolean;
+  needs_password: boolean; // recibido en una baja (§8.4): su autor pone una contraseña nueva
+  can_admin_open: boolean;
+  can_delete: boolean;
+  grant: '' | 'read' | 'edit'; // el acceso que le dieron a quien mira (§6.1)
+  can_grant: boolean; // el autor y el superadmin dan y quitan accesos (§19.1)
+  has_vault: boolean;
+  has_password: boolean;
+  can_declassify: boolean; // solo el superadmin (§6.1)
+  reset?: SealedReset; // solo para el autor y el superadmin
+  title?: string;
+  markdown?: string;
+  html?: string;
+  toc?: Heading[] | null;
+  revision?: number;
+  current_revision?: number;
+  can_edit?: boolean;
+  updated_by?: string;
+  updated_at?: string;
+};
+export type SealedGrant = { user_id: string; full_name: string; email: string; permission: 'read' | 'edit'; created_at: string };
+export type MySealed = { id: string; slug: string; area: { slug: string; name: string; personal: boolean }; author: string; access: 'author' | 'read' | 'edit'; updated_at: string };
+export type SealedRevision = { revision: number; author: string; created_at: string };
+// En qué va el restablecimiento de la contraseña (§6.3): pedido por el autor o aprobado (24 h).
+export type SealedReset = '' | 'requested' | 'approved';
+export type AdminSealed = { id: string; slug: string; area: { slug: string; name: string; personal: boolean }; author: string; updated_at: string; reset: SealedReset };
 export type SharedHit = { id: string; title: string; area: { name: string }; snippet: { text: string; hit?: boolean }[] };
 
 // Rango de cada rol: el nivel más alto que puede leer y asignar (SPEC §3.2).

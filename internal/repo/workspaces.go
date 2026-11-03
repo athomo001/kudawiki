@@ -43,6 +43,8 @@ type Workspace struct {
 	Kind, OwnerID string
 	// QuizzesEnabled: el área puede apagar los cuestionarios (§4.16.7).
 	QuizzesEnabled bool
+	// WatermarkN2: la marca de agua de N3 y sellados también en sus páginas N2 (§4.15).
+	WatermarkN2 bool
 }
 
 // Membership es un área vista por uno de sus miembros.
@@ -83,14 +85,14 @@ func (r *Repo) CreateWorkspace(ctx context.Context, w Workspace) error {
 func (r *Repo) UpdateWorkspace(ctx context.Context, s Scope, w Workspace) error {
 	_, err := r.db.Write.ExecContext(ctx, `UPDATE workspaces SET name = ?, description = ?, approval_mode = ?, viewers_can_propose = ?,
 		 require_change_summary = ?, revisions_keep_last = nullif(?, 0), revisions_keep_days = nullif(?, 0), default_review_days = nullif(?, 0),
-		 quizzes_enabled = ? WHERE id = ?`,
-		w.Name, w.Description, w.ApprovalMode, w.ViewersCanPropose, w.RequireChangeSummary, w.KeepLast, w.KeepDays, w.ReviewDays, w.QuizzesEnabled, s.WsID)
+		 quizzes_enabled = ?, watermark_n2 = ? WHERE id = ?`,
+		w.Name, w.Description, w.ApprovalMode, w.ViewersCanPropose, w.RequireChangeSummary, w.KeepLast, w.KeepDays, w.ReviewDays, w.QuizzesEnabled, w.WatermarkN2, s.WsID)
 	return err
 }
 
 const workspaceColumns = `w.id, w.slug, w.name, w.description, w.approval_mode, w.viewers_can_propose,
 	w.require_change_summary, coalesce(w.revisions_keep_last, 0), coalesce(w.revisions_keep_days, 0), coalesce(w.default_review_days, 0),
-	w.kind, coalesce(w.owner_user_id, ''), w.quizzes_enabled`
+	w.kind, coalesce(w.owner_user_id, ''), w.quizzes_enabled, w.watermark_n2`
 
 // ListWorkspaces y WorkspaceByID son del panel del superadmin, que administra áreas sin ser miembro.
 // Traen también los espacios personales (Kind): el panel los deja afuera y doctor los revisa.
@@ -108,7 +110,7 @@ func (r *Repo) WorkspaceByID(ctx context.Context, id string) (Workspace, error) 
 
 func scanWorkspace(row scanner) (Workspace, error) {
 	var w Workspace
-	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description, &w.ApprovalMode, &w.ViewersCanPropose, &w.RequireChangeSummary, &w.KeepLast, &w.KeepDays, &w.ReviewDays, &w.Kind, &w.OwnerID, &w.QuizzesEnabled)
+	err := row.Scan(&w.ID, &w.Slug, &w.Name, &w.Description, &w.ApprovalMode, &w.ViewersCanPropose, &w.RequireChangeSummary, &w.KeepLast, &w.KeepDays, &w.ReviewDays, &w.Kind, &w.OwnerID, &w.QuizzesEnabled, &w.WatermarkN2)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Workspace{}, ErrNotFound
 	}
@@ -140,7 +142,7 @@ func (r *Repo) Memberships(ctx context.Context, userID string) ([]Membership, er
 func scanMembership(row scanner) (Membership, error) {
 	var m Membership
 	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.ApprovalMode, &m.ViewersCanPropose,
-		&m.RequireChangeSummary, &m.KeepLast, &m.KeepDays, &m.ReviewDays, &m.Kind, &m.OwnerID, &m.QuizzesEnabled, &m.Role)
+		&m.RequireChangeSummary, &m.KeepLast, &m.KeepDays, &m.ReviewDays, &m.Kind, &m.OwnerID, &m.QuizzesEnabled, &m.WatermarkN2, &m.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Membership{}, ErrNotFound
 	}

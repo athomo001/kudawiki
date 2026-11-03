@@ -35,6 +35,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
+	"github.com/athomo001/kudawiki/internal/sealed"
 	"github.com/athomo001/kudawiki/internal/shares"
 	"github.com/athomo001/kudawiki/internal/wiki"
 	"github.com/athomo001/kudawiki/internal/workspace"
@@ -133,6 +134,34 @@ type proposalService interface {
 	Withdraw(ctx context.Context, sc repo.Scope, userID, id string) error
 	Approve(ctx context.Context, sc repo.Scope, reviewerID, id, comment string, edit *proposals.Draft) (int, error)
 	Reject(ctx context.Context, sc repo.Scope, reviewerID, id, comment string) error
+}
+
+// sealedService son los documentos sellados (§6).
+type sealedService interface {
+	Create(ctx context.Context, sc repo.Scope, actorID, session, slug, password string, c sealed.Content) (string, error)
+	InArea(ctx context.Context, sc repo.Scope, u repo.User) ([]repo.SealedRef, error)
+	Doc(ctx context.Context, u repo.User, session, id string) (repo.SealedDoc, bool, error)
+	UnlockPassword(ctx context.Context, u repo.User, session, id, password string) error
+	UnlockAsAdmin(ctx context.Context, u repo.User, session, id string) error
+	SetPassword(ctx context.Context, u repo.User, session, id, password string) error
+	UnlockVault(ctx context.Context, u repo.User, session, id, vaultKey string) error
+	Grants(ctx context.Context, u repo.User, id string) ([]repo.SealedGrant, error)
+	Grant(ctx context.Context, u repo.User, session, id, email, permission string) error
+	Revoke(ctx context.Context, u repo.User, id, userID string) error
+	Mine(ctx context.Context, u repo.User) ([]repo.MySealed, error)
+	SetVault(ctx context.Context, u repo.User, vaultKey string) (int64, error)
+	Read(ctx context.Context, u repo.User, session, id string, n int) (sealed.View, error)
+	History(ctx context.Context, u repo.User, session, id string) ([]repo.SealedRevision, error)
+	Save(ctx context.Context, u repo.User, session, id string, base int, c sealed.Content) (int, error)
+	Delete(ctx context.Context, u repo.User, id, confirm string) error
+	Declassify(ctx context.Context, u repo.User, id string) (repo.SealedDoc, error)
+	RequestReset(ctx context.Context, u repo.User, id string) error
+	ApproveReset(ctx context.Context, u repo.User, id string) error
+	CompleteReset(ctx context.Context, u repo.User, session, id, password string) error
+	ResetState(requested bool, expires time.Time) string
+	All(ctx context.Context) ([]repo.AdminSealed, error)
+	AddFile(ctx context.Context, u repo.User, session, id, filename string, body io.Reader) (sealed.File, error)
+	OpenFile(ctx context.Context, u repo.User, session, id, fileID string) (sealed.File, []byte, error)
 }
 
 // shareService son los artículos compartidos entre áreas (§4.19).
@@ -235,10 +264,12 @@ type reader interface {
 	PendingReads(ctx context.Context, userID string) ([]repo.PendingRead, error)
 	MyQuizAttempts(ctx context.Context, userID string) ([]repo.MyQuizAttempt, error)
 	ReviewProblems(ctx context.Context, s repo.Scope, now time.Time) ([]repo.ReviewProblem, error)
+	SealedMediaInArea(ctx context.Context, wsID string) ([]repo.SealedMedia, error)
+	SealedWithoutMasterKey(ctx context.Context, wsID string) ([]string, error)
 	TemplateByID(ctx context.Context, s repo.Scope, id string) (repo.Template, error)
 	RecordView(ctx context.Context, s repo.Scope, slug string) error
 	AuditEvents(ctx context.Context, f repo.AuditFilter) ([]repo.AuditEntry, error)
-	AreaAudit(ctx context.Context, s repo.Scope, f repo.AuditFilter) ([]repo.AuditEntry, error)
+	AreaAudit(ctx context.Context, s repo.Scope, viewerID string, f repo.AuditFilter) ([]repo.AuditEntry, error)
 	// Salud del contenido (§13.7): lo que pide health.Check.
 	BrokenLinks(ctx context.Context, s repo.Scope) ([]repo.BrokenLink, error)
 	ShadowedAliases(ctx context.Context, s repo.Scope) ([]repo.ShadowedAlias, error)
@@ -300,6 +331,7 @@ type Deps struct {
 	Wiki       wikiService
 	Proposals  proposalService
 	Shares     shareService
+	Sealed     sealedService
 	Media      mediaService
 	Branding   brandingService
 	Mail       mailService
@@ -376,9 +408,11 @@ func New(d Deps) http.Handler {
 			a.passkeyRoutes(r)
 			a.sessionRoutes(r)
 			a.notificationRoutes(r)
+			a.vaultRoutes(r)
 			a.homeRoutes(r)
 			r.Route("/admin", a.adminRoutes)
 			r.Route("/w/{ws}", a.areaRoutes)
+			r.Route("/sealed", a.sealedRoutes)
 		})
 		r.NotFound(a.notFound)
 	})
@@ -567,6 +601,18 @@ var domainErrors = map[error]int{
 	shares.ErrCommentRequired:         http.StatusUnprocessableEntity,
 	shares.ErrClosed:                  http.StatusConflict,
 	repo.ErrNotShareable:              http.StatusUnprocessableEntity,
+	sealed.ErrInvalid:                 http.StatusUnprocessableEntity,
+	sealed.ErrPasswordShort:           http.StatusUnprocessableEntity,
+	sealed.ErrWrongPassword:           http.StatusUnprocessableEntity,
+	sealed.ErrConfirm:                 http.StatusUnprocessableEntity,
+	sealed.ErrLocked:                  http.StatusLocked,
+	sealed.ErrReadOnly:                http.StatusConflict, // ya sabe que existe: no es el 404 de §3.3
+	sealed.ErrSecondFactor:            http.StatusConflict,
+	sealed.ErrVaultShort:              http.StatusUnprocessableEntity,
+	sealed.ErrWrongVaultKey:           http.StatusUnprocessableEntity,
+	sealed.ErrNoUser:                  http.StatusUnprocessableEntity,
+	sealed.ErrNoVault:                 http.StatusConflict,
+	sealed.ErrNoReset:                 http.StatusConflict,
 	notify.ErrInvalidPrefs:            http.StatusUnprocessableEntity,
 	media.ErrTooLarge:                 http.StatusRequestEntityTooLarge,
 	media.ErrUnsupportedType:          http.StatusUnsupportedMediaType,

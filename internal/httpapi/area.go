@@ -36,6 +36,7 @@ func (a api) areaRoutes(r chi.Router) {
 	a.pageRoutes(r)
 	a.proposalRoutes(r)
 	a.shareRoutes(r)
+	a.sealedAreaRoutes(r)
 	a.areaHomeRoutes(r)
 	a.draftRoutes(r)
 	a.templateRoutes(r)
@@ -184,7 +185,7 @@ func (a api) areaSettings(w http.ResponseWriter, r *http.Request) {
 	a.json(w, http.StatusOK, map[string]any{"name": ws.Name, "description": ws.Description,
 		"approval_mode": ws.ApprovalMode, "viewers_can_propose": ws.ViewersCanPropose,
 		"require_change_summary": ws.RequireChangeSummary, "keep_last": ws.KeepLast, "keep_days": ws.KeepDays,
-		"review_days": ws.ReviewDays, "quizzes_enabled": ws.QuizzesEnabled})
+		"review_days": ws.ReviewDays, "quizzes_enabled": ws.QuizzesEnabled, "watermark_n2": ws.WatermarkN2})
 }
 
 func (a api) updateAreaSettings(w http.ResponseWriter, r *http.Request) {
@@ -198,13 +199,14 @@ func (a api) updateAreaSettings(w http.ResponseWriter, r *http.Request) {
 		KeepDays          *int    `json:"keep_days"`
 		ReviewDays        *int    `json:"review_days"`
 		QuizzesEnabled    *bool   `json:"quizzes_enabled"`
+		WatermarkN2       *bool   `json:"watermark_n2"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
 	s := workspace.Settings{Name: in.Name, Description: in.Description, ApprovalMode: in.ApprovalMode, ViewersCanPropose: in.ViewersCanPropose,
 		RequireChangeSummary: in.RequireSummary, KeepLast: in.KeepLast, KeepDays: in.KeepDays, ReviewDays: in.ReviewDays,
-		QuizzesEnabled: in.QuizzesEnabled}
+		QuizzesEnabled: in.QuizzesEnabled, WatermarkN2: in.WatermarkN2}
 	if err := a.Workspaces.Update(r.Context(), scopeOf(r), s); err != nil {
 		a.fail(w, r, err)
 		return

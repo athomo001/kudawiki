@@ -87,13 +87,14 @@ type Area struct {
 
 // Plan es el resumen previo a la baja (§8.4).
 type Plan struct {
-	Areas         []Area
-	PersonalPages int
-	PersonalMedia int
-	Drafts        int
-	Proposals     int
-	Grace         time.Duration
-	Pending       *repo.Offboarding // la baja en curso, si hay
+	Areas          []Area
+	PersonalPages  int
+	PersonalMedia  int
+	PersonalSealed int
+	Drafts         int
+	Proposals      int
+	Grace          time.Duration
+	Pending        *repo.Offboarding // la baja en curso, si hay
 }
 
 // Plan arma el resumen para quien hace la baja (actorID, el superadmin).
@@ -106,7 +107,7 @@ func (s *Service) Plan(ctx context.Context, actorID, userID string) (Plan, error
 	if err != nil {
 		return Plan{}, err
 	}
-	out := Plan{PersonalPages: p.PersonalPages, PersonalMedia: p.PersonalMedia, Drafts: p.Drafts, Proposals: p.Proposals, Grace: s.grace}
+	out := Plan{PersonalPages: p.PersonalPages, PersonalMedia: p.PersonalMedia, PersonalSealed: p.PersonalSealed, Drafts: p.Drafts, Proposals: p.Proposals, Grace: s.grace}
 	for _, a := range p.Areas {
 		out.Areas = append(out.Areas, defaults(a, actorID))
 	}
@@ -143,7 +144,7 @@ func receivers(p repo.OffboardingPlan, chosen map[string]string, fallback string
 		if d.NeedsAdmin {
 			needs = append(needs, a.Slug)
 		}
-		if a.Pages+a.Quizzes+a.ReadRequests == 0 {
+		if a.Pages+a.Sealed+a.Quizzes+a.ReadRequests == 0 {
 			continue
 		}
 		pick, ok := chosen[a.WsID]
@@ -246,11 +247,15 @@ func (s *Service) complete(ctx context.Context, u repo.User, to map[string]strin
 	if err != nil {
 		return res, err
 	}
-	var pages, quizzes, reads int
+	var pages, sealed, quizzes, reads int
 	for _, t := range res.Transfers {
-		pages, quizzes, reads = pages+len(t.PageIDs), quizzes+t.Quizzes, reads+t.ReadRequests
+		pages, sealed, quizzes, reads = pages+len(t.PageIDs), sealed+len(t.SealedIDs), quizzes+t.Quizzes, reads+t.ReadRequests
 		for _, id := range t.PageIDs {
 			s.audit.Record(ctx, audit.Event{Action: audit.PageOwnerTransfer, WsID: t.WsID, TargetType: "page", TargetID: id, System: sys,
+				Meta: map[string]any{"from": u.ID, "to": t.To}})
+		}
+		for _, id := range t.SealedIDs {
+			s.audit.Record(ctx, audit.Event{Action: audit.SealedOwnerTransfer, WsID: t.WsID, TargetType: "sealed", TargetID: id, System: sys,
 				Meta: map[string]any{"from": u.ID, "to": t.To}})
 		}
 		if t.To == actorID {
@@ -263,11 +268,11 @@ func (s *Service) complete(ctx context.Context, u repo.User, to map[string]strin
 	}
 	if res.PersonalWsID != "" {
 		s.audit.Record(ctx, audit.Event{Action: audit.PersonalPurge, WsID: res.PersonalWsID, TargetType: "user", TargetID: u.ID, System: sys,
-			Meta: map[string]any{"pages": res.PersonalPages, "media": len(res.PersonalMedia)}})
+			Meta: map[string]any{"pages": res.PersonalPages, "media": len(res.PersonalMedia), "sealed": res.PersonalSealed}})
 	}
 	s.audit.Record(ctx, audit.Event{Action: audit.UserOffboardingComplete, TargetType: "user", TargetID: u.ID, System: sys,
-		Meta: map[string]any{"pages": pages, "quizzes": quizzes, "read_requests": reads, "personal_pages": res.PersonalPages,
-			"personal_media": len(res.PersonalMedia), "drafts": res.Drafts, "proposals": res.Proposals}})
+		Meta: map[string]any{"pages": pages, "sealed": sealed, "quizzes": quizzes, "read_requests": reads, "personal_pages": res.PersonalPages,
+			"personal_media": len(res.PersonalMedia), "personal_sealed": res.PersonalSealed, "drafts": res.Drafts, "proposals": res.Proposals}})
 	// Un archivo que no se pudo borrar ya no tiene fila: lo encuentra la salud del contenido (§13.7).
 	for _, f := range res.PersonalMedia {
 		if err := s.files.Remove(f.WsID, f.ID); err != nil {

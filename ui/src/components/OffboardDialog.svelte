@@ -11,6 +11,7 @@
     id: string;
     name: string;
     pages: number;
+    sealed: number;
     quizzes: number;
     read_requests: number;
     admins: Admin[];
@@ -22,6 +23,7 @@
     areas: PlanArea[];
     personal_pages: number;
     personal_media: number;
+    personal_sealed: number;
     drafts: number;
     proposals: number;
     grace_days: number;
@@ -40,7 +42,7 @@
   let busy = $state(false);
   let error = $state('');
 
-  const items = (a: PlanArea) => a.pages + a.quizzes + a.read_requests;
+  const items = (a: PlanArea) => a.pages + a.sealed + a.quizzes + a.read_requests;
   const blocked = $derived(plan?.areas.some((a) => a.needs_admin) ?? false);
   const anything = $derived(plan?.areas.some((a) => items(a) > 0) ?? false);
   // Cuándo se completa: la fecha de la baja en curso, o hoy más la gracia.
@@ -105,7 +107,7 @@
           <div class="offboard-area">
             <strong>{a.name}</strong>
             <span class="muted small">
-              {t('admin.offboard_area_items', { pages: String(a.pages), quizzes: String(a.quizzes), reads: String(a.read_requests) })}
+              {t('admin.offboard_area_items', { pages: String(a.pages), sealed: String(a.sealed), quizzes: String(a.quizzes), reads: String(a.read_requests) })}
             </span>
             {#if a.admins.length}
               <label class="field">
@@ -126,6 +128,7 @@
         {t('admin.offboard_delete', {
           pages: String(plan.personal_pages),
           media: String(plan.personal_media),
+          sealed: String(plan.personal_sealed),
           drafts: String(plan.drafts),
           proposals: String(plan.proposals),
         })}

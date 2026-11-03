@@ -152,6 +152,8 @@ type payload struct {
 	// de destino (aviso al origen) y Share el vínculo, para llegar al artículo desde el destino.
 	From   string `json:"from,omitempty"`
 	Target string `json:"target,omitempty"`
+	// Sellados (§6): el id del documento. Title es su ruta: el título va cifrado.
+	Sealed string `json:"sealed,omitempty"`
 	Share  string `json:"share,omitempty"`
 }
 
@@ -530,6 +532,10 @@ func (s *Service) link(n repo.Notification) string {
 		var p payload
 		_ = json.Unmarshal([]byte(n.Payload), &p)
 		return area + "/shared/" + p.Share
+	case "sealed_admin_access", "sealed_reset_approved":
+		var p payload
+		_ = json.Unmarshal([]byte(n.Payload), &p)
+		return s.baseURL + "/sealed/" + p.Sealed
 	}
 	if n.PageSlug != "" {
 		return area + "/p/" + n.PageSlug

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/audit"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/ldap/ldaptest"
@@ -19,7 +20,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/workspace"
 )
 
-var key = bytes.Repeat([]byte{7}, 32)
+var key = crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}
 
 const (
 	svcDN    = "CN=svc-kudawiki,OU=Servicios,DC=empresa,DC=local"

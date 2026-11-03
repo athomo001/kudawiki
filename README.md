@@ -68,7 +68,7 @@ El logo son tres capas apiladas, una por área: cada área de trabajo tiene su p
 | F4 · Propuestas y notificaciones | ✅ Hecha |
 | F5 · Espacio personal y vigencia | ✅ Hecha |
 | F6 · Identidad, AD y 2FA | ✅ Hecha |
-| F7 · Documentos sellados | ⚪ Pendiente |
+| F7 · Documentos sellados | ✅ Hecha |
 | F8 · Endurecimiento y v1.0 | ⚪ Pendiente |
 
 Detalle de cada fase en [FASES.md](FASES.md) · cambios en [CHANGELOG.md](CHANGELOG.md) · mapa del producto en [spec/MAPA.md](spec/MAPA.md) · especificación completa en [spec/SPEC.md](spec/SPEC.md).

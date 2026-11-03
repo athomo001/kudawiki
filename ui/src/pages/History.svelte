@@ -1,9 +1,13 @@
 <script lang="ts">
-  import { api, canEdit, codeOf, formatDate, type Area, type DiffLine, type RevisionMeta } from '../lib/api';
+  import { api, canEdit, codeOf, formatDate, type Area, type DiffLine, type Level, type RevisionMeta } from '../lib/api';
   import { t, errorText, locale } from '../lib/i18n/index.svelte';
   import DiffView from '../components/DiffView.svelte';
+  import Watermark from '../components/Watermark.svelte';
+  import { watermarked } from '../lib/watermark.svelte';
 
-  let { area, slug, onreverted }: { area: Area; slug: string; onreverted: () => void } = $props();
+  // level: el de la página, del árbol del área; el historial muestra su contenido y lleva la
+  // misma marca de agua que el lector (§4.15).
+  let { area, slug, level, onreverted }: { area: Area; slug: string; level?: Level; onreverted: () => void } = $props();
 
   let revisions = $state<RevisionMeta[]>([]);
   let from = $state(0);
@@ -49,6 +53,7 @@
   });
 </script>
 
+{#if watermarked(level, area)}<Watermark />{/if}
 <h1>{t('page.history')}{#if revisions[0]}<span class="h1-sub">{revisions[0].title}</span>{/if}</h1>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 

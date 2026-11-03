@@ -74,11 +74,11 @@ func (s *Service) Enqueue(ctx context.Context, m Message) error {
 		return err
 	}
 	id := ulid.Make().String()
-	enc, err := crypto.Seal(s.key, raw, []byte(id))
+	enc, err := crypto.Seal(s.key.Key, raw, []byte(id))
 	if err != nil {
 		return err
 	}
-	if err := s.store.EnqueueEmail(ctx, repo.OutboxEmail{ID: id, Template: m.Template, PayloadEnc: enc, KeyVersion: crypto.MasterKeyVersion}, s.now()); err != nil {
+	if err := s.store.EnqueueEmail(ctx, repo.OutboxEmail{ID: id, Template: m.Template, PayloadEnc: enc, KeyVersion: s.key.Version}, s.now()); err != nil {
 		return err
 	}
 	select { // despierta al worker sin esperar su próxima vuelta
@@ -145,10 +145,10 @@ func (s *Service) Flush(ctx context.Context, log *slog.Logger) error {
 // entrega, que se reintenta: quizás el superadmin lo está arreglando. Un cuerpo que no se abre
 // (otra llave) no se reintenta.
 func (s *Service) deliverQueued(ctx context.Context, c config, e repo.OutboxEmail) error {
-	if e.KeyVersion != crypto.MasterKeyVersion {
+	if e.KeyVersion != s.key.Version {
 		return errors.New("payload sealed with another master key version")
 	}
-	raw, err := crypto.Open(s.key, e.PayloadEnc, []byte(e.ID))
+	raw, err := crypto.Open(s.key.Key, e.PayloadEnc, []byte(e.ID))
 	if err != nil {
 		return err
 	}

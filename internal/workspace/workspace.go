@@ -97,6 +97,8 @@ type Settings struct {
 	ReviewDays *int
 	// Cuestionarios (§4.16.7): encendidos por defecto.
 	QuizzesEnabled *bool
+	// Marca de agua en N2 (§4.15): apagada por defecto; en N3 y sellados va siempre.
+	WatermarkN2 *bool
 }
 
 // validRetention: las últimas N revisiones (hasta 10 000) o las de los últimos N días (hasta
@@ -139,6 +141,9 @@ func (s *Service) Update(ctx context.Context, sc repo.Scope, in Settings) error 
 	}
 	if in.QuizzesEnabled != nil && *in.QuizzesEnabled != w.QuizzesEnabled {
 		w.QuizzesEnabled, changed = *in.QuizzesEnabled, append(changed, "quizzes_enabled")
+	}
+	if in.WatermarkN2 != nil && *in.WatermarkN2 != w.WatermarkN2 {
+		w.WatermarkN2, changed = *in.WatermarkN2, append(changed, "watermark_n2")
 	}
 	if w.Name == "" || utf8.RuneCountInString(w.Description) > maxDescription || (w.ApprovalMode != "direct" && w.ApprovalMode != "required") ||
 		!validRetention(w.KeepLast, w.KeepDays) || w.ReviewDays < 0 || w.ReviewDays > 3650 {

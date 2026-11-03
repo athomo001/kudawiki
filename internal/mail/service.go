@@ -12,6 +12,7 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/repo"
 )
 
@@ -25,7 +26,7 @@ type Service struct {
 	store         store
 	brand         brand
 	audit         *audit.Recorder
-	key           []byte             // MASTER_KEY: cifra la contraseña guardada
+	key           crypto.MasterKey   // cifra la contraseña guardada y los correos en cola
 	fixed         map[string]*string // claves del archivo o de las variables, ya validadas
 	fixedPassword *string            // la del archivo: nunca va a la base
 	locked        []string
@@ -39,7 +40,7 @@ type Service struct {
 // NewService valida lo que viene del archivo de configuración: un puerto o un remitente mal
 // escritos ahí impiden arrancar, en vez de quedar ignorados. i18n es la carpeta con es.json y
 // en.json, de donde salen los textos del correo (§12.1).
-func NewService(s store, b brand, rec *audit.Recorder, masterKey []byte, fromConfig Patch, i18n fs.FS, baseURL string, now func() time.Time) (*Service, error) {
+func NewService(s store, b brand, rec *audit.Recorder, masterKey crypto.MasterKey, fromConfig Patch, i18n fs.FS, baseURL string, now func() time.Time) (*Service, error) {
 	fixed, password, hasPassword, err := fromConfig.values()
 	if err != nil {
 		return nil, errors.New("smtp in the configuration file: port 1-65535, security starttls, tls or none, and from as a plain address")

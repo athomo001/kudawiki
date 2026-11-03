@@ -35,6 +35,7 @@ func (a api) adminRoutes(r chi.Router) {
 	r.With(a.adminScope).Patch("/workspaces/{id}", a.renameWorkspace)
 	r.Get("/audit", a.audit)
 	r.Get("/health", a.globalHealth)
+	r.With(noStore).Get("/sealed", a.allSealed)
 	a.siteAdminRoutes(r)
 	a.smtpAdminRoutes(r)
 	a.ldapAdminRoutes(r)

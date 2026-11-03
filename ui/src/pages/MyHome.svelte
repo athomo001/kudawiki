@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, canWrite, formatDate, formatPercent, timeAgo, type Level, type Me, type Proposal } from '../lib/api';
+  import { api, canWrite, formatDate, formatPercent, timeAgo, type Level, type Me, type MySealed, type Proposal } from '../lib/api';
   import LevelBadge from '../components/LevelBadge.svelte';
   import { t, locale } from '../lib/i18n/index.svelte';
 
@@ -18,6 +18,7 @@
   let mine = $state<AreaProposal[]>([]);
   let reviews = $state<OwnReview[]>([]);
   let watching = $state<Watched[]>([]);
+  let sealed = $state<MySealed[]>([]);
   let reads = $state<PendingRead[]>([]);
   let attempts = $state<MyAttempt[]>([]);
   let loaded = $state(false);
@@ -47,6 +48,7 @@
       api<PendingRead[]>('GET', '/me/read-requests').then((r) => (reads = r)).catch(() => {}),
       api<MyAttempt[]>('GET', '/me/quizzes').then((a) => (attempts = a)).catch(() => {}),
       api<Watched[]>('GET', '/me/watching').then((w) => (watching = w)).catch(() => {}),
+      api<MySealed[]>('GET', '/me/sealed').then((s) => (sealed = s)).catch(() => {}),
     ]).finally(() => (loaded = true));
   });
 
@@ -128,6 +130,24 @@
           <small class="muted">
             {a.area.name} · {a.status === 'in_progress' ? t('quiz.in_progress') : `${formatPercent(a.percent, locale())} % · ${t(a.passed ? 'quiz.passed' : 'quiz.failed')}`}
             · <time datetime={a.started_at}>{ago(a.started_at)}</time>
+          </small>
+        </li>
+      {/each}
+    </ul>
+  </section>
+{/if}
+
+<!-- Sellados (§14.4): los que escribí y los que me compartieron, de todas las áreas, con su ruta. -->
+{#if sealed.length}
+  <section class="area-section" aria-labelledby="me-sealed">
+    <h2 id="me-sealed">{t('sealed.list')}</h2>
+    <ul class="me-list">
+      {#each sealed as s (s.id)}
+        <li>
+          <a href={`/sealed/${s.id}`}>{s.slug}</a>
+          <small class="muted">
+            {s.area.personal ? (s.access === 'author' ? t('personal.title') : t('sealed.personal_of', { name: s.author })) : s.area.name} · {s.access === 'author' ? t('sealed.access_author') : t(`sealed.access_${s.access}`)}
+            {#if s.access !== 'author'} · {t('sealed.author', { name: s.author })}{/if}
           </small>
         </li>
       {/each}

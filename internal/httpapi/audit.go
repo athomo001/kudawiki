@@ -67,6 +67,6 @@ func (a api) audit(w http.ResponseWriter, r *http.Request) {
 func (a api) areaAudit(w http.ResponseWriter, r *http.Request) {
 	f := auditFilter(r)
 	f.WsSlug = ""
-	es, err := a.Read.AreaAudit(r.Context(), scopeOf(r), f)
+	es, err := a.Read.AreaAudit(r.Context(), scopeOf(r), currentUser(r).ID, f)
 	a.auditJSON(w, r, es, err, false)
 }

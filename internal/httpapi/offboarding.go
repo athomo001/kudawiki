@@ -36,11 +36,11 @@ func (a api) offboardingPlan(w http.ResponseWriter, r *http.Request) {
 		for j, ad := range x.Admins {
 			admins[j] = map[string]string{"id": ad.ID, "full_name": ad.FullName}
 		}
-		areas[i] = map[string]any{"id": x.WsID, "slug": x.Slug, "name": x.Name, "role": x.Role, "pages": x.Pages,
+		areas[i] = map[string]any{"id": x.WsID, "slug": x.Slug, "name": x.Name, "role": x.Role, "pages": x.Pages, "sealed": x.Sealed,
 			"quizzes": x.Quizzes, "read_requests": x.ReadRequests, "admins": admins, "receiver": x.Receiver,
 			"to_you": x.ToActor, "needs_admin": x.NeedsAdmin}
 	}
-	out := map[string]any{"areas": areas, "personal_pages": p.PersonalPages, "personal_media": p.PersonalMedia,
+	out := map[string]any{"areas": areas, "personal_pages": p.PersonalPages, "personal_media": p.PersonalMedia, "personal_sealed": p.PersonalSealed,
 		"drafts": p.Drafts, "proposals": p.Proposals, "grace_days": int(p.Grace / (24 * time.Hour))}
 	if p.Pending != nil {
 		out["pending"] = map[string]any{"until": p.Pending.Until, "receivers": p.Pending.Receivers}
@@ -67,10 +67,10 @@ func (a api) startOffboarding(w http.ResponseWriter, r *http.Request) {
 		a.json(w, http.StatusOK, map[string]any{"status": "pending", "until": o.Until})
 		return
 	}
-	pages, quizzes, reads := 0, 0, 0
+	pages, sealed, quizzes, reads := 0, 0, 0, 0
 	for _, t := range o.Result.Transfers {
-		pages, quizzes, reads = pages+len(t.PageIDs), quizzes+t.Quizzes, reads+t.ReadRequests
+		pages, sealed, quizzes, reads = pages+len(t.PageIDs), sealed+len(t.SealedIDs), quizzes+t.Quizzes, reads+t.ReadRequests
 	}
-	a.json(w, http.StatusOK, map[string]any{"status": "completed", "pages": pages, "quizzes": quizzes, "read_requests": reads,
-		"personal_pages": o.Result.PersonalPages, "drafts": o.Result.Drafts, "proposals": o.Result.Proposals})
+	a.json(w, http.StatusOK, map[string]any{"status": "completed", "pages": pages, "sealed": sealed, "quizzes": quizzes, "read_requests": reads,
+		"personal_pages": o.Result.PersonalPages, "personal_sealed": o.Result.PersonalSealed, "drafts": o.Result.Drafts, "proposals": o.Result.Proposals})
 }

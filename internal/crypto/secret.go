@@ -7,10 +7,6 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// MasterKeyVersion es la versión de la MASTER_KEY con que se cifra hoy; cada fila guarda la
-// suya para que la rotación (§6.5) sepa qué le falta re-cifrar.
-const MasterKeyVersion = 1
-
 var ErrOpen = errors.New("secret cannot be opened")
 
 // Seal cifra un secreto de configuración con la MASTER_KEY (XChaCha20-Poly1305, §6.3). El nonce

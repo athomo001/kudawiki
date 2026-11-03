@@ -7,6 +7,7 @@
   import NotificationPrefsForm from '../components/NotificationPrefsForm.svelte';
   import TotpSetup from '../components/TotpSetup.svelte';
   import PasskeyList from '../components/PasskeyList.svelte';
+  import VaultSetup from '../components/VaultSetup.svelte';
   import { site } from '../lib/site.svelte';
 
   // Mi perfil (SPEC §8.5.2, §14.1): lo que la persona cambia de sí misma. El correo y los roles
@@ -296,6 +297,8 @@
   </section>
 
   {#if me.passkeys.available}<PasskeyList {onchanged} />{/if}
+
+  <VaultSetup hasVault={me.vault} {onchanged} />
 
   <SessionList />
 </div>

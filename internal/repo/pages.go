@@ -160,6 +160,16 @@ func (r *Repo) CreatePage(ctx context.Context, s Scope, w PageWrite) (string, er
 		return "", err
 	}
 	defer tx.Rollback()
+	id, err := createPage(ctx, tx, s, w, 1)
+	if err != nil {
+		return "", err
+	}
+	return id, tx.Commit()
+}
+
+// createPage inserta la página dentro de tx, con al menos el nivel minRank. Desclasificar un
+// sellado la crea en la misma transacción que libera su ruta (§6.1).
+func createPage(ctx context.Context, tx *sql.Tx, s Scope, w PageWrite, minRank int) (string, error) {
 	// La página nace con el nivel de su padre más alto (§3.2). Si ese padre es de un nivel que
 	// quien crea no ve, la ruta no está disponible, igual que si estuviera ocupada (§19.35).
 	anc, err := maxAncestorRank(ctx, tx, s, w.Slug)
@@ -174,7 +184,7 @@ func (r *Repo) CreatePage(ctx context.Context, s Scope, w PageWrite) (string, er
 		`INSERT INTO pages (id, workspace_id, slug, min_rank, title, content_markdown, lang, created_by, updated_by,
 		 owner_id, review_interval_days, verified_at, verified_by)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), CURRENT_TIMESTAMP, ?)`,
-		id, s.WsID, w.Slug, max(1, anc), w.Title, w.Markdown, w.Lang, w.AuthorID, w.AuthorID, w.AuthorID, w.ReviewDays, w.AuthorID); err != nil {
+		id, s.WsID, w.Slug, max(minRank, anc), w.Title, w.Markdown, w.Lang, w.AuthorID, w.AuthorID, w.AuthorID, w.ReviewDays, w.AuthorID); err != nil {
 		return "", conflict(err)
 	}
 	if err := insertRevision(ctx, tx, s, id, 1, w); err != nil {
@@ -198,7 +208,7 @@ func (r *Repo) CreatePage(ctx context.Context, s Scope, w PageWrite) (string, er
 	if err := writeIndex(ctx, tx, id, w.Index); err != nil {
 		return "", err
 	}
-	return id, tx.Commit()
+	return id, nil
 }
 
 // UpdatePage aplica el bloqueo optimista de SPEC §4.1: si la revisión actual ya no es base,

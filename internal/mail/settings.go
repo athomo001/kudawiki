@@ -175,10 +175,10 @@ func (s *Service) settings(ctx context.Context, open bool) (config, error) {
 			return config{}, err
 		case !open:
 			c.password = Mask
-		case version != crypto.MasterKeyVersion:
+		case version != s.key.Version:
 			return config{}, errors.New("smtp password sealed with another master key version")
 		default:
-			plain, err := crypto.Open(s.key, enc, []byte(passwordKey))
+			plain, err := crypto.Open(s.key.Key, enc, []byte(passwordKey))
 			if err != nil {
 				return config{}, err
 			}
@@ -223,11 +223,11 @@ func (s *Service) Update(ctx context.Context, actorID string, p Patch) (Settings
 	if pwChanged {
 		secrets = map[string]repo.SealedSetting{passwordKey: {}}
 		if password != "" {
-			enc, err := crypto.Seal(s.key, []byte(password), []byte(passwordKey))
+			enc, err := crypto.Seal(s.key.Key, []byte(password), []byte(passwordKey))
 			if err != nil {
 				return Settings{}, err
 			}
-			secrets[passwordKey] = repo.SealedSetting{Enc: enc, KeyVersion: crypto.MasterKeyVersion}
+			secrets[passwordKey] = repo.SealedSetting{Enc: enc, KeyVersion: s.key.Version}
 		}
 	}
 	if err := s.store.SaveSiteSettings(ctx, values, secrets, actorID); err != nil {

@@ -29,6 +29,8 @@
   let reviewDays = $state(365);
   // Cuestionarios (§4.16.7): encendidos por defecto.
   let quizzes = $state(true);
+  // Marca de agua en N2 (§4.15): en N3 y sellados va siempre.
+  let watermarkN2 = $state(false);
   let overrides = $state<ApprovalOverride[]>([]);
   let prefix = $state('');
   let prefixMode = $state<Mode>('required');
@@ -47,6 +49,7 @@
     keep_days: number;
     review_days: number;
     quizzes_enabled: boolean;
+    watermark_n2: boolean;
   };
   // last: lo guardado, para contar los cambios y para Descartar.
   let last = $state<Settings | null>(null);
@@ -71,6 +74,7 @@
     review = s.review_days > 0;
     reviewDays = s.review_days || reviewDays;
     quizzes = s.quizzes_enabled;
+    watermarkN2 = s.watermark_n2;
   }
 
   const current = (): Settings => ({
@@ -83,6 +87,7 @@
     keep_days: keep === 'days' ? keepDays : 0,
     review_days: review ? reviewDays : 0,
     quizzes_enabled: quizzes,
+    watermark_n2: watermarkN2,
   });
   const changes = $derived(last ? countChanges(last, current()) : 0);
 
@@ -163,6 +168,12 @@
       <label class="check">
         <input type="checkbox" bind:checked={quizzes} />
         {t('settings.quizzes_on')}
+      </label>
+    </Setting>
+    <Setting title={t('settings.watermark')} description={t('settings.watermark_hint')}>
+      <label class="check">
+        <input type="checkbox" bind:checked={watermarkN2} />
+        {t('settings.watermark_n2')}
       </label>
     </Setting>
   {:else if section === 'publishing'}

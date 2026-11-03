@@ -27,6 +27,7 @@
       label: 'admin.group_supervision',
       items: [
         { href: '/admin/health', label: 'health.short', icon: 'pulse' },
+        { href: '/admin/sealed', label: 'sealed.list_title', icon: 'lock' },
         { href: '/admin/audit', label: 'audit.title', icon: 'list' },
       ],
     },

@@ -176,13 +176,14 @@ Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones,
 
 ## F7 — Documentos sellados (M6)
 
-- [ ] Cifrado de sobre (DEK por documento), bóveda por usuario, grants.
-- [ ] Acceso de admins con MASTER_KEY, auditado y avisado al autor.
-- [ ] Desclasificar, restablecer contraseña, borrado definitivo.
-- [ ] Rotación de MASTER_KEY y custodia Shamir.
-- [ ] Marca de agua en N3 y sellados.
+- [x] Cifrado de sobre (DEK por documento), bóveda por usuario, grants. *(F7.1 y F7.2)*
+- [x] Acceso de admins con MASTER_KEY, auditado y avisado al autor. *(F7.1)*
+- [x] Desclasificar, restablecer contraseña, borrado definitivo. *(F7.1: borrado definitivo; F7.3: desclasificar, restablecer y la lista de sellados del superadmin)*
+- [x] Rotación de MASTER_KEY y custodia Shamir. *(F7.4: `kudawiki masterkey rotate`, `split`, `combine`; los custodios siguen abiertos en §19.16)*
+- [x] Marca de agua en N3 y sellados. *(F7.5: también en N2 si el área la enciende, §4.15)*
+- [x] Archivos de los sellados, cifrados con su DEK (§6.1: "sus revisiones y media también se cifran"). *(F7.6: `sealed_media`, `<id>.enc`, adjuntar en el editor, desclasificar los pasa al área, doctor)*
 
-**Criterio de salida:** con solo `wiki.db` + backups (sin MASTER_KEY) no se recupera texto de ningún sellado (test de grep sobre los archivos).
+**Criterio de salida:** con solo `wiki.db` + backups (sin MASTER_KEY) no se recupera texto de ningún sellado (test de grep sobre los archivos). ✅ **Cumplido el 2026-11-02**: `TestSealedNothingInClear` busca el título, el contenido de cada revisión, los archivos y sus nombres de un sellado vivo y de uno borrado en `wiki.db`, su WAL, `storage/` y un respaldo descomprimido, y no aparecen; el texto de una página y un archivo normales sí, como control.
 
 ---
 

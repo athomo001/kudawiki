@@ -395,7 +395,7 @@ type Service struct {
 	store         store
 	members       areaMembers
 	audit         *audit.Recorder
-	key           []byte
+	key           crypto.MasterKey
 	fixed         map[string]*string
 	fixedPassword *string
 	locked        []string
@@ -417,7 +417,7 @@ type Service struct {
 
 // NewService arma el servicio con lo que viene del archivo, ya validado: un error ahí detiene
 // el arranque, como en el resto de la configuración.
-func NewService(s store, m areaMembers, rec *audit.Recorder, masterKey []byte, fromConfig Patch, now func() time.Time, log *slog.Logger) (*Service, error) {
+func NewService(s store, m areaMembers, rec *audit.Recorder, masterKey crypto.MasterKey, fromConfig Patch, now func() time.Time, log *slog.Logger) (*Service, error) {
 	fixed, password, hasPassword, err := fromConfig.values()
 	if err != nil {
 		var fe *FieldError
@@ -490,10 +490,10 @@ func (s *Service) settings(ctx context.Context, overlay map[string]*string, open
 			return config{}, err
 		case !open:
 			c.password = Mask
-		case version != crypto.MasterKeyVersion:
+		case version != s.key.Version:
 			return config{}, errors.New("ldap bind password sealed with another master key version")
 		default:
-			plain, err := crypto.Open(s.key, enc, []byte(passwordKey))
+			plain, err := crypto.Open(s.key.Key, enc, []byte(passwordKey))
 			if err != nil {
 				return config{}, err
 			}
@@ -664,11 +664,11 @@ func (s *Service) Update(ctx context.Context, actorID string, p Patch, force boo
 	if c.pwChanged {
 		secrets = map[string]repo.SealedSetting{passwordKey: {}}
 		if c.password != "" {
-			enc, err := crypto.Seal(s.key, []byte(c.password), []byte(passwordKey))
+			enc, err := crypto.Seal(s.key.Key, []byte(c.password), []byte(passwordKey))
 			if err != nil {
 				return Settings{}, nil, err
 			}
-			secrets[passwordKey] = repo.SealedSetting{Enc: enc, KeyVersion: crypto.MasterKeyVersion}
+			secrets[passwordKey] = repo.SealedSetting{Enc: enc, KeyVersion: s.key.Version}
 		}
 	}
 	if err := s.store.SaveSiteSettings(ctx, c.values, secrets, actorID); err != nil {

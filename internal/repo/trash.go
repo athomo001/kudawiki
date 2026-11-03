@@ -153,7 +153,7 @@ func (r *Repo) RestorePages(ctx context.Context, s Scope, actorID, id string) (i
 			`UPDATE pages SET deleted_at = NULL, deleted_by = NULL, trash_root_id = NULL, min_rank = ?,
 			 current_revision = current_revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			max(p.rank, anc), actorID, p.id); err != nil {
-			return 0, err
+			return 0, conflict(err) // la ruta de un sellado (§6.1)
 		}
 		if err := insertRevision(ctx, tx, s, p.id, p.revision+1, PageWrite{
 			Title: p.title, Markdown: p.markdown, Kind: "restored", AuthorID: actorID,

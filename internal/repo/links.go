@@ -195,7 +195,7 @@ func (r *Repo) MovePages(ctx context.Context, s Scope, actorID, from, to string,
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE pages SET slug = ?, min_rank = ?, current_revision = current_revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			newSlug, max(p.rank, anc), actorID, p.id); err != nil {
-			return "", 0, err
+			return "", 0, conflict(err) // la ruta de un sellado (§6.1)
 		}
 		if err := insertRevision(ctx, tx, s, p.id, p.revision+1, PageWrite{
 			Title: p.title, Markdown: p.markdown, Kind: "moved", Summary: p.slug + " → " + newSlug, AuthorID: actorID,

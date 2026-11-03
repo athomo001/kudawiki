@@ -23,12 +23,13 @@ import (
 
 	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/database"
 	"github.com/athomo001/kudawiki/internal/database/dbtest"
 	"github.com/athomo001/kudawiki/internal/repo"
 )
 
-var key = bytes.Repeat([]byte{9}, 32)
+var key = crypto.MasterKey{Key: bytes.Repeat([]byte{9}, 32), Version: 1}
 
 type fixture struct {
 	svc   *Service

@@ -83,8 +83,9 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 	for i, m := range ms {
 		// viewers_can_propose: la interfaz le ofrece a un lector "Proponer un cambio" (§19.5).
 		// require_change_summary: el editor marca el resumen como obligatorio (§4.3).
+		// watermark_n2: el lector ve la marca de agua también en las páginas N2 (§4.15).
 		areas[i] = map[string]any{"slug": m.Slug, "name": m.Name, "description": m.Description, "role": m.Role,
-			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary}
+			"viewers_can_propose": m.ViewersCanPropose, "require_change_summary": m.RequireChangeSummary, "watermark_n2": m.WatermarkN2}
 	}
 	a.json(w, http.StatusOK, map[string]any{
 		// auth_source: una cuenta del directorio no cambia aquí su nombre ni su contraseña (§8.6.3).
@@ -95,6 +96,7 @@ func (a api) me(w http.ResponseWriter, r *http.Request) {
 		// lo cumple igual que el TOTP.
 		"totp": totp, "mfa_setup_required": totp.Required && !totp.Enabled && u.Passkeys == 0,
 		"passkeys": map[string]any{"count": u.Passkeys, "available": a.Auth.PasskeysAvailable()},
+		"vault":    u.HasVault, // §6.3: sin bóveda no se le pueden compartir sellados
 	})
 }
 

@@ -147,7 +147,7 @@ func (r *Repo) PublishPage(ctx context.Context, from, to Scope, m PublishMove) e
 		`UPDATE pages SET workspace_id = ?, slug = ?, min_rank = ?, content_markdown = ?, current_revision = current_revision + 1,
 		 updated_by = ?, updated_at = CURRENT_TIMESTAMP, review_notified_at = NULL WHERE id = ?`,
 		to.WsID, m.Slug, max(1, anc, min(rank, to.MaxRank)), m.Markdown, m.ActorID, m.PageID); err != nil {
-		return err
+		return conflict(err) // la ruta de un sellado (§6.1)
 	}
 	// El historial viaja con la página; sus URLs de media se cambian para que las revisiones viejas
 	// no apunten al espacio personal, que en el área nadie más puede abrir.

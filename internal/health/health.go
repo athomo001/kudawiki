@@ -58,6 +58,8 @@ type store interface {
 	PageBySlug(ctx context.Context, s repo.Scope, slug string) (repo.Page, error)
 	RevisionByNumber(ctx context.Context, s repo.Scope, pageID string, n int) (repo.Revision, error)
 	ReviewProblems(ctx context.Context, s repo.Scope, now time.Time) ([]repo.ReviewProblem, error)
+	SealedMediaInArea(ctx context.Context, wsID string) ([]repo.SealedMedia, error)
+	SealedWithoutMasterKey(ctx context.Context, wsID string) ([]string, error)
 }
 
 type Options struct {
@@ -290,6 +292,30 @@ func media(ctx context.Context, st store, o Options, sc repo.Scope, add func(che
 			add("media.unattached", Warning, "", m.ID)
 		}
 	}
+	// Los archivos de sellados (F7.6), <id>.enc: sin fila es un resto de un borrado que no
+	// terminó, ilegible sin su DEK; con fila y sin archivo, el documento perdió un adjunto (§13.7).
+	// El nombre y el contenido van cifrados: doctor solo mira que estén.
+	sealedFiles, err := st.SealedMediaInArea(ctx, sc.WsID)
+	if err != nil {
+		return err
+	}
+	// Un sellado sin su DEK envuelta con la MASTER_KEY (§13.7). Va la ruta y no un enlace: un
+	// sellado no es una página del árbol.
+	unkeyed, err := st.SealedWithoutMasterKey(ctx, sc.WsID)
+	if err != nil {
+		return err
+	}
+	for _, slug := range unkeyed {
+		add("sealed.no_master_key", Error, "", slug)
+	}
+	for _, m := range sealedFiles {
+		known[m.ID+".enc"] = true
+		if _, err := os.Stat(filepath.Join(dir, m.ID+".enc")); errors.Is(err, fs.ErrNotExist) {
+			add("sealed.missing_file", Error, "", m.ID)
+		} else if err != nil {
+			return err
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -305,6 +331,10 @@ func media(ctx context.Context, st store, o Options, sc repo.Scope, add func(che
 	}
 	slices.Sort(stray)
 	for _, name := range stray {
+		if strings.HasSuffix(name, ".enc") {
+			add("sealed.stray_file", Warning, "", name)
+			continue
+		}
 		add("media.stray_file", Warning, "", name)
 	}
 	return nil

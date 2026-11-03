@@ -41,6 +41,7 @@ const (
 	Daily      Kind = "daily"       // el automático; lo rota Prune
 	Manual     Kind = "manual"      // kudawiki backup
 	PreMigrate Kind = "pre-migrate" // antes de migrar, solo la base (§13.9)
+	PreRotate  Kind = "pre-rotate"  // antes de rotar la MASTER_KEY, solo la base: storage/ no cambia (§6.5)
 )
 
 // Manifest va al final del archivo: lo que tiene, de qué esquema es y el hash de cada parte.

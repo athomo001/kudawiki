@@ -148,6 +148,33 @@ var (
 	UserPseudonymize        = Action{"user.pseudonymize"}
 	PageOwnerTransfer       = Action{"page.owner_transfer"}
 	PersonalPurge           = Action{"personal.purge"}
+	// Sellados (§6, §11.1): nunca llevan el título, que va cifrado; el objetivo es el id del sellado.
+	// El admin de área no ve los que hizo otro admin o el superadmin (§11.2).
+	SealedCreate       = Action{"sealed.create"}
+	SealedUnlock       = Action{"sealed.unlock"}
+	SealedUnlockFailed = Action{"sealed.unlock_failed"}
+	SealedAdminOpen    = Action{"sealed.admin_open"}
+	SealedPurge        = Action{"sealed.purge"}
+	// SealedOwnerTransfer: la baja pasó la autoría de un sellado al admin receptor (§8.4).
+	SealedOwnerTransfer = Action{"sealed.owner_transfer"}
+	// SealedPasswordSet: quien recibió un sellado en una baja le puso su contraseña (§8.4).
+	SealedPasswordSet = Action{"sealed.password_set"}
+	// Accesos a un sellado (§6.1, F7.2): el autor o el superadmin los dan y los quitan.
+	SealedGrant  = Action{"sealed.grant"}
+	SealedRevoke = Action{"sealed.revoke"}
+	// VaultSet: la persona creó su clave de bóveda o puso una nueva (§6.3).
+	VaultSet = Action{"vault.set"}
+	// SealedDeclassify: el superadmin convirtió el sellado en una página del área (§6.1, F7.3).
+	SealedDeclassify = Action{"sealed.declassify"}
+	// Restablecer la contraseña de un sellado (§6.3, F7.3): el autor pide, el superadmin aprueba
+	// y el autor pone la nueva.
+	SealedResetRequest  = Action{"sealed.password_reset_request"}
+	SealedResetApprove  = Action{"sealed.password_reset_approve"}
+	SealedResetComplete = Action{"sealed.password_reset_complete"}
+	// MASTER_KEY desde la consola (§6.5, F7.4): rotarla, repartirla en partes y reconstruirla.
+	MasterKeyRotate  = Action{"masterkey.rotate"}
+	MasterKeySplit   = Action{"masterkey.split"}
+	MasterKeyCombine = Action{"masterkey.combine"}
 )
 
 // All son todas las acciones; cada una tiene su traducción en la interfaz (lo exige un test).
@@ -169,6 +196,9 @@ var All = []Action{
 	ShareRequest, ShareApprove, ShareReject, ShareEnd,
 	UserOffboardingStart, UserOffboardingComplete, UserReactivate, UserSuperadminGrant, UserSuperadminRevoke, UserPseudonymize,
 	PageOwnerTransfer, PersonalPurge,
+	SealedCreate, SealedUnlock, SealedUnlockFailed, SealedAdminOpen, SealedPurge, SealedOwnerTransfer, SealedPasswordSet, SealedGrant, SealedRevoke, VaultSet,
+	SealedDeclassify, SealedResetRequest, SealedResetApprove, SealedResetComplete,
+	MasterKeyRotate, MasterKeySplit, MasterKeyCombine,
 }
 
 // Actor es quien hace la acción, tal como está en ese momento.

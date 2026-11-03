@@ -38,29 +38,32 @@ var templates = map[string]int{
 	"two_factor_changed":        3, // §8.1: de seguridad, no desactivable
 	"ldap_sync_aborted":         2, // §8.3.4: a los superadmins; la sincronización no aplicó nada
 	// Avisos (§5.3, §12.1): nunca llevan contenido de la página, solo su título.
-	"proposal_pending":    2,
-	"proposal_reminder":   2,
-	"proposal_approved":   2,
-	"proposal_rejected":   2,
-	"proposal_rebase":     2,
-	"page_changed":        2,
-	"page_deleted":        2,
-	"review_due":          2, // §4.8
-	"review_reminder":     2,
-	"read_request":        2, // §4.14
-	"read_reminder":       2,
-	"quiz_assigned":       2, // §4.16
-	"quiz_reminder":       2,
-	"quiz_extra_attempts": 1,
-	"quiz_failed_out":     2,
-	"ownership_received":  2, // §8.4
-	"role_changed":        2, // §12.1: de la cuenta, no desactivable
-	"share_pending":       2, // §4.19
-	"share_approved":      2,
-	"share_rejected":      2,
-	"shared_received":     2,
-	"share_ended":         2,
-	"digest":              1,
+	"proposal_pending":      2,
+	"proposal_reminder":     2,
+	"proposal_approved":     2,
+	"proposal_rejected":     2,
+	"proposal_rebase":       2,
+	"page_changed":          2,
+	"page_deleted":          2,
+	"review_due":            2, // §4.8
+	"review_reminder":       2,
+	"read_request":          2, // §4.14
+	"read_reminder":         2,
+	"quiz_assigned":         2, // §4.16
+	"quiz_reminder":         2,
+	"quiz_extra_attempts":   1,
+	"quiz_failed_out":       2,
+	"ownership_received":    2, // §8.4
+	"role_changed":          2, // §12.1: de la cuenta, no desactivable
+	"share_pending":         2, // §4.19
+	"share_approved":        2,
+	"share_rejected":        2,
+	"shared_received":       2,
+	"share_ended":           2,
+	"sealed_admin_access":   2, // §6.2: de la cuenta, no desactivable
+	"sealed_purged":         1, // §6.1
+	"sealed_reset_approved": 2, // §6.3: de la cuenta, no desactivable
+	"digest":                1,
 }
 
 // lineTemplates son los renglones del resumen diario: email.line.<tipo>, uno por aviso.
@@ -69,6 +72,7 @@ var lineTemplates = map[string]bool{
 	"proposal_rebase": true, "page_changed": true, "page_deleted": true, "review_due": true, "review_reminder": true,
 	"read_request": true, "read_reminder": true, "quiz_assigned": true, "quiz_reminder": true, "quiz_extra_attempts": true, "quiz_failed_out": true,
 	"ownership_received": true, "share_pending": true, "share_approved": true, "share_rejected": true, "shared_received": true, "share_ended": true,
+	"sealed_admin_access": true, "sealed_purged": true, "sealed_reset_approved": true,
 }
 
 // content es la descripción de un correo: de ella salen el HTML y el texto plano, así nunca

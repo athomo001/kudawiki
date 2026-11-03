@@ -21,6 +21,7 @@ type OffboardingArea struct {
 	WsID, Slug, Name string
 	Role             string // "" si ya no es miembro pero algo suyo quedó ahí
 	Pages            int    // de las que es dueña, también las de la papelera
+	Sealed           int    // sellados de los que es autora (§6)
 	Quizzes          int
 	ReadRequests     int
 	Admins           []AreaAdmin
@@ -28,11 +29,12 @@ type OffboardingArea struct {
 
 // OffboardingPlan es el resumen que ve el superadmin antes de la baja.
 type OffboardingPlan struct {
-	Areas         []OffboardingArea
-	PersonalPages int
-	PersonalMedia int
-	Drafts        int // autoguardados en las áreas; los del espacio personal se van con él
-	Proposals     int // devueltas o retiradas: contenido que nunca se publicó
+	Areas          []OffboardingArea
+	PersonalPages  int
+	PersonalMedia  int
+	PersonalSealed int
+	Drafts         int // autoguardados en las áreas; los del espacio personal se van con él
+	Proposals      int // devueltas o retiradas: contenido que nunca se publicó
 }
 
 // Offboarding es una baja en curso.
@@ -48,11 +50,13 @@ func (r *Repo) OffboardingPlan(ctx context.Context, userID string) (OffboardingP
 	rows, err := r.db.Read.QueryContext(ctx,
 		`SELECT w.id, w.slug, w.name, COALESCE(m.role, ''),
 		   (SELECT COUNT(*) FROM pages WHERE workspace_id = w.id AND owner_id = ?1),
+		   (SELECT COUNT(*) FROM sealed_pages WHERE workspace_id = w.id AND author_id = ?1),
 		   (SELECT COUNT(*) FROM quizzes WHERE workspace_id = w.id AND created_by = ?1),
 		   (SELECT COUNT(*) FROM read_requests WHERE workspace_id = w.id AND created_by = ?1)
 		 FROM workspaces w LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = ?1
 		 WHERE w.kind = 'area' AND (m.user_id IS NOT NULL
 		   OR EXISTS (SELECT 1 FROM pages WHERE workspace_id = w.id AND owner_id = ?1)
+		   OR EXISTS (SELECT 1 FROM sealed_pages WHERE workspace_id = w.id AND author_id = ?1)
 		   OR EXISTS (SELECT 1 FROM quizzes WHERE workspace_id = w.id AND created_by = ?1)
 		   OR EXISTS (SELECT 1 FROM read_requests WHERE workspace_id = w.id AND created_by = ?1))
 		 ORDER BY w.name`, userID)
@@ -61,7 +65,7 @@ func (r *Repo) OffboardingPlan(ctx context.Context, userID string) (OffboardingP
 	}
 	p.Areas, err = collect(rows, func(row scanner) (OffboardingArea, error) {
 		var a OffboardingArea
-		return a, row.Scan(&a.WsID, &a.Slug, &a.Name, &a.Role, &a.Pages, &a.Quizzes, &a.ReadRequests)
+		return a, row.Scan(&a.WsID, &a.Slug, &a.Name, &a.Role, &a.Pages, &a.Sealed, &a.Quizzes, &a.ReadRequests)
 	})
 	if err != nil {
 		return p, err
@@ -74,9 +78,10 @@ func (r *Repo) OffboardingPlan(ctx context.Context, userID string) (OffboardingP
 	err = r.db.Read.QueryRowContext(ctx,
 		`SELECT (SELECT COUNT(*) FROM pages p JOIN workspaces w ON w.id = p.workspace_id WHERE w.kind = 'personal' AND w.owner_user_id = ?1),
 		   (SELECT COUNT(*) FROM media_assets a JOIN workspaces w ON w.id = a.workspace_id WHERE w.kind = 'personal' AND w.owner_user_id = ?1),
+		   (SELECT COUNT(*) FROM sealed_pages s JOIN workspaces w ON w.id = s.workspace_id WHERE w.kind = 'personal' AND w.owner_user_id = ?1),
 		   (SELECT COUNT(*) FROM page_drafts d JOIN workspaces w ON w.id = d.workspace_id WHERE w.kind = 'area' AND d.user_id = ?1),
 		   (SELECT COUNT(*) FROM proposals WHERE author_id = ?1 AND status IN ('rejected', 'withdrawn'))`, userID).
-		Scan(&p.PersonalPages, &p.PersonalMedia, &p.Drafts, &p.Proposals)
+		Scan(&p.PersonalPages, &p.PersonalMedia, &p.PersonalSealed, &p.Drafts, &p.Proposals)
 	return p, err
 }
 
@@ -195,13 +200,14 @@ func (r *Repo) SetGlobalAdmin(ctx context.Context, userID string, on bool) error
 type Transfer struct {
 	WsID, To     string
 	PageIDs      []string
+	SealedIDs    []string
 	Quizzes      int
 	ReadRequests int
 }
 
 func (t Transfer) Empty() bool { return t.Count() == 0 }
 
-func (t Transfer) Count() int { return len(t.PageIDs) + t.Quizzes + t.ReadRequests }
+func (t Transfer) Count() int { return len(t.PageIDs) + len(t.SealedIDs) + t.Quizzes + t.ReadRequests }
 
 // Notice es el aviso a quien recibe (§8.4): de quién y cuánto. El payload tiene la forma de los
 // de notify ({"actor": …}); el detalle está en la auditoría del área.
@@ -210,20 +216,25 @@ func (t Transfer) Notice(fromName string) NewNotification {
 	return NewNotification{UserID: t.To, Kind: "ownership_received", Category: "review", Payload: string(p), Count: t.Count()}
 }
 
-// transfer pasa a to las páginas de las que from es dueño, sus cuestionarios y sus solicitudes
-// de lectura. Las revisiones conservan al autor: la historia no se reescribe.
+// transfer pasa a to las páginas de las que from es dueño, sus sellados, sus cuestionarios y sus
+// solicitudes de lectura. Las revisiones conservan al autor: la historia no se reescribe.
 func transfer(ctx context.Context, tx *sql.Tx, wsID, from, to string) (Transfer, error) {
 	t := Transfer{WsID: wsID, To: to}
-	rows, err := tx.QueryContext(ctx,
-		`UPDATE pages SET owner_id = ? WHERE workspace_id = ? AND owner_id = ? RETURNING id`, to, wsID, from)
-	if err != nil {
+	var err error
+	if t.PageIDs, err = returningIDs(ctx, tx,
+		`UPDATE pages SET owner_id = ? WHERE workspace_id = ? AND owner_id = ? RETURNING id`, to, wsID, from); err != nil {
 		return t, err
 	}
-	if t.PageIDs, err = collect(rows, func(row scanner) (string, error) {
-		var id string
-		return id, row.Scan(&id)
-	}); err != nil {
+	// Los sellados pasan con su autoría (§8.4). La contraseña la conocía solo quien se va: se borra
+	// su DEK envuelta y quien recibe pone una propia al abrirlo (con la llave maestra, en sealed).
+	if t.SealedIDs, err = returningIDs(ctx, tx,
+		`UPDATE sealed_pages SET author_id = ? WHERE workspace_id = ? AND author_id = ? RETURNING id`, to, wsID, from); err != nil {
 		return t, err
+	}
+	for _, id := range t.SealedIDs { // solo los que pasan: los de quien recibe conservan la suya
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sealed_keys WHERE page_id = ? AND holder_type = 'password'`, id); err != nil {
+			return t, err
+		}
 	}
 	for _, q := range []struct {
 		sql string
@@ -240,6 +251,17 @@ func transfer(ctx context.Context, tx *sql.Tx, wsID, from, to string) (Transfer,
 		*q.n = int(n)
 	}
 	return t, nil
+}
+
+func returningIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, func(row scanner) (string, error) {
+		var id string
+		return id, row.Scan(&id)
+	})
 }
 
 // RemoveMember saca a la persona del área y le pasa a receiver lo suyo de esa área (§8.4: quitarlo
@@ -264,12 +286,13 @@ func (r *Repo) RemoveMember(ctx context.Context, s Scope, userID, receiver strin
 
 // OffboardingResult es lo que hizo la baja, para la auditoría y el aviso a cada receptor.
 type OffboardingResult struct {
-	Transfers     []Transfer
-	PersonalWsID  string // "" si nunca entró a su espacio personal
-	PersonalPages int
-	PersonalMedia []MediaFile // los archivos se borran del disco después de confirmar
-	Drafts        int64
-	Proposals     int64
+	Transfers      []Transfer
+	PersonalWsID   string // "" si nunca entró a su espacio personal
+	PersonalPages  int
+	PersonalSealed int
+	PersonalMedia  []MediaFile // los archivos se borran del disco después de confirmar
+	Drafts         int64
+	Proposals      int64
 }
 
 // CompleteOffboarding hace la baja de una vez: transfiere lo de cada área a su receptor, borra lo
@@ -282,7 +305,14 @@ func (r *Repo) CompleteOffboarding(ctx context.Context, userID string, receivers
 	if err != nil {
 		return out, err
 	}
-	defer tx.Rollback()
+	secure := false
+	defer func() {
+		tx.Rollback()
+		// Después de soltar la transacción: la conexión de escritura es una sola (§13.4).
+		if secure {
+			r.db.Write.ExecContext(context.WithoutCancel(ctx), `PRAGMA secure_delete = OFF`)
+		}
+	}()
 	for wsID, to := range receivers {
 		t, err := transfer(ctx, tx, wsID, userID, to)
 		if err != nil {
@@ -297,6 +327,15 @@ func (r *Repo) CompleteOffboarding(ctx context.Context, userID string, receivers
 		return out, err
 	}
 	if out.PersonalWsID != "" {
+		// Sus sellados personales se van con el espacio, de forma definitiva (§8.4, §6.1): SQLite
+		// pisa lo borrado. Sin sus DEK envueltas cualquier resto ya es ilegible.
+		if _, err := tx.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
+			return out, err
+		}
+		secure = true
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sealed_pages WHERE workspace_id = ?`, out.PersonalWsID).Scan(&out.PersonalSealed); err != nil {
+			return out, err
+		}
 		if out.PersonalMedia, err = personalPurge(ctx, tx, out.PersonalWsID, &out.PersonalPages); err != nil {
 			return out, err
 		}
@@ -310,6 +349,8 @@ func (r *Repo) CompleteOffboarding(ctx context.Context, userID string, receivers
 		{`DELETE FROM page_watchers WHERE user_id = ?`, nil},
 		{`DELETE FROM notifications WHERE user_id = ?`, nil},
 		{`DELETE FROM passkeys WHERE user_id = ?`, nil},
+		// Los accesos que recibió a sellados ajenos: sus DEK envueltas (§8.4).
+		{`DELETE FROM sealed_keys WHERE holder_type = 'user' AND holder_user_id = ?`, nil},
 		{`DELETE FROM sessions WHERE user_id = ?`, nil},
 		{`DELETE FROM auth_tokens WHERE user_id = ?`, nil},
 		{`DELETE FROM workspace_members WHERE user_id = ?`, nil},
@@ -324,6 +365,7 @@ func (r *Repo) CompleteOffboarding(ctx context.Context, userID string, receivers
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE users SET is_active = 0, is_global_admin = 0, offboarded_at = ?, offboarding_at = NULL,
+		   vault_pubkey = NULL, vault_privkey_enc = NULL, vault_salt = NULL,
 		   offboarding_receiver_json = NULL, offboarding_by = NULL, updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ? AND offboarded_at IS NULL`, sqlTime(at), userID)
 	if err != nil {
@@ -339,7 +381,10 @@ func (r *Repo) CompleteOffboarding(ctx context.Context, userID string, receivers
 // foránea) y después el workspace, que se lleva por cascada páginas, revisiones y media.
 // Devuelve los archivos de media para borrarlos del disco.
 func personalPurge(ctx context.Context, tx *sql.Tx, wsID string, pages *int) ([]MediaFile, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, id FROM media_assets WHERE workspace_id = ?`, wsID)
+	// Con los archivos de sus sellados (F7.6), que se van con el espacio: media.Remove borra
+	// también el <id>.enc.
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, id FROM media_assets WHERE workspace_id = ?1
+		UNION ALL SELECT s.workspace_id, m.id FROM sealed_media m JOIN sealed_pages s ON s.id = m.page_id WHERE s.workspace_id = ?1`, wsID)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,8 @@
   import { shortcuts } from '../lib/shortcuts';
   import NotFound from './NotFound.svelte';
   import { setDocumentTitle } from '../lib/site.svelte';
+  import Watermark from '../components/Watermark.svelte';
+  import { watermarked } from '../lib/watermark.svelte';
 
   // refs: el árbol del área, para anterior/siguiente entre hermanas (§15).
   let { area, slug, refs, onmoved }: { area: Area; slug: string; refs: PageRef[]; onmoved: () => void } = $props();
@@ -222,6 +224,7 @@
   <div class="view"><NotFound /></div>
 {:else if page}
   <div class="reader">
+    {#if watermarked(page.level, area)}<Watermark />{/if}
     <article class="article" lang={page.lang}>
       <p class={`article-badges level-${page.level}`} lang={locale()}>
         {page.level > 1 ? '🔒 ' : ''}{t('page.level_line', { level: t(`level.${page.level}`) })}

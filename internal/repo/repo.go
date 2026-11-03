@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/athomo001/kudawiki/internal/database"
@@ -21,10 +22,13 @@ var (
 	ErrConflict = errors.New("conflict")
 )
 
-// conflict traduce la violación de UNIQUE del driver a ErrConflict.
+// conflict traduce la violación de UNIQUE del driver a ErrConflict. La ruta reservada por un
+// sellado (los triggers slug_reserved de la migración 0036) da el mismo error que una ruta
+// ocupada: quien choca no se entera de que ahí hay un sellado (§6.1).
 func conflict(err error) error {
 	var se *sqlite.Error
-	if errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+	if errors.As(err, &se) && (se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE ||
+		se.Code() == sqlite3.SQLITE_CONSTRAINT_TRIGGER && strings.Contains(se.Error(), "slug_reserved")) {
 		return ErrConflict
 	}
 	return err
@@ -52,6 +56,7 @@ type User struct {
 	HasAvatar     bool // la foto se lee aparte (Avatar): no viaja en cada request
 	TOTPEnabled   bool // el secreto se lee aparte (TOTPOf), solo al verificar un código (§8.1)
 	Passkeys      int  // cuántas tiene; las credenciales se leen aparte (PasskeysOf, §8.1)
+	HasVault      bool // configuró su clave de bóveda (§6.3); las llaves se leen aparte (VaultOf)
 	// Baja (§8.4): OffboardingAt es el fin de la gracia de una baja en curso y OffboardedAt cuándo
 	// se completó. Cero si no hay.
 	OffboardingAt time.Time
@@ -87,7 +92,7 @@ func (r *Repo) CreateUser(ctx context.Context, u User) error {
 
 const userColumns = `id, email, full_name, COALESCE(password_hash, ''), is_global_admin, is_active, locale, reading_prefs_json,
 	invited_at IS NOT NULL, avatar_png IS NOT NULL, totp_enabled,
-	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at, auth_source, COALESCE(ldap_guid, ''), COALESCE(ldap_dn, '')`
+	(SELECT COUNT(*) FROM passkeys WHERE passkeys.user_id = users.id), offboarding_at, offboarded_at, auth_source, COALESCE(ldap_guid, ''), COALESCE(ldap_dn, ''), vault_pubkey IS NOT NULL`
 
 func (r *Repo) UserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(r.db.Read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
@@ -113,7 +118,7 @@ func scanUser(row scanner) (User, error) {
 	var prefs string
 	var offboarding, offboarded sql.NullTime
 	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.IsGlobalAdmin, &u.IsActive, &u.Locale, &prefs, &u.Invited, &u.HasAvatar, &u.TOTPEnabled, &u.Passkeys,
-		&offboarding, &offboarded, &u.AuthSource, &u.LDAPGUID, &u.LDAPDN)
+		&offboarding, &offboarded, &u.AuthSource, &u.LDAPGUID, &u.LDAPDN, &u.HasVault)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
