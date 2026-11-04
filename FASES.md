@@ -14,7 +14,7 @@ Cómo vamos y qué viene. El detalle de cada función está en [spec/SPEC.md](sp
 | [F5](#f5--espacio-personal-y-vigencia-m4) | Espacio personal y vigencia (M4) | Borradores privados, plantillas, revisión periódica, acuse de lectura y cuestionarios | ✅ |
 | [F6](#f6--identidad-ad-y-2fa-m5) | Identidad, AD y 2FA (M5) | Login con Active Directory, TOTP, passkeys, bajas, artículos compartidos entre áreas | ✅ |
 | [F7](#f7--documentos-sellados-m6) | Documentos sellados (M6) | Cifrado de sobre, bóveda, llave maestra | ✅ |
-| [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ✅ (falta la etiqueta) |
+| [F8](#f8--endurecimiento-y-v10-m7) | Endurecimiento y v1.0 (M7) | **v1.0** lista para producción | ✅ (la etiqueta sale sola con el próximo push) |
 | [F8-B](#f8-b-faltantes) | Faltantes antes de v1.0 | Respaldos y borrar todo en el panel, modos de color, Mi perfil, borrar y descargar respaldos | ✅ |
 | [F9](#f9-hardening) | Hardening | SOC 2, ISO 27701, ISO 27001 | ⚪ |
 | [F10](#f10--post-implementacion) | Después de v1.0 | Comentarios, PDF, MCP… | ⚪ |
@@ -198,6 +198,7 @@ Orden del 2026-10-31: 1. TOTP (F6.1a) → 2. reauth (F6.1b) → 3. mis sesiones,
 - [x] Exportar/importar área, importador Wiki.js 2.x, export de datos personales. *(F8.7, F8.8 y F8.9)*
 - [x] Pulido de UX, accesibilidad, documentación de operación. *(F8.11: arrastrar y ordenar en el árbol (B7); F8.13: E2E de los flujos; F8.15: E2E de accesibilidad en 18 pantallas y la casilla de tarea con nombre; F8.14: `docs/operacion/` y `deploy/kudawiki.service`)*
 - [x] **Auditoría interna y pentest hecho por Claude** (§21.2.2, decisión del dueño del 2026-11-02: reemplazan al pentest externo para v1.0). *(F8.15, 2026-11-03: `docs/seguridad/auditoria-v1.0.md`, 66 chequeos de caja negra; sin críticos ni altos; tres medios y tres bajos, corregidos salvo el residual M-1r, que pasó a F9, hoy F10)*
+- [x] **Versiones automáticas e instalación desde GitHub** (§13.9, §13.11, pedido del dueño del 2026-11-03). `tag.yml` etiqueta según los prefijos de los commits cuando el CI de `main` pasa (la primera, v1.0.0) y `release.yml` publica el release con notas automáticas y la imagen firmada como `X.Y.Z`, `X.Y`, `X` y `latest`. `compose.yaml` usa esa imagen, el contenedor y los volúmenes se llaman `kudawiki`, y el manual público está en `deploy/README.md`. `kudawiki version` dice qué corre.
 
 **Criterio de salida:** auditoría interna y pentest sin hallazgos altos abiertos, pruebas E2E verdes, documentación de instalación y operación completa → se etiqueta **v1.0**.
 

@@ -39,7 +39,7 @@ func runDoctorSecurity(ctx context.Context, cfg config.Config) error {
 	}
 	// Los avisos de seguridad de cada versión van en sus notas (§21.2.3): la wiki no consulta
 	// internet para saber si hay uno (updates.check no existe en v1, §13.9).
-	fmt.Println("security advisories: see the release notes of this version")
+	fmt.Printf("security advisories: see the release notes of version %s\n", version)
 	fmt.Printf("security checks: %d errors, %d warnings\n", errs, len(problems)-errs)
 	if errs > 0 {
 		return errors.New("the installation has security errors")

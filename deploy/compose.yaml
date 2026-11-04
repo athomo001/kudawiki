@@ -1,15 +1,34 @@
-# Kudawiki en un solo contenedor (SPEC §13.11). Los valores salen de deploy/.env
-# (copia de .env.example; compose lo lee solo).
-#   Primera vez:  docker compose run --rm init     # pide la contraseña del superadmin
+# Kudawiki en un solo contenedor (SPEC §13.11), con la imagen firmada de ghcr.io. Los valores
+# salen de .env, al lado de este archivo (copia de .env.example; compose lo lee solo). Manual
+# completo: README.md de esta carpeta.
+#   Primera vez:  docker compose pull && docker compose run --rm init   # pide la contraseña
 #   Arrancar:     docker compose up -d
-#   Respaldo ya:  docker compose exec kudawiki /kudawiki backup      (el diario es a las 03:00)
+#   Actualizar:   docker compose pull && docker compose up -d           (respalda antes de migrar)
+#   Respaldo ya:  docker compose exec kudawiki /kudawiki backup         (el diario es a las 03:00)
 #   Restaurar:    docker compose stop kudawiki
 #                 docker compose run --rm kudawiki restore /data/backups/<archivo>.tar.zst
+
+# Sin esto, compose toma el nombre de la carpeta ("deploy") para el contenedor y los volúmenes.
+name: kudawiki
+
+# Lo mismo en los dos servicios. Endurecimiento de §21.2.6: solo lectura salvo /data, sin
+# capacidades ni escalada de privilegios, /tmp en memoria y un tope de procesos.
+x-kudawiki: &kudawiki
+  # "1" sigue la última 1.x, que se puede saltar sin pasos intermedios (§13.9); una versión
+  # exacta (1.0.0) deja las actualizaciones a mano. "dev" es la imagen de `make image`.
+  image: ghcr.io/athomo001/kudawiki:${KUDAWIKI_VERSION:-1}
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 512
+
 services:
   kudawiki:
-    build: ..
-    image: kudawiki:local
+    <<: *kudawiki
+    container_name: kudawiki
     restart: unless-stopped
+    # Solo en la máquina: afuera se llega por el proxy inverso con TLS (SPEC §21.2.1).
     ports: ["127.0.0.1:8080:8080"]
     environment:
       KUDAWIKI_BASE_URL: ${KUDAWIKI_BASE_URL:-http://localhost:8080}
@@ -18,15 +37,20 @@ services:
     volumes:
       - data:/data
       - keys:/keys:ro          # la MASTER_KEY: aparte de /data y de los backups
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
     mem_limit: 512m
+    # Los 10 s de Docker cortan un respaldo a medias; 60 s, como la unidad systemd.
+    stop_grace_period: 60s
+    # Sin tope, el log de Docker crece hasta llenar el disco. Si audit.forward es stdout y ese log
+    # es la copia externa de la auditoría (§11), hay que mandarlo fuera antes de que rote.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
 
   # Solo para `kudawiki init`: único paso en que la llave se monta con escritura.
   init:
-    image: kudawiki:local
+    <<: *kudawiki
     profiles: [init]
     entrypoint: ["/kudawiki", "init"]
     environment:
@@ -37,10 +61,6 @@ services:
     volumes:
       - data:/data
       - keys:/keys
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
 
 volumes:
   data:

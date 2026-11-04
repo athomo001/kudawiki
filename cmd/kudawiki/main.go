@@ -60,9 +60,14 @@ import (
 	"golang.org/x/term"
 )
 
+// version la graba el build con -ldflags "-X main.version=1.2.3" (Dockerfile, release.yml) a partir
+// de la etiqueta del release (§13.9): así quien opera sabe qué corre sin mirar la imagen.
+var version = "dev"
+
 const usage = `usage: kudawiki <command> [flags]
 
 commands:
+  version      print the version of this binary
   init         create the database, the master key and the first superadmin
                (KUDAWIKI_INIT_EMAIL, KUDAWIKI_INIT_NAME; password is prompted)
   serve        run the web server; outside localhost base_url must be https:// unless
@@ -114,6 +119,11 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
+	}
+	// Antes de leer la configuración: la versión se consulta también sin instalación.
+	if os.Args[1] == "version" {
+		fmt.Println(version)
+		return
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -451,7 +461,7 @@ func runServe(ctx context.Context, cfg config.Config, insecureHTTP bool) error {
 		}
 		errc <- srv.ListenAndServe()
 	}()
-	logger.Info("listening", "addr", cfg.Listen, "base_url", cfg.BaseURL)
+	logger.Info("listening", "version", version, "addr", cfg.Listen, "base_url", cfg.BaseURL)
 
 	select {
 	case err := <-errc:

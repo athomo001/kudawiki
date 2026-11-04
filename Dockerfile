@@ -18,17 +18,27 @@ RUN pnpm build
 # Etapa 2: binario estático, sin CGO.
 FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
 ARG TARGETOS TARGETARCH
+# La pone release.yml desde la etiqueta (§13.9); un build local queda como "dev".
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=ui /src/ui/dist ./ui/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w" -o /out/kudawiki ./cmd/kudawiki \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/kudawiki ./cmd/kudawiki \
  && mkdir /out/data /out/keys
 
 # Etapa final: sin shell ni gestor de paquetes, usuario sin privilegios.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+ARG VERSION=dev
+ARG REVISION=
+# source enlaza el paquete de ghcr.io con el repositorio: aparece en su página y hereda sus permisos.
+LABEL org.opencontainers.image.title="Kudawiki" \
+      org.opencontainers.image.description="La wiki del trabajo: wiki corporativa con aislamiento entre áreas" \
+      org.opencontainers.image.source="https://github.com/athomo001/kudawiki" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 COPY --from=build /out/kudawiki /kudawiki
 # Los volúmenes nuevos heredan este dueño: así el usuario sin privilegios puede escribir.
 COPY --from=build --chown=nonroot:nonroot /out/data /data

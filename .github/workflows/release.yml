@@ -1,20 +1,25 @@
 name: release
 
-# Al empujar una etiqueta v* (SPEC §13.9, §21.2.2): binarios Linux, SBOM CycloneDX, sumas
-# SHA-256 firmadas y la imagen firmada con su SBOM adjunto (§13.11). Firma sin llave de cosign:
-# el certificado dice qué flujo y qué etiqueta la firmaron, y no hay llave privada que custodiar.
-# El release queda en borrador: las notas (migraciones, si se puede saltar versiones, si hay que
-# reindexar, avisos de seguridad) las escribe el dueño antes de publicarlo.
+# Sobre una etiqueta v* (SPEC §13.9, §21.2.2): binarios Linux, SBOM CycloneDX, sumas SHA-256
+# firmadas y la imagen firmada con su SBOM adjunto (§13.11). Firma sin llave de cosign: el
+# certificado dice qué flujo y qué etiqueta la firmaron, y no hay llave privada que custodiar.
+# La etiqueta la crea tag.yml (versión automática) o alguien a mano. El release sale publicado con
+# notas armadas aquí: los commits, si trae migraciones y si se puede saltar versiones; lo que
+# falte (avisos de seguridad, reindexar) se agrega editándolo en GitHub (decisión del 2026-11-03).
 
 on:
   push:
     tags: ['v*']
+  # tag.yml lo lanza así sobre la etiqueta que crea: un push hecho con GITHUB_TOKEN no dispara flujos.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   release:
+    # Lanzado a mano sobre una rama, no hay versión que publicar.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write   # crear el release y subir sus archivos
@@ -22,6 +27,8 @@ jobs:
       id-token: write   # el token OIDC con que cosign firma sin llave
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # las etiquetas anteriores: notas y tags flotantes de la imagen
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -37,11 +44,12 @@ jobs:
       - run: make lint
       - run: make audit
 
+      # La versión queda grabada en el binario: `kudawiki version` y el log de arranque.
       - name: Binarios
         run: |
           mkdir dist
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/kudawiki-linux-$arch" ./cmd/kudawiki
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "dist/kudawiki-linux-$arch" ./cmd/kudawiki
           done
 
       # Del código y no del binario: así entran también las librerías de la UI embebida (pnpm-lock).
@@ -62,22 +70,42 @@ jobs:
           cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
 
       # La etapa final del Dockerfile solo copia: compilar para arm64 no necesita emulación.
+      # v1.2.3 se publica como 1.2.3; 1.2, 1 y latest pasan a ella solo si es la más nueva de cada
+      # serie, para que una corrección a una serie vieja no mueva latest hacia atrás. Una de prueba
+      # (v1.3.0-rc.1) queda solo con su nombre.
       - name: Imagen firmada
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ver=${GITHUB_REF_NAME#v}
+          tags=(-t "$image:$ver")
+          newest() { git tag -l "$1" | grep -v -- - | sort -V | tail -n1; }
+          if [[ $ver =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]}
+            if [[ $(newest "v$x.$y.*") == "$GITHUB_REF_NAME" ]]; then tags+=(-t "$image:$x.$y"); fi
+            if [[ $(newest "v$x.*") == "$GITHUB_REF_NAME" ]]; then tags+=(-t "$image:$x"); fi
+            if [[ $(newest 'v*') == "$GITHUB_REF_NAME" ]]; then tags+=(-t "$image:latest"); fi
+          fi
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker buildx create --use
           docker buildx build --platform linux/amd64,linux/arm64 --push \
-            -t "$image:$GITHUB_REF_NAME" --metadata-file meta.json .
+            --build-arg "VERSION=$ver" --build-arg "REVISION=$GITHUB_SHA" \
+            "${tags[@]}" --metadata-file meta.json .
           digest=$(jq -r '."containerimage.digest"' meta.json)
           cosign sign --yes "$image@$digest"
           cosign attest --yes --type cyclonedx --predicate dist/kudawiki-sbom.cdx.json "$image@$digest"
           echo "$image@$digest" > dist/IMAGE
 
-      - name: Release en borrador
+      # Las notas que pide §13.9, armadas desde git. El texto de los commits va directo al archivo:
+      # nunca pasa por una expresión ${{ }} ni se interpreta en el shell.
+      - name: Notas
+        run: bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md && cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "Notas por escribir (ver CHANGELOG.md)."
+          pre=()
+          if [[ $GITHUB_REF_NAME == *-* ]]; then pre=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag "${pre[@]}" --title "$GITHUB_REF_NAME" --notes-file notes.md

@@ -3,13 +3,18 @@ STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GOSEC := github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 
-.PHONY: ui build test lint audit load e2e
+.PHONY: ui build test lint audit load e2e image
 
 ui:
 	cd ui && pnpm install --frozen-lockfile && pnpm check && pnpm build
 
 build: ui
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/kudawiki ./cmd/kudawiki
+
+# La imagen con lo que hay en el disco, con el nombre que usa deploy/compose.yaml: se prueba con
+# KUDAWIKI_VERSION=dev en deploy/.env. Las versiones publicadas las arma release.yml.
+image:
+	docker build -t ghcr.io/athomo001/kudawiki:dev .
 
 test: ui
 	go test -race ./...

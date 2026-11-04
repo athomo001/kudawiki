@@ -1,0 +1,7 @@
+<!-- Logo de Kudawiki (D · Capas): tres áreas apiladas; la del frente lleva la K. Para fondos claros. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Kudawiki">
+  <rect x="15" y="3" width="30" height="30" rx="4" fill="#bcd6fb"/>
+  <rect x="9" y="9" width="30" height="30" rx="4" fill="#3b82f6"/>
+  <rect x="3" y="15" width="30" height="30" rx="4" fill="#1d4f91"/>
+  <path d="M13.5 22v16M13.5 31l8-9M16 28.5l6.5 9.5" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

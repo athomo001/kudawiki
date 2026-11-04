@@ -1,0 +1,52 @@
+name: tag
+
+# Versión automática (SPEC §13.9): cuando el CI de un push a main termina en verde, calcula la
+# próxima versión según los commits desde la última etiqueta (.github/scripts/next-version.sh),
+# la etiqueta y lanza el release sobre ella. Un push con solo docs:, chore:, ci:… no la genera.
+# Una etiqueta creada a mano (git push origin v1.2.3) sigue funcionando: release.yml la toma sola.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Dos pushes seguidos no pueden calcular la misma versión: van de a uno.
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # empujar la etiqueta
+      actions: write    # lanzar release.yml: una etiqueta empujada con GITHUB_TOKEN no lo dispara
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # todas las etiquetas y commits, para comparar con la última
+
+      - name: Etiquetar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # Un CI viejo que termina tarde no etiqueta un commit que ya quedó en una versión.
+          if git tag --contains "$SHA" | grep -q '^v'; then
+            echo "$SHA ya está en una versión"
+            exit 0
+          fi
+          next=$(bash .github/scripts/next-version.sh "$SHA")
+          if [ -z "$next" ]; then
+            echo "Sin feat: ni fix: desde la última versión: no hay versión nueva"
+            exit 0
+          fi
+          git tag "$next" "$SHA"
+          git push origin "refs/tags/$next"
+          gh workflow run release.yml --ref "$next"
+          echo "### $next" >> "$GITHUB_STEP_SUMMARY"

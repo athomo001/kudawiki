@@ -514,6 +514,7 @@ func Load(path string) (Config, error) {
 }
 
 // backupEnv es la variable de cada clave de backup que se puede cambiar desde el panel.
+// #nosec G101 -- nombres de variables de entorno, no credenciales
 var backupEnv = map[string]string{
 	"time": "KUDAWIKI_BACKUP_TIME", "keep_daily": "", "keep_weekly": "", "keep_monthly": "",
 	"remote.endpoint": "KUDAWIKI_BACKUP_REMOTE_ENDPOINT", "remote.region": "KUDAWIKI_BACKUP_REMOTE_REGION",
