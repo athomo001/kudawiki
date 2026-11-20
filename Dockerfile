@@ -3,7 +3,7 @@
 
 # Etapa 1: frontend. Node 26 no trae corepack: pnpm es el binario standalone del
 # release, con versión fijada y hash verificado (SPEC §15). Nunca npm.
-FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS ui
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS ui
 ARG PNPM_VERSION=12.16.1
 ADD --checksum=sha256:565ff81174a14f6f7bd5d84c1b17e51031a80230d370a1fe24be5d16bd02a825 \
     https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-x64.tar.gz /tmp/pnpm.tar.gz
