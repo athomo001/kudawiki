@@ -2,11 +2,19 @@ package crypto
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
 // La DEK envuelta con la contraseña se abre solo con esa contraseña, esa sal y el mismo aad.
 func TestPasswordWrap(t *testing.T) {
+	PasswordKEK := func(password string, salt []byte) []byte {
+		k, err := PasswordKEK(context.Background(), password, salt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
 	dek, _ := NewDEK()
 	salt, _ := NewSalt()
 	box, err := Seal(PasswordKEK("una contraseña larga", salt), dek, []byte("page-1"))
@@ -36,7 +44,7 @@ func TestPasswordWrap(t *testing.T) {
 
 // La DEK envuelta para una bóveda se abre solo con su clave de bóveda y en su cuenta (aad).
 func TestVaultWrap(t *testing.T) {
-	pub, priv, salt, err := NewVault("clave de bóveda larga", []byte("user-1"))
+	pub, priv, salt, err := NewVault(context.Background(), "clave de bóveda larga", []byte("user-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,18 +53,18 @@ func TestVaultWrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := OpenWithVault("clave de bóveda larga", salt, priv, []byte("user-1"), pub, wrapped); err != nil || !bytes.Equal(got, dek) {
+	if got, err := OpenWithVault(context.Background(), "clave de bóveda larga", salt, priv, []byte("user-1"), pub, wrapped); err != nil || !bytes.Equal(got, dek) {
 		t.Fatalf("open with the vault key: %v", err)
 	}
-	if _, err := OpenWithVault("otra clave de bóveda", salt, priv, []byte("user-1"), pub, wrapped); err != ErrOpen {
+	if _, err := OpenWithVault(context.Background(), "otra clave de bóveda", salt, priv, []byte("user-1"), pub, wrapped); err != ErrOpen {
 		t.Errorf("wrong vault key: %v, want ErrOpen", err)
 	}
-	if _, err := OpenWithVault("clave de bóveda larga", salt, priv, []byte("user-2"), pub, wrapped); err != ErrOpen {
+	if _, err := OpenWithVault(context.Background(), "clave de bóveda larga", salt, priv, []byte("user-2"), pub, wrapped); err != ErrOpen {
 		t.Errorf("another account: %v, want ErrOpen", err)
 	}
-	otherPub, _, _, _ := NewVault("x", []byte("user-2"))
+	otherPub, _, _, _ := NewVault(context.Background(), "x", []byte("user-2"))
 	foreign, _ := WrapForVault(otherPub, dek)
-	if _, err := OpenWithVault("clave de bóveda larga", salt, priv, []byte("user-1"), pub, foreign); err != ErrOpen {
+	if _, err := OpenWithVault(context.Background(), "clave de bóveda larga", salt, priv, []byte("user-1"), pub, foreign); err != ErrOpen {
 		t.Errorf("a box for someone else: %v, want ErrOpen", err)
 	}
 }

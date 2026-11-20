@@ -66,6 +66,12 @@ func TestBackupsAdmin(t *testing.T) {
 		t.Fatalf("get: %d %q %s", w.Code, w.Header().Get("Cache-Control"), w.Body)
 	}
 
+	// QA-08: cambiar el respaldo pide reautenticarse.
+	if w := f.do("super", "PUT", "/api/admin/backups/settings", `{"time":"04:00"}`); w.Code != http.StatusUnauthorized ||
+		!strings.Contains(w.Body.String(), "reauth_required") {
+		t.Errorf("put without reauth: %d %s", w.Code, w.Body)
+	}
+	f.reauth(t, "super")
 	for _, body := range []string{`{"time":"25:00"}`, `{"time":"3:00"}`, `{"keep_daily":0}`, `{"keep_monthly":-1}`,
 		`{"remote":{"endpoint":"https://s3 .acme.cl"}}`, `{"remote":{"endpoint":"ftp://s3.acme.cl","bucket":"kw"}}`} {
 		if w := f.do("super", "PUT", "/api/admin/backups/settings", body); w.Code != http.StatusUnprocessableEntity {

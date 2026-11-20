@@ -198,7 +198,11 @@ func (s *Service) Create(ctx context.Context, sc repo.Scope, actorID, session, s
 	if err != nil {
 		return "", err
 	}
-	byPassword, err := crypto.Seal(crypto.PasswordKEK(password, salt), dek, keyAAD(id, "password"))
+	kek, err := crypto.PasswordKEK(ctx, password, salt)
+	if err != nil {
+		return "", err
+	}
+	byPassword, err := crypto.Seal(kek, dek, keyAAD(id, "password"))
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +255,12 @@ func (s *Service) UnlockPassword(ctx context.Context, u repo.User, session, id, 
 	} else if err != nil {
 		return err
 	}
-	dek, err := crypto.Open(crypto.PasswordKEK(password, k.Salt), k.Wrapped, keyAAD(id, "password"))
+	kek, err := crypto.PasswordKEK(ctx, password, k.Salt)
+	if err != nil {
+		s.giveBack(key) // no se probó ninguna contraseña: no gasta un intento ni es un fallo
+		return err
+	}
+	dek, err := crypto.Open(kek, k.Wrapped, keyAAD(id, "password"))
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{Action: audit.SealedUnlockFailed, WsID: d.WsID, TargetType: "sealed", TargetID: id})
 		return ErrWrongPassword
@@ -286,7 +295,11 @@ func (s *Service) SetPassword(ctx context.Context, u repo.User, session, id, pas
 	if err != nil {
 		return err
 	}
-	wrapped, err := crypto.Seal(crypto.PasswordKEK(password, salt), dek, keyAAD(id, "password"))
+	kek, err := crypto.PasswordKEK(ctx, password, salt)
+	if err != nil {
+		return err
+	}
+	wrapped, err := crypto.Seal(kek, dek, keyAAD(id, "password"))
 	if err != nil {
 		return err
 	}
@@ -451,7 +464,11 @@ func (s *Service) UnlockVault(ctx context.Context, u repo.User, session, id, vau
 	if err != nil {
 		return err
 	}
-	dek, err := crypto.OpenWithVault(vaultKey, v.Salt, v.PrivEnc, vaultAAD(u.ID), v.Pub, k.Wrapped)
+	dek, err := crypto.OpenWithVault(ctx, vaultKey, v.Salt, v.PrivEnc, vaultAAD(u.ID), v.Pub, k.Wrapped)
+	if err != nil && !errors.Is(err, crypto.ErrOpen) {
+		s.giveBack(key) // el tope de Argon2 lleno o el pedido cancelado: no se probó la clave
+		return err
+	}
 	if err != nil {
 		s.audit.Record(ctx, audit.Event{Action: audit.SealedUnlockFailed, WsID: d.WsID, TargetType: "sealed", TargetID: id, Meta: map[string]any{"by": "vault"}})
 		return ErrWrongVaultKey
@@ -555,7 +572,7 @@ func (s *Service) SetVault(ctx context.Context, u repo.User, vaultKey string) (i
 	} else if n > maxPassword {
 		return 0, ErrInvalid
 	}
-	pub, priv, salt, err := crypto.NewVault(vaultKey, vaultAAD(u.ID))
+	pub, priv, salt, err := crypto.NewVault(ctx, vaultKey, vaultAAD(u.ID))
 	if err != nil {
 		return 0, err
 	}
@@ -695,7 +712,11 @@ func (s *Service) CompleteReset(ctx context.Context, u repo.User, session, id, p
 	if err != nil {
 		return err
 	}
-	wrapped, err := crypto.Seal(crypto.PasswordKEK(password, salt), dek, keyAAD(id, "password"))
+	kek, err := crypto.PasswordKEK(ctx, password, salt)
+	if err != nil {
+		return err
+	}
+	wrapped, err := crypto.Seal(kek, dek, keyAAD(id, "password"))
 	if err != nil {
 		return err
 	}
@@ -786,6 +807,15 @@ func (s *Service) allow(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
+	// Barrido perezoso, como el del login: solo se borraba al acertar, y los fallos de cada
+	// documento y persona quedaban para siempre en memoria (QA-14).
+	if len(s.attempts) > 10_000 {
+		for k, a := range s.attempts {
+			if now.Sub(a.since) >= attemptWindow {
+				delete(s.attempts, k)
+			}
+		}
+	}
 	a := s.attempts[key]
 	if now.Sub(a.since) >= attemptWindow {
 		a = attempt{since: now}
@@ -796,6 +826,16 @@ func (s *Service) allow(key string) error {
 	a.count++
 	s.attempts[key] = a
 	return nil
+}
+
+// giveBack devuelve el intento que allow descontó cuando no se llegó a probar nada.
+func (s *Service) giveBack(key string) {
+	s.mu.Lock()
+	if a, ok := s.attempts[key]; ok && a.count > 0 {
+		a.count--
+		s.attempts[key] = a
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) forget(key string) {

@@ -24,6 +24,7 @@ import (
 	"github.com/athomo001/kudawiki/internal/auth"
 	"github.com/athomo001/kudawiki/internal/backups"
 	"github.com/athomo001/kudawiki/internal/branding"
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"github.com/athomo001/kudawiki/internal/health"
 	"github.com/athomo001/kudawiki/internal/jobs"
 	"github.com/athomo001/kudawiki/internal/ldap"
@@ -53,6 +54,9 @@ type authService interface {
 	// Segundo factor (§8.1).
 	VerifyLogin(ctx context.Context, challenge, code string) (string, error)
 	NeedsMFASetup(ctx context.Context, u repo.User) (bool, error)
+	// El mínimo de las contraseñas locales (§8.1).
+	PasswordMin(ctx context.Context) (int, error)
+	SetPasswordMin(ctx context.Context, actorID string, n int) error
 	TOTPStatus(ctx context.Context, u repo.User) (auth.TOTPStatus, error)
 	BeginTOTP(ctx context.Context, u repo.User, issuer string) (auth.TOTPSetup, error)
 	ConfirmTOTP(ctx context.Context, u repo.User, sessionToken, code string, revokeOthers bool) ([]string, error)
@@ -189,10 +193,10 @@ type shareService interface {
 
 type mediaService interface {
 	Upload(ctx context.Context, sc repo.Scope, actorID, filename string, body io.Reader) (repo.Media, error)
-	Open(ctx context.Context, sc repo.Scope, id string, thumb bool) (repo.Media, *os.File, error)
+	Open(ctx context.Context, sc repo.Scope, viewerID, id string, thumb bool) (repo.Media, *os.File, error)
 	OpenShared(ctx context.Context, sc repo.Scope, shareID, id string, thumb bool) (repo.Media, *os.File, error)
-	List(ctx context.Context, sc repo.Scope, q string) ([]repo.MediaItem, error)
-	Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.PageRef, error)
+	List(ctx context.Context, sc repo.Scope, viewerID, q string) ([]repo.MediaItem, error)
+	Delete(ctx context.Context, sc repo.Scope, viewerID, id string) ([]repo.PageRef, error)
 }
 
 // personalService es el espacio personal (§7).
@@ -554,7 +558,12 @@ func (a api) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/reset" || r.URL.Path == "/invite" || r.URL.Path == "/unsubscribe" {
 		h.Set("Referrer-Policy", "no-referrer") // las páginas que abren un enlace con token (§8.5.1, §12.1)
 	}
-	page = brandPage(page, site, loginOptions{PasswordReset: a.Auth.ResetAvailable(r.Context()), Passkeys: a.Auth.PasskeysAvailable(), Directory: a.LDAP.Available(r.Context()),
+	passwordMin, err := a.Auth.PasswordMin(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	page = brandPage(page, site, loginOptions{PasswordMin: passwordMin, PasswordReset: a.Auth.ResetAvailable(r.Context()), Passkeys: a.Auth.PasskeysAvailable(), Directory: a.LDAP.Available(r.Context()),
 		PasswordHelpURL: a.LDAP.PasswordHelpURL(r.Context())}, nonce)
 	w.Write(bytes.Replace(page, []byte("<head>"), []byte(`<head><meta name="csp-nonce" content="`+nonce+`">`), 1))
 }
@@ -601,6 +610,7 @@ var domainErrors = map[error]int{
 	workspace.ErrManagedByDirectory:   http.StatusConflict,
 	auth.ErrPasswordTooShort:          http.StatusUnprocessableEntity,
 	auth.ErrPasswordCommon:            http.StatusUnprocessableEntity,
+	auth.ErrInvalidPasswordMin:        http.StatusUnprocessableEntity,
 	auth.ErrInvalidUser:               http.StatusUnprocessableEntity,
 	auth.ErrEmailTaken:                http.StatusConflict,
 	auth.ErrInvalidInvite:             http.StatusGone,
@@ -710,6 +720,8 @@ var domainErrors = map[error]int{
 	backups.ErrBusy:                   http.StatusConflict,
 	backups.ErrConfirm:                http.StatusUnprocessableEntity,
 	backups.ErrProtected:              http.StatusConflict,
+	// El tope de Argon2id siguió lleno (QA-03, QA-04): reintentar en un momento.
+	crypto.ErrBusy: http.StatusTooManyRequests,
 }
 
 // fail traduce un error de dominio a su respuesta; cualquier otro es un 500.

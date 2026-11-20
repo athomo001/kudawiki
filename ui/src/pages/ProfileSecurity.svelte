@@ -91,7 +91,7 @@
 
 <PageHead context={`${t('profile.title')} · ${t('profile.group_security')}`} title={t('profile.nav_security')} description={t('profile.security_desc')} />
 
-<Setting title={t('profile.password')} description={me.auth_source === 'ldap' ? t('profile.password_directory') : t('profile.password_hint')}>
+<Setting title={t('profile.password')} description={me.auth_source === 'ldap' ? t('profile.password_directory') : t('profile.password_hint', { n: String(site.password_min) })}>
   {#if me.auth_source === 'ldap'}
     {#if site.password_help_url}
       <p><a href={site.password_help_url} rel="noopener noreferrer" target="_blank">{t('auth.password_help')}</a></p>
@@ -109,7 +109,7 @@
       <div class="field-pair">
         <label class="field">
           {t('profile.password_new')}
-          <input type="password" autocomplete="new-password" required bind:value={next} />
+          <input type="password" autocomplete="new-password" required minlength={site.password_min} bind:value={next} />
         </label>
         <label class="field">
           {t('auth.password_repeat')}

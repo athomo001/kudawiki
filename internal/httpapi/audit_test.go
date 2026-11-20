@@ -88,7 +88,8 @@ func TestAuditViews(t *testing.T) {
 }
 
 // §11.2: el login es público; los fallos no inundan la auditoría. Por persona e IP va el
-// primero de la ventana y el bloqueo; contra un email que no existe, nada.
+// primero de la serie y cada bloqueo (los intentos durante la espera, no); contra un email que
+// no existe, nada.
 func TestFailedLoginsDoNotFloodTheAudit(t *testing.T) {
 	f := newFixture(t)
 	for range 10 {

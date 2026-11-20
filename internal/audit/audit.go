@@ -127,6 +127,8 @@ var (
 	// Correo (§12).
 	SiteSMTPUpdate = Action{"site.smtp_update"}
 	SMTPTestSend   = Action{"smtp.test_send"}
+	// El mínimo de las contraseñas locales (§8.1, QA-06).
+	SitePasswordPolicyUpdate = Action{"site.password_policy_update"}
 	// Directorio LDAP / AD (§8.6). La configuración guarda qué claves cambiaron, nunca sus valores.
 	LDAPConfigUpdate = Action{"ldap.config_update"}
 	LDAPTest         = Action{"ldap.test"}
@@ -221,7 +223,7 @@ var All = []Action{
 	QuizCreate, QuizUpdate, QuizPublish, QuizArchive, QuizDelete, QuizAttemptStart, QuizAttemptSubmit, QuizAttemptTimeout,
 	QuizExtraAttemptsGrant, QuizResultsExport,
 	CLIUnlock, CLISetPassword, CLICreateSuperadmin, CLIRevokeSessions,
-	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SMTPTestSend, LDAPConfigUpdate, LDAPTest,
+	SiteBrandingUpdate, SiteAssetUpload, SiteAssetDelete, SiteSMTPUpdate, SitePasswordPolicyUpdate, SMTPTestSend, LDAPConfigUpdate, LDAPTest,
 	LDAPMappingCreate, LDAPMappingUpdate, LDAPMappingDelete,
 	LDAPAccountLink, LDAPMembershipDetach, LDAPSyncStart, LDAPSyncDone, LDAPSyncAborted, UserDeactivatedByLDAP,
 	AuthPasswordResetRequest, AuthPasswordResetComplete,

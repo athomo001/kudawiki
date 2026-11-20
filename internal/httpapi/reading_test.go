@@ -130,6 +130,11 @@ func TestReadRequests(t *testing.T) {
 	if !strings.HasPrefix(csv, "name,email,role,status") || !strings.Contains(csv, "viewerTI@empresa.cl,viewer,confirmed") {
 		t.Errorf("csv: %s", csv)
 	}
+	// QA-05: un nombre que una planilla tomaría por fórmula sale como texto.
+	f.expect(t, "viewerTI", "PATCH", "/api/me", `{"full_name":"=HYPERLINK(\"https://x.test\",\"ver\")"}`, http.StatusNoContent)
+	if csv := f.expect(t, "editorTI", "GET", "/api/w/ti/read-requests/"+byEditor+"?format=csv", "", http.StatusOK); !strings.Contains(csv, `"'=HYPERLINK(`) {
+		t.Errorf("a formula in the name reached the csv as is: %s", csv)
+	}
 
 	// Avisos: la solicitud nueva y, cerca del plazo, el recordatorio a quien no confirmó.
 	f.db.Write.Exec(`UPDATE read_requests SET due_at = datetime('now', '+1 day'), notified_at = datetime('now', '-3 days') WHERE id = ?`, byAdmin)

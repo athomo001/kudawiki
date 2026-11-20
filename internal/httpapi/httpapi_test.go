@@ -86,7 +86,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 	store := repo.New(db)
 	rec := audit.NewRecorder(store, time.Now, slog.New(slog.DiscardHandler))
 	quizzes := quiz.NewService(store, rec, time.Now)
-	svc, err := auth.NewService(store, rec, time.Now, false)
+	svc, err := auth.NewService(store, rec, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func newFixture(t *testing.T, limit ...middleware.Limit) fixture {
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><head><!-- kw:brand --><title>Kudawiki</title><!-- /kw:brand --></head>app")}},
 		BaseURL: base, TrashRetention: 30 * 24 * time.Hour, RateLimit: append(limit, unlimited)[0], Log: slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelError}))})
 
-	hash, _ := auth.HashPassword(password)
+	hash, _ := auth.HashPassword(context.Background(), password)
 	users := map[string]string{}
 	for _, name := range []string{"super", "adminTI", "editorTI", "viewerTI", "adminFin", "outsider"} {
 		id := ulid.Make().String()

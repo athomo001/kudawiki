@@ -12,6 +12,7 @@ export type Site = {
   passkeys: boolean; // el login ofrece "Entrar con una passkey" (§8.1): base_url las admite
   directory: boolean; // el login acepta un usuario del directorio, no solo un correo (§8.6.2)
   password_help_url: string; // la página de la empresa para la contraseña del directorio (§8.6.3)
+  password_min: number; // mínimo de caracteres de una contraseña local nueva, que fija el superadmin (§8.1)
 };
 
 const fallback: Site = {
@@ -26,6 +27,7 @@ const fallback: Site = {
   passkeys: false,
   directory: false,
   password_help_url: '',
+  password_min: 10,
 };
 
 function embedded(): Site {

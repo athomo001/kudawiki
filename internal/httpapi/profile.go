@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -107,13 +108,16 @@ func (a api) uploadedFile(w http.ResponseWriter, r *http.Request, max int64) ([]
 	}
 }
 
-// rateLimited responde 429 con Retry-After si el error es un tope de intentos (§8.2).
+// rateLimited responde 429 con Retry-After si el error es un tope de intentos (§8.2). Los
+// segundos van también en el cuerpo (retry_after): la pantalla de login muestra cuánto falta.
 func (a api) rateLimited(w http.ResponseWriter, r *http.Request, err error) bool {
 	var limited auth.RateLimitedError
 	if !errors.As(err, &limited) {
 		return false
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(limited.RetryAfter.Seconds())+1))
-	a.error(w, r, http.StatusTooManyRequests, "rate_limited", nil)
+	secs := int(math.Ceil(limited.RetryAfter.Seconds()))
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	a.json(w, http.StatusTooManyRequests, map[string]any{"error": map[string]any{
+		"code": "rate_limited", "message": http.StatusText(http.StatusTooManyRequests), "retry_after": secs}})
 	return true
 }

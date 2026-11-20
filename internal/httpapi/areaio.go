@@ -36,7 +36,7 @@ func (a api) exportArea(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="kudawiki-`+ws.Slug+`.zip"`)
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.AreaIO.Export(r.Context(), sc, ws, w); err != nil {
+	if err := a.AreaIO.Export(r.Context(), sc, ws, streaming(w)); err != nil { // QA-02
 		// La respuesta ya empezó: queda en el log y el ZIP llega cortado (no abre).
 		a.Log.Error("export area", "ws", sc.WsID, "err", err)
 	}
@@ -59,7 +59,7 @@ func (a api) exportMyAreas(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="kudawiki-mis-areas.zip"`)
 	w.Header().Set("Cache-Control", "no-store")
-	zw := zip.NewWriter(w)
+	zw := zip.NewWriter(streaming(w)) // QA-02
 	for _, m := range ms {
 		// Cada ZIP ya viene comprimido: se guarda tal cual.
 		f, err := zw.CreateHeader(&zip.FileHeader{Name: m.Slug + ".zip", Method: zip.Store, Modified: time.Now()})
@@ -80,6 +80,7 @@ func (a api) exportMyAreas(w http.ResponseWriter, r *http.Request) {
 // importArea recibe el ZIP como el campo "file". Con ?dry_run=1 no crea nada: devuelve el informe
 // de lo que haría, que la interfaz muestra antes de confirmar.
 func (a api) importArea(w http.ResponseWriter, r *http.Request) {
+	streamingBody(w, r) // puede tardar más que ReadTimeout (QA-02)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)

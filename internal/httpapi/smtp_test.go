@@ -32,6 +32,12 @@ func TestSMTPAdmin(t *testing.T) {
 	if w := f.do("super", "POST", "/api/admin/smtp/test", ""); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "smtp_not_configured") {
 		t.Errorf("test without SMTP: %d %s", w.Code, w.Body)
 	}
+	// QA-08: cambiar el servidor pide reautenticarse.
+	if w := f.do("super", "PUT", "/api/admin/smtp", `{"host":"smtp.acme.cl"}`); w.Code != http.StatusUnauthorized ||
+		!strings.Contains(w.Body.String(), "reauth_required") {
+		t.Errorf("put without reauth: %d %s", w.Code, w.Body)
+	}
+	f.reauth(t, "super")
 	if w := f.do("super", "PUT", "/api/admin/smtp", `{"port":99999}`); w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("bad port: %d %s", w.Code, w.Body)
 	}

@@ -168,7 +168,7 @@ func (s *Service) sendReset(ctx context.Context, u repo.User, actorID, ip string
 // a la persona y, si es superadmin, a los demás (§8.5.1, §8.5.3). No inicia sesión: se entra con
 // la contraseña nueva. El 2FA, cuando llegue (F6), no se toca.
 func (s *Service) CompletePasswordReset(ctx context.Context, token, password string) error {
-	if err := CheckPolicy(password, s.relaxed); err != nil {
+	if err := s.checkPolicy(ctx, password); err != nil {
 		return err
 	}
 	id, err := s.store.ResetTokenUser(ctx, hashToken(token), s.now())
@@ -182,12 +182,12 @@ func (s *Service) CompletePasswordReset(ctx context.Context, token, password str
 	if err != nil {
 		return err
 	}
-	if same, err := VerifyPassword(u.PasswordHash, password); err != nil {
+	if same, err := VerifyPassword(ctx, u.PasswordHash, password); err != nil {
 		return err
 	} else if same {
 		return ErrSamePassword
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return err
 	}

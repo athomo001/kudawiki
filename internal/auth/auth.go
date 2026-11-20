@@ -27,7 +27,9 @@ const (
 	SessionAbsolute = sessionAbsolute
 	touchEvery      = time.Minute // no escribir en cada request: hay un solo escritor (§13.4)
 
-	loginMaxAttempts = 10 // SPEC §8.2: 10 intentos / 15 min por IP+email
+	// El segundo paso, la reautenticación y el cambio de contraseña: 10 intentos / 15 min por
+	// persona (§8.1, §8.2). El login con contraseña tiene su bloqueo escalonado (lockout.go).
+	loginMaxAttempts = 10
 	loginWindow      = 15 * time.Minute
 )
 
@@ -62,6 +64,9 @@ type store interface {
 	CompleteReset(ctx context.Context, tokenHash string, now time.Time, passwordHash string) (string, error)
 	ListUsers(ctx context.Context) ([]repo.User, error)
 	SetPreferences(ctx context.Context, userID, locale string, prefs repo.ReadingPrefs, editorMode string) error
+	// El mínimo de las contraseñas locales, que fija el superadmin (§8.1).
+	SiteSettings(ctx context.Context, prefix string) (map[string]string, error)
+	SetSiteSettings(ctx context.Context, values map[string]*string, by string) error
 	// Recuperación por consola (SPEC §13.6).
 	DeleteSessions(ctx context.Context, userID string) (int64, error)
 	SetPassword(ctx context.Context, userID, passwordHash string) error
@@ -95,7 +100,6 @@ type Service struct {
 	audit     *audit.Recorder
 	now       func() time.Time
 	dummyHash string // se verifica contra él cuando el email no existe, para no revelarlo por el tiempo
-	relaxed   bool   // política de contraseñas de desarrollo (SPEC §8.1)
 	email     Email  // el correo de §8.5; vacío en la consola
 	resetTTL  time.Duration
 	inviteTTL time.Duration
@@ -110,6 +114,7 @@ type Service struct {
 
 	mu         sync.Mutex
 	attempts   map[string]attempt
+	lockouts   map[string]lockout      // el login con contraseña, por IP + correo (§8.2)
 	challenges map[string]mfaChallenge // por hash del token: el segundo paso del login (§8.1)
 	ceremonies map[string]ceremony     // registros y verificaciones de passkeys empezados
 }
@@ -133,22 +138,22 @@ type attempt struct {
 	window time.Duration
 }
 
-func NewService(s store, rec *audit.Recorder, now func() time.Time, relaxedPolicy bool) (*Service, error) {
-	dummy, err := HashPassword("kudawiki-timing-equalizer")
+func NewService(s store, rec *audit.Recorder, now func() time.Time) (*Service, error) {
+	dummy, err := HashPassword(context.Background(), "kudawiki-timing-equalizer")
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, relaxed: relaxedPolicy, attempts: map[string]attempt{},
+	return &Service{store: s, audit: rec, now: now, dummyHash: dummy, attempts: map[string]attempt{}, lockouts: map[string]lockout{},
 		challenges: map[string]mfaChallenge{}, ceremonies: map[string]ceremony{},
 		resetTTL: defaultResetTTL, inviteTTL: defaultInviteTTL, async: func(f func()) { go f() }}, nil
 }
 
 // CreateSuperadmin es el único alta de usuarios de F1: la usa `kudawiki init` (SPEC §13.6).
 func (s *Service) CreateSuperadmin(ctx context.Context, email, fullName, password string) error {
-	if err := CheckPolicy(password, s.relaxed); err != nil {
+	if err := s.checkPolicy(ctx, password); err != nil {
 		return err
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return err
 	}
@@ -165,7 +170,7 @@ func (s *Service) CreateSuperadmin(ctx context.Context, email, fullName, passwor
 // cualquiera podría bloquear cuentas de la empresa a través de la wiki.
 func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginResult, error) {
 	key := ip + "|" + strings.ToLower(strings.TrimSpace(email))
-	n, err := s.allow(key)
+	n, wait, err := s.tryLogin(key)
 	if errors.As(err, new(RateLimitedError)) {
 		// El bloqueo vive en la memoria de este proceso y `kudawiki admin unlock` corre en otro:
 		// deja la hora en la BD, y solo se consulta cuando hay bloqueo (SPEC §13.6).
@@ -173,8 +178,8 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 		if uerr != nil {
 			return LoginResult{}, uerr
 		}
-		if s.lift(key, at) {
-			n, err = s.allow(key)
+		if s.liftLogin(key, at) {
+			n, wait, err = s.tryLogin(key)
 		}
 	}
 	if err != nil {
@@ -189,7 +194,7 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 	if hash == "" {
 		hash = s.dummyHash
 	}
-	ok, err := VerifyPassword(hash, password)
+	ok, err := VerifyPassword(ctx, hash, password)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -205,11 +210,15 @@ func (s *Service) Login(ctx context.Context, ip, email, password string) (LoginR
 		}
 	}
 	if !ok {
-		s.auditFailure(ctx, u, n)
+		s.auditFailure(ctx, u, n, wait)
+		if wait > 0 {
+			// El intento que bloquea ya lo dice: la pantalla muestra la espera sin otro intento (§8.2).
+			return LoginResult{}, RateLimitedError{RetryAfter: wait}
+		}
 		return LoginResult{}, ErrInvalidCredentials
 	}
 
-	s.forget(key)
+	s.forgetLogin(key)
 	if u.TOTPEnabled || u.Passkeys > 0 {
 		return s.challenge(u)
 	}
@@ -241,19 +250,19 @@ func (s *Service) forget(key string) {
 }
 
 // auditFailure no registra cada intento: el login es público y cualquiera podría llenar la
-// auditoría (§11.2). Por persona existente e IP se registra el primer fallo de cada ventana de
-// 15 minutos y el bloqueo, con el conteo. Los intentos contra emails que no existen no se registran.
-func (s *Service) auditFailure(ctx context.Context, u repo.User, attempt int) {
+// auditoría (§11.2). Por persona existente e IP se registra el primer fallo de cada serie y cada
+// bloqueo, con el conteo y la espera. Los intentos contra emails que no existen no se registran.
+func (s *Service) auditFailure(ctx context.Context, u repo.User, attempt int, wait time.Duration) {
 	if u.ID == "" {
 		return
 	}
-	e := audit.Event{TargetType: "user", TargetID: u.ID, Actor: actorOf(u),
-		Meta: map[string]any{"attempts": attempt, "window_minutes": int(loginWindow.Minutes())}}
-	switch attempt {
-	case 1:
-		e.Action = audit.AuthLoginFailed
-	case loginMaxAttempts:
+	e := audit.Event{TargetType: "user", TargetID: u.ID, Actor: actorOf(u), Meta: map[string]any{"attempts": attempt}}
+	switch {
+	case wait > 0:
 		e.Action = audit.AuthLockout
+		e.Meta["wait_minutes"] = int(wait.Minutes())
+	case attempt == 1:
+		e.Action = audit.AuthLoginFailed
 	default:
 		return
 	}
@@ -290,18 +299,6 @@ func (s *Service) count(key string, limit int, window time.Duration) (int, error
 	a.count++
 	s.attempts[key] = a
 	return a.count, nil
-}
-
-// lift olvida la ventana de intentos si el desbloqueo por consola es posterior a su inicio.
-func (s *Service) lift(key string, unlockedAt time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	a, ok := s.attempts[key]
-	if !ok || !unlockedAt.After(a.since) {
-		return false
-	}
-	delete(s.attempts, key)
-	return true
 }
 
 // Authenticate valida la sesión y devuelve su usuario. Una sesión vencida se borra al verla.

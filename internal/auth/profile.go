@@ -42,7 +42,7 @@ func (s *Service) SetFullName(ctx context.Context, userID, name string) error {
 // intentos que el login: una sesión robada no sirve para adivinarla. revokeOthers cierra las
 // demás sesiones y deja abierta la de quien la cambia.
 func (s *Service) ChangePassword(ctx context.Context, userID, sessionToken, current, next string, revokeOthers bool) error {
-	if err := CheckPolicy(next, s.relaxed); err != nil {
+	if err := s.checkPolicy(ctx, next); err != nil {
 		return err
 	}
 	key := "password|" + userID
@@ -58,14 +58,14 @@ func (s *Service) ChangePassword(ctx context.Context, userID, sessionToken, curr
 	}
 	ok := false
 	if u.PasswordHash != "" { // invitada sin aceptar: no hay nada que cambiar aquí
-		if ok, err = VerifyPassword(u.PasswordHash, current); err != nil {
+		if ok, err = VerifyPassword(ctx, u.PasswordHash, current); err != nil {
 			return err
 		}
 	}
 	if !ok {
 		return ErrWrongPassword
 	}
-	hash, err := HashPassword(next)
+	hash, err := HashPassword(ctx, next)
 	if err != nil {
 		return err
 	}

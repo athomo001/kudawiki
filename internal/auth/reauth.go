@@ -81,7 +81,7 @@ func (s *Service) checkPassword(ctx context.Context, u repo.User, password strin
 	if u.PasswordHash == "" {
 		return ErrNoLocalPassword
 	}
-	ok, err := VerifyPassword(u.PasswordHash, password)
+	ok, err := VerifyPassword(ctx, u.PasswordHash, password)
 	if err != nil {
 		return err
 	}

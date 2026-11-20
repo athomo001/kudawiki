@@ -50,9 +50,10 @@
   {:else}
     <form onsubmit={submit}>
       <label for="pw">{t('reset.new_password')}</label>
-      <input id="pw" type="password" autocomplete="new-password" required bind:value={password} />
+      <input id="pw" type="password" autocomplete="new-password" required minlength={site.password_min} aria-describedby="pw-hint" bind:value={password} />
+      <small id="pw-hint" class="muted">{t('profile.password_hint', { n: String(site.password_min) })}</small>
       <label for="pw2">{t('auth.password_repeat')}</label>
-      <input id="pw2" type="password" autocomplete="new-password" required bind:value={repeat} />
+      <input id="pw2" type="password" autocomplete="new-password" required minlength={site.password_min} bind:value={repeat} />
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <button type="submit" class="primary" disabled={busy}>{t('reset.submit')}</button>
     </form>

@@ -166,7 +166,7 @@ func brandPage(page []byte, site branding.Site, login loginOptions, nonce string
 		"header_dark": site.Palette.HeaderDark,
 		"logo":        site.Assets["logo"], "logo_dark": site.Assets["logo_dark"],
 		"password_reset": login.PasswordReset, "passkeys": login.Passkeys, "directory": login.Directory,
-		"password_help_url": login.PasswordHelpURL,
+		"password_help_url": login.PasswordHelpURL, "password_min": login.PasswordMin,
 	})
 	tail := `<script type="application/json" id="kw-site">` + string(public) + `</script>`
 	if css := site.Palette.CSS(); css != "" {
@@ -178,9 +178,12 @@ func brandPage(page []byte, site branding.Site, login loginOptions, nonce string
 // loginOptions: "¿Olvidaste tu contraseña?" si hay correo (§8.5.1) y "Entrar con una passkey" si
 // base_url las admite (§8.1); con el directorio activo, el campo acepta un usuario (§8.6.2) y
 // PasswordHelpURL lleva a la página de la empresa para la contraseña del directorio (§8.6.3).
+// PasswordMin es el mínimo vigente que muestran las pantallas que eligen una contraseña (§8.1); va
+// también a la invitación y al restablecimiento, que se abren sin sesión.
 type loginOptions struct {
 	PasswordReset, Passkeys, Directory bool
 	PasswordHelpURL                    string
+	PasswordMin                        int
 }
 
 func brandHead(site branding.Site) string {

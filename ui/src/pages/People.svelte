@@ -7,6 +7,7 @@
   import PageHead from '../components/PageHead.svelte';
   import OffboardDialog from '../components/OffboardDialog.svelte';
   import LinkDirectoryDialog from '../components/LinkDirectoryDialog.svelte';
+  import PasswordPolicy from '../components/PasswordPolicy.svelte';
 
   // Administración → Personas (SPEC §14.2, §15, diseño "Kudawiki — Administración"): una tabla a
   // todo el ancho con cómo entra cada persona, su verificación en dos pasos, sus áreas y su estado.
@@ -333,6 +334,8 @@
     </tbody>
   </table>
 </div>
+
+<PasswordPolicy />
 
 <Dialog title={t('admin.invite')} bind:open={inviting}>
   <form class="stack" onsubmit={sendInvite}>

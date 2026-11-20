@@ -48,8 +48,8 @@ const (
 
 type store interface {
 	CreateMedia(ctx context.Context, s repo.Scope, m repo.Media) error
-	MediaByID(ctx context.Context, s repo.Scope, id string) (repo.Media, error)
-	MediaList(ctx context.Context, s repo.Scope, q string, limit int) ([]repo.MediaItem, error)
+	MediaByID(ctx context.Context, s repo.Scope, viewerID, id string) (repo.Media, error)
+	MediaList(ctx context.Context, s repo.Scope, viewerID, q string, limit int) ([]repo.MediaItem, error)
 	MediaUsedBy(ctx context.Context, s repo.Scope, id string) ([]repo.PageRef, error)
 	TrashMedia(ctx context.Context, s repo.Scope, id string) error
 	SharedMedia(ctx context.Context, s repo.Scope, shareID, mediaID string) (repo.Media, string, error)
@@ -157,9 +157,10 @@ func (s *Service) thumbnail(src, dst string) error {
 	return errors.Join(err, w.Close())
 }
 
-// Open devuelve la media si el Scope la puede ver (si no, repo.ErrNotFound) y su archivo.
-func (s *Service) Open(ctx context.Context, sc repo.Scope, id string, thumb bool) (repo.Media, *os.File, error) {
-	m, err := s.store.MediaByID(ctx, sc, id)
+// Open devuelve la media si el Scope y quien pregunta (viewerID) la pueden ver (si no,
+// repo.ErrNotFound) y su archivo.
+func (s *Service) Open(ctx context.Context, sc repo.Scope, viewerID, id string, thumb bool) (repo.Media, *os.File, error) {
+	m, err := s.store.MediaByID(ctx, sc, viewerID, id)
 	if err != nil {
 		return repo.Media{}, nil, err
 	}
@@ -192,15 +193,15 @@ func (s *Service) OpenShared(ctx context.Context, sc repo.Scope, shareID, id str
 }
 
 // List es el navegador de archivos del área (§4.4): lo que el Scope ve, lo más nuevo primero.
-func (s *Service) List(ctx context.Context, sc repo.Scope, q string) ([]repo.MediaItem, error) {
-	return s.store.MediaList(ctx, sc, strings.TrimSpace(q), listLimit)
+func (s *Service) List(ctx context.Context, sc repo.Scope, viewerID, q string) ([]repo.MediaItem, error) {
+	return s.store.MediaList(ctx, sc, viewerID, strings.TrimSpace(q), listLimit)
 }
 
 // Delete manda el archivo a la papelera (§4.4, §4.5). Si una página que quien borra ve lo usa en
 // su versión actual, no lo borra y devuelve esas páginas con ErrInUse: primero se saca de ahí. Las
 // revisiones viejas que lo mostraban lo verán roto.
-func (s *Service) Delete(ctx context.Context, sc repo.Scope, id string) ([]repo.PageRef, error) {
-	m, err := s.store.MediaByID(ctx, sc, id)
+func (s *Service) Delete(ctx context.Context, sc repo.Scope, viewerID, id string) ([]repo.PageRef, error) {
+	m, err := s.store.MediaByID(ctx, sc, viewerID, id)
 	if err != nil {
 		return nil, err
 	}

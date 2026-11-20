@@ -21,7 +21,6 @@
   import People from './pages/People.svelte';
   import Areas from './pages/Areas.svelte';
   import AdminArea from './pages/AdminArea.svelte';
-  import Templates from './pages/Templates.svelte';
   import Audit from './pages/Audit.svelte';
   import Health from './pages/Health.svelte';
   import AccessReview from './pages/AccessReview.svelte';
@@ -39,6 +38,9 @@
   import Reset from './pages/Reset.svelte';
   import Unsubscribe from './pages/Unsubscribe.svelte';
   import NotFound from './pages/NotFound.svelte';
+
+  // Plantillas trae CodeMirror: se carga al abrirla, no con la wiki (QA-13).
+  const loadTemplates = () => import('./pages/Templates.svelte');
 
   let me = $state<Me | null>(null);
   let ready = $state(false);
@@ -219,7 +221,7 @@
             {:else if route.path === '/admin/backups'}
               <Backups />
             {:else if route.path === '/admin/templates'}
-              <Templates endpoint="/admin/templates" context={site} global />
+              {#await loadTemplates() then { default: Templates }}<Templates endpoint="/admin/templates" context={site} global />{/await}
             {:else if route.path === '/admin/health'}
               <Health endpoint="/admin/health" context={supervision} global />
             {:else if route.path === '/admin/sealed'}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/quiz"
 	"github.com/go-chi/chi/v5"
 )
@@ -201,7 +202,7 @@ func (a api) quizResults(w http.ResponseWriter, r *http.Request) {
 		cw := csv.NewWriter(w)
 		_ = cw.Write([]string{"name", "email", "attempts", "score_percent", "passed", "in_progress", "last_attempt_at", "last_duration_s"})
 		for _, p := range res.People {
-			_ = cw.Write([]string{p.Name, p.Email, strconv.Itoa(p.Attempts), strconv.FormatFloat(p.Percent, 'f', 1, 64),
+			_ = cw.Write([]string{audit.CSVSafe(p.Name), audit.CSVSafe(p.Email), strconv.Itoa(p.Attempts), strconv.FormatFloat(p.Percent, 'f', 1, 64),
 				strconv.FormatBool(p.Passed), strconv.FormatBool(p.InProgress), csvTime(p.LastAt), strconv.Itoa(p.LastDurationS)})
 		}
 		cw.Flush()

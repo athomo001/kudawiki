@@ -2,6 +2,7 @@
   import { api, codeOf } from '../lib/api';
   import { t, errorText } from '../lib/i18n/index.svelte';
   import Brand from '../components/Brand.svelte';
+  import { site } from '../lib/site.svelte';
 
   // El token viaja en el fragmento (#), que nunca llega al servidor; se saca de la barra de
   // direcciones apenas se lee, para que no quede en el historial (SPEC §8.5).
@@ -42,9 +43,10 @@
   {:else}
     <form onsubmit={submit}>
       <label for="pw">{t('auth.password')}</label>
-      <input id="pw" type="password" autocomplete="new-password" required bind:value={password} />
+      <input id="pw" type="password" autocomplete="new-password" required minlength={site.password_min} aria-describedby="pw-hint" bind:value={password} />
+      <small id="pw-hint" class="muted">{t('profile.password_hint', { n: String(site.password_min) })}</small>
       <label for="pw2">{t('auth.password_repeat')}</label>
-      <input id="pw2" type="password" autocomplete="new-password" required bind:value={repeat} />
+      <input id="pw2" type="password" autocomplete="new-password" required minlength={site.password_min} bind:value={repeat} />
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <button type="submit" class="primary" disabled={busy || !token}>{t('invite.submit')}</button>
     </form>

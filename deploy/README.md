@@ -59,7 +59,7 @@ o cada servidor entra con un token de solo lectura (`read:packages`):
 ## 4. Crear la instalación y arrancar
 
 ```sh
-docker compose run --rm init   # crea la base, la llave maestra y el superadmin; pide la contraseña
+docker compose run --rm init   # crea la base, la llave maestra y el superadmin; pide la contraseña (10 caracteres o más)
 docker compose up -d
 docker compose ps              # STATUS tiene que llegar a "healthy"
 docker compose exec kudawiki /kudawiki version

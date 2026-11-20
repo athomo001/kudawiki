@@ -30,7 +30,7 @@ func totpService(t *testing.T) (*Service, *repo.Repo, *clock) {
 	t.Helper()
 	s, r, c := newService(t)
 	s.SetSecondFactor(SecondFactor{Key: crypto.MasterKey{Key: bytes.Repeat([]byte{7}, 32), Version: 1}, Enforce: MFAAdmins})
-	hash, _ := HashPassword(goodPassword)
+	hash, _ := HashPassword(context.Background(), goodPassword)
 	if err := r.CreateUser(context.Background(), repo.User{ID: ulid.Make().String(), Email: "beto@empresa.cl", FullName: "Beto",
 		PasswordHash: hash, IsActive: true, Locale: "es"}); err != nil {
 		t.Fatal(err)

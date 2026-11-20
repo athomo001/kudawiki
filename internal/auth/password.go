@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/athomo001/kudawiki/internal/crypto"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -21,8 +23,6 @@ const (
 	argonThreads = 2
 	argonKeyLen  = 32
 	argonSaltLen = 16
-
-	MinPasswordLength = 10
 )
 
 var (
@@ -39,16 +39,10 @@ var commonPasswordsRaw string
 
 var commonPasswords = strings.Split(strings.TrimSuffix(commonPasswordsRaw, "\n"), "\n")
 
-// CheckPolicy aplica la política de contraseñas locales (SPEC §8.1). relaxed solo vale en una
-// instalación de desarrollo (base_url en localhost): acepta cualquier contraseña no vacía.
-func CheckPolicy(password string, relaxed bool) error {
-	if password == "" {
-		return ErrPasswordTooShort
-	}
-	if relaxed {
-		return nil
-	}
-	if utf8.RuneCountInString(password) < MinPasswordLength {
+// CheckPolicy aplica la política de contraseñas locales (SPEC §8.1) con el mínimo vigente, que
+// nunca es menor que MinPasswordLength. La lista de comunes vale siempre, también en desarrollo.
+func CheckPolicy(password string, minLength int) error {
+	if utf8.RuneCountInString(password) < max(minLength, MinPasswordLength) {
 		return ErrPasswordTooShort
 	}
 	p := strings.ToLower(password)
@@ -58,31 +52,30 @@ func CheckPolicy(password string, relaxed bool) error {
 	return nil
 }
 
-// hashSlots limita los hashes simultáneos: cada uno reserva 64 MiB y sin tope
-// un puñado de logins concurrentes agota la memoria del contenedor.
-var hashSlots = make(chan struct{}, 4)
-
-func derive(password string, salt []byte, t, m uint32, p uint8, keyLen uint32) []byte {
-	hashSlots <- struct{}{}
-	defer func() { <-hashSlots }()
-	return argon2.IDKey([]byte(password), salt, t, m, p, keyLen)
+// derive pasa por el tope de Argon2id del proceso (crypto.Argon2ID), el mismo de los sellados:
+// cada hash reserva 64 MiB, y la espera termina si quien pidió se fue o si tarda demasiado (QA-04).
+func derive(ctx context.Context, password string, salt []byte, t, m uint32, p uint8, keyLen uint32) ([]byte, error) {
+	return crypto.Argon2ID(ctx, []byte(password), salt, t, m, p, keyLen)
 }
 
 // HashPassword devuelve el formato PHC estándar, que guarda los parámetros junto al hash
 // para poder subirlos más adelante sin invalidar los existentes.
-func HashPassword(password string) (string, error) {
+func HashPassword(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
+	key, err := derive(ctx, password, salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	if err != nil {
+		return "", err
+	}
 	enc := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
-		argon2.Version, argonMemory, argonTime, argonThreads,
-		enc.EncodeToString(salt), enc.EncodeToString(derive(password, salt, argonTime, argonMemory, argonThreads, argonKeyLen))), nil
+		argon2.Version, argonMemory, argonTime, argonThreads, enc.EncodeToString(salt), enc.EncodeToString(key)), nil
 }
 
 // VerifyPassword compara en tiempo constante.
-func VerifyPassword(encoded, password string) (bool, error) {
+func VerifyPassword(ctx context.Context, encoded, password string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, errors.New("unsupported password hash")
@@ -103,6 +96,9 @@ func VerifyPassword(encoded, password string) (bool, error) {
 		return false, err
 	}
 	// #nosec G115 -- largo de un hash Argon2id guardado por nosotros (32 bytes)
-	got := derive(password, salt, t, m, p, uint32(len(want)))
+	got, err := derive(ctx, password, salt, t, m, p, uint32(len(want)))
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

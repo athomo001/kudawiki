@@ -27,7 +27,9 @@ type backupsService interface {
 
 func (a api) backupAdminRoutes(r chi.Router) {
 	r.With(noStore).Get("/backups", a.getBackups)
-	r.Put("/backups/settings", a.putBackupSettings)
+	// Cambiar el respaldo pide reautenticarse (QA-08), como borrar uno: bajar la retención borra
+	// respaldos, y cambiar el destino S3 manda las copias a otro lado.
+	r.With(a.requireReauth).Put("/backups/settings", a.putBackupSettings)
 	r.Post("/backups", a.runBackup)
 	// Borrar un respaldo quita una vuelta atrás: pide reautenticarse, como borrar todo.
 	r.With(a.requireReauth).Delete("/backups/{name}", a.deleteBackup)
@@ -99,7 +101,8 @@ func (a api) downloadBackup(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+e.Name+`"`) // el nombre ya es nuestro: sin comillas ni rutas
-	http.ServeContent(w, r, e.Name, e.CreatedAt, f)
+	// Un respaldo grande tarda más que WriteTimeout en bajar (QA-02).
+	http.ServeContent(streaming(w), r, e.Name, e.CreatedAt, f)
 }
 
 // resetSite deja solo la cuenta de quien lo pide: nunca otra, para que nadie quede afuera de su

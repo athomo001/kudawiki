@@ -34,6 +34,8 @@ func TestPasswordResetAPI(t *testing.T) {
 	}
 
 	// Un servidor configurado (no hace falta que conteste: la cola guarda el correo y reintenta).
+	// Cambiar el correo pide reautenticarse (QA-08).
+	f.reauth(t, "super")
 	if w := f.do("super", "PUT", "/api/admin/smtp", `{"host":"127.0.0.1","port":1,"security":"none","from":"wiki@empresa.cl"}`); w.Code != http.StatusOK {
 		t.Fatalf("smtp: %d %s", w.Code, w.Body)
 	}

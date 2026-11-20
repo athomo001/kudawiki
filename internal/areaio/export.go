@@ -30,7 +30,7 @@ type exportStore interface {
 
 // opener abre el archivo de una media, con el mismo control de nivel que al servirla.
 type opener interface {
-	Open(ctx context.Context, sc repo.Scope, id string, thumb bool) (repo.Media, *os.File, error)
+	Open(ctx context.Context, sc repo.Scope, viewerID, id string, thumb bool) (repo.Media, *os.File, error)
 }
 
 // FrontMatter es la cabecera de cada .md. Los mismos campos se leen al importar.
@@ -73,7 +73,9 @@ func Export(ctx context.Context, st exportStore, files opener, sc repo.Scope, ar
 	names := map[string]string{} // id → ruta dentro del ZIP
 	for _, md := range media {
 		name := "media/" + md.ID + "-" + safeName(md.Filename)
-		_, f, err := files.Open(ctx, sc, md.ID, false)
+		// ExportMedia solo trae media con página, que se ve por el nivel de la página: quién
+		// pregunta solo importa para la que no tiene (QA-12), y esa no se exporta.
+		_, f, err := files.Open(ctx, sc, "", md.ID, false)
 		if err != nil {
 			continue // borrada mientras tanto: la salud del área lo muestra
 		}

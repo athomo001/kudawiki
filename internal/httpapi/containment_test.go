@@ -494,6 +494,8 @@ func TestEveryRouteIsInTheMatrix(t *testing.T) {
 		"GET /metrics",
 		"POST /api/auth/login", "POST /api/auth/invite/accept", "POST /api/auth/logout", "GET /api/auth/me", "PATCH /api/me",
 		"POST /api/me/password", "GET /api/me/avatar", "PUT /api/me/avatar", "DELETE /api/me/avatar",
+		// Mínimo de las contraseñas (QA-06), del superadmin: TestPasswordPolicy.
+		"GET /api/admin/password-policy", "PUT /api/admin/password-policy",
 		"GET /api/admin/users", "POST /api/admin/users", "GET /api/admin/health", "POST /api/admin/users/{id}/invite", "GET /api/admin/workspaces", "POST /api/admin/workspaces", "PATCH /api/admin/workspaces/{id}",
 		"GET /api/admin/workspaces/{id}/members/", "POST /api/admin/workspaces/{id}/members/",
 		"DELETE /api/admin/workspaces/{id}/members/{user_id}",

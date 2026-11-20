@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/athomo001/kudawiki/internal/audit"
 	"github.com/athomo001/kudawiki/internal/reading"
 	"github.com/athomo001/kudawiki/internal/repo"
 	"github.com/go-chi/chi/v5"
@@ -115,7 +116,7 @@ func (a api) readRequest(w http.ResponseWriter, r *http.Request) {
 		_ = cw.Write([]string{"name", "email", "role", "status", "first_opened_at", "last_opened_at", "opens", "confirmed_at", "confirmed_revision",
 			"attempts", "best_percent"})
 		for _, p := range d.People {
-			_ = cw.Write([]string{p.Name, p.Email, p.Role, p.Status, csvTime(p.FirstOpen), csvTime(p.LastOpen), strconv.Itoa(p.Opens),
+			_ = cw.Write([]string{audit.CSVSafe(p.Name), audit.CSVSafe(p.Email), p.Role, p.Status, csvTime(p.FirstOpen), csvTime(p.LastOpen), strconv.Itoa(p.Opens),
 				csvTime(p.AckAt), strconv.Itoa(p.AckRevision), strconv.Itoa(p.Quiz.Used), strconv.FormatFloat(p.Quiz.BestPercent, 'f', 1, 64)})
 		}
 		cw.Flush()

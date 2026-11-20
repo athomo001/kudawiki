@@ -29,6 +29,8 @@ func (a api) adminRoutes(r chi.Router) {
 	r.Patch("/users/{id}", a.patchUser)
 	r.Post("/users/{id}/invite", a.resendInvite)
 	r.Post("/users/{id}/password-reset", a.adminPasswordReset)
+	r.Get("/password-policy", a.getPasswordPolicy)
+	r.Put("/password-policy", a.putPasswordPolicy)
 	a.offboardingRoutes(r)
 	r.Get("/workspaces", a.listWorkspaces)
 	r.Post("/workspaces", a.createWorkspace)

@@ -239,9 +239,6 @@ func runInit(ctx context.Context, cfg config.Config, email, name string) error {
 	if err := backup.GenerateKey(cfg.Backup.KeyFile); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	if cfg.IsLocal() {
-		fmt.Println("warning: base_url is localhost, so the password policy was relaxed (development only)")
-	}
 	fmt.Println("kudawiki initialized; back up the master key separately from the data:", cfg.MasterKeyFile)
 	fmt.Println("and the backup key, without which the offsite copies cannot be read:", cfg.Backup.KeyFile)
 	return nil
@@ -257,7 +254,7 @@ func initDB(ctx context.Context, cfg config.Config, email, name, password string
 		return err
 	}
 	// El alta del primer superadmin es de la consola, no de una persona en la wiki: no se audita.
-	svc, err := auth.NewService(repo.New(db), audit.NewRecorder(repo.New(db), time.Now, slog.Default()), time.Now, cfg.IsLocal())
+	svc, err := auth.NewService(repo.New(db), audit.NewRecorder(repo.New(db), time.Now, slog.Default()), time.Now)
 	if err != nil {
 		return err
 	}
@@ -351,7 +348,7 @@ func runServe(ctx context.Context, cfg config.Config, insecureHTTP bool) error {
 		rec.Record(ctx, audit.Event{Action: audit.BackupRun, TargetType: "backup", TargetID: filepath.Base(preMigrate), System: "pre_migrate",
 			Meta: map[string]any{"kind": string(backup.PreMigrate)}})
 	}
-	svc, err := auth.NewService(store, rec, time.Now, cfg.IsLocal())
+	svc, err := auth.NewService(store, rec, time.Now)
 	if err != nil {
 		return err
 	}
@@ -1043,7 +1040,7 @@ func runAdmin(ctx context.Context, cfg config.Config, args []string) error {
 		return errors.New("the database has pending migrations: start the server once to apply them")
 	}
 	store := repo.New(db)
-	svc, err := auth.NewService(store, audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil))), time.Now, cfg.IsLocal())
+	svc, err := auth.NewService(store, audit.NewRecorder(store, time.Now, slog.New(slog.NewTextHandler(os.Stderr, nil))), time.Now)
 	if err != nil {
 		return err
 	}
@@ -1098,10 +1095,9 @@ func consoleError(err error, cfg config.Config) error {
 		return errors.New("that email already has an account: use `kudawiki admin set-password`")
 	case errors.Is(err, auth.ErrInvalidUser):
 		return errors.New("a valid email and a name are required")
-	case errors.Is(err, auth.ErrPasswordTooShort) && cfg.IsLocal():
-		return errors.New("password rejected: it cannot be empty")
 	case errors.Is(err, auth.ErrPasswordTooShort):
-		return fmt.Errorf("password rejected: it must have at least %d characters", auth.MinPasswordLength)
+		// El mínimo puede ser mayor si el superadmin lo subió desde el panel (§8.1).
+		return fmt.Errorf("password rejected: it is shorter than the site minimum (%d characters or more)", auth.MinPasswordLength)
 	case errors.Is(err, auth.ErrPasswordCommon):
 		return errors.New("password rejected: it is in the list of common passwords, choose another")
 	}

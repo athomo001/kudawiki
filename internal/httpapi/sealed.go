@@ -362,6 +362,7 @@ func (a api) allSealed(w http.ResponseWriter, r *http.Request) {
 // uploadSealedFile adjunta un archivo a un sellado abierto con permiso de edición (F7.6). Responde
 // la dirección para el Markdown, que solo sirve con el documento abierto.
 func (a api) uploadSealedFile(w http.ResponseWriter, r *http.Request) {
+	streamingBody(w, r) // puede tardar más que ReadTimeout (QA-02)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)

@@ -13,7 +13,9 @@ import (
 
 func (a api) smtpAdminRoutes(r chi.Router) {
 	r.Get("/smtp", a.getSMTP)
-	r.Put("/smtp", a.putSMTP)
+	// Cambiar el servidor pide reautenticarse (QA-08): con una sesión robada alguien apuntaría el
+	// correo a un servidor suyo y recibiría los enlaces para restablecer cualquier contraseña local.
+	r.With(a.requireReauth).Put("/smtp", a.putSMTP)
 	r.Post("/smtp/test", a.testSMTP)
 }
 

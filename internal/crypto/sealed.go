@@ -1,9 +1,9 @@
 package crypto
 
 import (
+	"context"
 	"crypto/rand"
 
-	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -31,9 +31,10 @@ func NewDEK() ([]byte, error) { return random(DEKSize) }
 // NewSalt es la sal de una contraseña de documento.
 func NewSalt() ([]byte, error) { return random(SaltSize) }
 
-// PasswordKEK deriva de la contraseña del documento la llave que envuelve su DEK.
-func PasswordKEK(password string, salt []byte) []byte {
-	return argon2.IDKey([]byte(password), salt, kdfTime, kdfMemory, kdfThreads, DEKSize)
+// PasswordKEK deriva de la contraseña del documento la llave que envuelve su DEK. Pasa por el
+// tope de Argon2ID: sin él, unos pocos desbloqueos a la vez agotaban la memoria (QA-03).
+func PasswordKEK(ctx context.Context, password string, salt []byte) ([]byte, error) {
+	return Argon2ID(ctx, []byte(password), salt, kdfTime, kdfMemory, kdfThreads, DEKSize)
 }
 
 func random(n int) ([]byte, error) {
@@ -50,7 +51,7 @@ func random(n int) ([]byte, error) {
 
 // NewVault crea el par de claves y devuelve la pública y la privada cifrada con la clave de
 // bóveda. aad ata la privada a su dueño: copiada a otra cuenta no abre.
-func NewVault(vaultKey string, aad []byte) (pub, privEnc, salt []byte, err error) {
+func NewVault(ctx context.Context, vaultKey string, aad []byte) (pub, privEnc, salt []byte, err error) {
 	pk, sk, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, nil, err
@@ -58,7 +59,11 @@ func NewVault(vaultKey string, aad []byte) (pub, privEnc, salt []byte, err error
 	if salt, err = NewSalt(); err != nil {
 		return nil, nil, nil, err
 	}
-	if privEnc, err = Seal(PasswordKEK(vaultKey, salt), sk[:], aad); err != nil {
+	kek, err := PasswordKEK(ctx, vaultKey, salt)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if privEnc, err = Seal(kek, sk[:], aad); err != nil {
 		return nil, nil, nil, err
 	}
 	return pk[:], privEnc, salt, nil
@@ -74,8 +79,12 @@ func WrapForVault(pub, dek []byte) ([]byte, error) {
 
 // OpenWithVault abre una DEK envuelta para la bóveda: con la clave de bóveda descifra la
 // privada y con ella la caja. Una clave equivocada da ErrOpen, igual que una caja ajena.
-func OpenWithVault(vaultKey string, salt, privEnc, aad, pub, wrapped []byte) ([]byte, error) {
-	sk, err := Open(PasswordKEK(vaultKey, salt), privEnc, aad)
+func OpenWithVault(ctx context.Context, vaultKey string, salt, privEnc, aad, pub, wrapped []byte) ([]byte, error) {
+	kek, err := PasswordKEK(ctx, vaultKey, salt)
+	if err != nil {
+		return nil, err
+	}
+	sk, err := Open(kek, privEnc, aad)
 	if err != nil {
 		return nil, err
 	}

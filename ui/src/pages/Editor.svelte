@@ -139,7 +139,16 @@
   // ancho queda en este navegador (es una preferencia de pantalla, no del perfil).
   const SPLIT_KEY = 'kw.editor.split';
   const clamp = (n: number) => Math.min(80, Math.max(20, Math.round(n)));
-  let split = $state(clamp(Number(localStorage.getItem(SPLIT_KEY)) || 50));
+  // Sin almacenamiento (modo privado estricto, sitio bloqueado) localStorage lanza: el editor abre
+  // igual, con el divisor al medio, y solo se pierde el recuerdo del ancho (QA-10).
+  function savedSplit(): number {
+    try {
+      return clamp(Number(localStorage.getItem(SPLIT_KEY)) || 50);
+    } catch {
+      return 50;
+    }
+  }
+  let split = $state(savedSplit());
   let body = $state<HTMLElement>();
   let dragging = false;
 
@@ -150,7 +159,11 @@
 
   function setSplit(n: number) {
     split = clamp(n);
-    localStorage.setItem(SPLIT_KEY, String(split));
+    try {
+      localStorage.setItem(SPLIT_KEY, String(split));
+    } catch {
+      // ídem: el ancho vale solo hasta cerrar el editor
+    }
   }
 
   function onSplitDown(e: PointerEvent) {

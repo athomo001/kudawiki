@@ -90,8 +90,8 @@ func (c *csvWriter) Write(e Exported) error {
 			return err
 		}
 	}
-	return c.w.Write([]string{strconv.FormatInt(e.ID, 10), e.At, e.Action, e.ActorID, csvSafe(e.Actor["email"]), csvSafe(e.Actor["name"]),
-		e.Actor["ip"], e.Actor["pseudonym"], e.WsID, e.Workspace, csvSafe(e.Page), e.TargetType, e.TargetID, e.MetaJSON, e.PrevHash, e.Hash})
+	return c.w.Write([]string{strconv.FormatInt(e.ID, 10), e.At, e.Action, e.ActorID, CSVSafe(e.Actor["email"]), CSVSafe(e.Actor["name"]),
+		e.Actor["ip"], e.Actor["pseudonym"], e.WsID, e.Workspace, CSVSafe(e.Page), e.TargetType, e.TargetID, e.MetaJSON, e.PrevHash, e.Hash})
 }
 
 func (c *csvWriter) Close() error {
@@ -99,9 +99,10 @@ func (c *csvWriter) Close() error {
 	return c.w.Error()
 }
 
-// csvSafe evita que una planilla ejecute como fórmula un nombre que empieza con = + - @ (CSV
-// injection): el nombre y la ruta los escribe una persona.
-func csvSafe(s string) string {
+// CSVSafe evita que una planilla ejecute como fórmula un nombre que empieza con = + - @ (CSV
+// injection): el nombre y la ruta los escribe una persona. Lo usan todas las exportaciones CSV,
+// también las de cuestionarios y acuse de lectura (QA-05).
+func CSVSafe(s string) string {
 	if s != "" && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@' || s[0] == '\t' || s[0] == '\r') {
 		return "'" + s
 	}

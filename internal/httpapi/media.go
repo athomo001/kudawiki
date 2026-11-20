@@ -13,7 +13,7 @@ import (
 )
 
 func (a api) getMedia(w http.ResponseWriter, r *http.Request) {
-	m, f, err := a.Media.Open(r.Context(), scopeOf(r), chi.URLParam(r, "id"), r.URL.Query().Get("thumb") == "1")
+	m, f, err := a.Media.Open(r.Context(), scopeOf(r), currentUser(r).ID, chi.URLParam(r, "id"), r.URL.Query().Get("thumb") == "1")
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -31,7 +31,10 @@ func serveMedia(w http.ResponseWriter, r *http.Request, m repo.Media, f *os.File
 	h := w.Header()
 	h.Set("Content-Type", m.MimeType)
 	h.Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": m.Filename}))
-	h.Set("Cache-Control", "private, max-age=3600")
+	// Se revalida en cada uso (304 con Last-Modified si no cambió): con max-age, la imagen de una
+	// página N3 seguía una hora en la cache de un equipo compartido después de salir o de perder
+	// el acceso (QA-11). La revalidación pasa por el Scope como cualquier pedido.
+	h.Set("Cache-Control", "private, no-cache")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox") // abierto directo, no ejecuta nada
 	http.ServeContent(w, r, "", m.CreatedAt, f)
 }
@@ -39,6 +42,7 @@ func serveMedia(w http.ResponseWriter, r *http.Request, m repo.Media, f *os.File
 // uploadMedia lee el multipart en streaming: el límite de tamaño lo aplica media.Service
 // mientras escribe, sin cargar el archivo en memoria.
 func (a api) uploadMedia(w http.ResponseWriter, r *http.Request) {
+	streamingBody(w, r) // puede tardar más que ReadTimeout (QA-02)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		a.error(w, r, http.StatusBadRequest, "invalid_request", nil)
@@ -73,7 +77,7 @@ func (a api) mediaURL(r *http.Request, id string) string {
 // listMedia es el navegador de archivos (§4.4). La página de cada archivo es la que lo tiene; si
 // quien pregunta lo ve, también la ve a ella (MediaList aplica el nivel de esa página).
 func (a api) listMedia(w http.ResponseWriter, r *http.Request) {
-	items, err := a.Media.List(r.Context(), scopeOf(r), r.URL.Query().Get("q"))
+	items, err := a.Media.List(r.Context(), scopeOf(r), currentUser(r).ID, r.URL.Query().Get("q"))
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -92,7 +96,7 @@ func (a api) listMedia(w http.ResponseWriter, r *http.Request) {
 
 // deleteMedia: si una página que quien borra ve todavía usa el archivo, 409 con esas páginas.
 func (a api) deleteMedia(w http.ResponseWriter, r *http.Request) {
-	pages, err := a.Media.Delete(r.Context(), scopeOf(r), chi.URLParam(r, "id"))
+	pages, err := a.Media.Delete(r.Context(), scopeOf(r), currentUser(r).ID, chi.URLParam(r, "id"))
 	if errors.Is(err, media.ErrInUse) {
 		a.json(w, http.StatusConflict, map[string]any{"error": map[string]any{
 			"code": err.Error(), "message": http.StatusText(http.StatusConflict), "pages": refsJSON(pages)}})

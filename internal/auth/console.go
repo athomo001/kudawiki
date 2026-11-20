@@ -32,7 +32,7 @@ func (s *Service) UnlockLogin(ctx context.Context, email string) error {
 // sesiones de la persona y anula sus enlaces sin usar. A una cuenta del directorio no: su
 // contraseña es la de la red, y una local la convertiría en dos cuentas en una (§8.6.3).
 func (s *Service) SetPassword(ctx context.Context, email, password string) error {
-	if err := CheckPolicy(password, s.relaxed); err != nil {
+	if err := s.checkPolicy(ctx, password); err != nil {
 		return err
 	}
 	u, err := s.store.UserByEmail(ctx, strings.TrimSpace(email))
@@ -42,7 +42,7 @@ func (s *Service) SetPassword(ctx context.Context, email, password string) error
 	if isDirectory(u) {
 		return ErrDirectoryManaged
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return err
 	}

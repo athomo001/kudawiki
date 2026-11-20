@@ -221,8 +221,8 @@ func searchSQL(s Scope, q SearchQuery, limit int) (string, []any) {
 		args = append(args, s.WsID, s.MaxRank)
 	}
 	if q.Path != "" {
-		b.WriteString(` AND (p.slug = ? OR p.slug LIKE ?)`)
-		args = append(args, q.Path, q.Path+"/%")
+		b.WriteString(` AND (p.slug = ? OR p.slug LIKE ? ESCAPE '\')`)
+		args = append(args, q.Path, likeEscape(q.Path)+"/%")
 	}
 	if len(q.Tags) > 0 && q.TagsAny {
 		b.WriteString(` AND EXISTS (SELECT 1 FROM page_tags t WHERE t.page_id = p.id AND t.tag IN (?` + strings.Repeat(",?", len(q.Tags)-1) + `))`)
@@ -237,8 +237,9 @@ func searchSQL(s Scope, q SearchQuery, limit int) (string, []any) {
 	}
 	if q.Author != "" {
 		b.WriteString(` AND EXISTS (SELECT 1 FROM page_revisions r JOIN users u ON u.id = r.created_by
-			WHERE r.page_id = p.id AND (u.full_name LIKE ? OR u.email LIKE ?))`)
-		args = append(args, "%"+q.Author+"%", "%"+q.Author+"%")
+			WHERE r.page_id = p.id AND (u.full_name LIKE ? ESCAPE '\' OR u.email LIKE ? ESCAPE '\'))`)
+		author := "%" + likeEscape(q.Author) + "%"
+		args = append(args, author, author)
 	}
 	if !q.Since.IsZero() {
 		b.WriteString(` AND p.updated_at >= ?`)
@@ -255,6 +256,12 @@ func searchSQL(s Scope, q SearchQuery, limit int) (string, []any) {
 	}
 	b.WriteString(` LIMIT ?`)
 	return b.String(), append(args, limit)
+}
+
+// likeEscape hace que % y _ de lo que escribe la persona valgan como texto en un LIKE con
+// ESCAPE '\': "autor:%" ya no trae a todos, ni "ruta:a_b" a "axb" (QA-15).
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 // SuggestTitle propone el título visible que más se parece a lo buscado, por trigramas: así

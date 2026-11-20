@@ -91,10 +91,10 @@ func (s *Service) deliverInvite(ctx context.Context, actorID string, u repo.User
 
 // AcceptInvite fija la contraseña elegida por la persona. No inicia sesión: se entra con ella.
 func (s *Service) AcceptInvite(ctx context.Context, token, password string) error {
-	if err := CheckPolicy(password, s.relaxed); err != nil {
+	if err := s.checkPolicy(ctx, password); err != nil {
 		return err
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return err
 	}

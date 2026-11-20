@@ -44,7 +44,7 @@ Cada fase termina cuando se cumple su **criterio de salida**, no cuando se acaba
 - [ ] Resolver las decisiones abiertas de SPEC §19 (las que bloquean el modelo de datos primero: 5, 10, 11, 15).
 - [ ] Sección "Stack" en el SPEC con versiones. Ya decididos: driver SQLite (`modernc.org/sqlite`, §19.33), i18n propia (§19.34) y Milkdown para el editor visual (§4.2, 2026-10-28; se construye en F8).
 - [x] Licencia del proyecto: privada, todos los derechos reservados (`LICENSE`, SPEC §19.31).
-- [ ] `SECURITY.md`.
+- [x] `SECURITY.md`.
 - [x] Infraestructura del repo: `go.mod` (toolchain fijado), estructura de §16, `Makefile` y CI (`.github/workflows/ci.yml`: gofmt, vet, staticcheck, tests con `-race`, govulncheck, `pnpm audit`, build de la imagen). Falta verlo verde en GitHub.
 - [ ] Mockups que faltan: cuestionario (crear, responder, resultados), inicio personal, "quién puede ver esto", panel de superadmin (incluidas Apariencia y LDAP), recuperar contraseña, vista móvil. *(El modo oscuro se construyó sin mockup el 2026-11-03, B4: el dueño rechazó el mockup y pidió un ícono.)*
 

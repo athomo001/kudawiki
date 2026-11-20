@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -119,6 +120,36 @@ func TestMediaBrowser(t *testing.T) {
 	}
 	if code, _ := list("viewerTI", ""); code != http.StatusNotFound {
 		t.Errorf("viewer: %d, want 404", code)
+	}
+
+	// QA-12: lo que un admin pega en una página que todavía no guarda (quizá N3) no lo ve otro
+	// editor, ni en la lista ni por su URL; quien lo subió y los admins, sí.
+	draft := up("adminTI", "borrador.png", pngBytes(t))
+	if _, items := list("editorTI", ""); strings.Contains(names(items), "borrador.png") {
+		t.Errorf("an editor lists another person's pageless file: %s", names(items))
+	}
+	if w := f.do("editorTI", "GET", draft, ""); w.Code != http.StatusNotFound {
+		t.Errorf("an editor opens another person's pageless file: %d", w.Code)
+	}
+	if w := f.do("adminTI", "GET", draft, ""); w.Code != http.StatusOK {
+		t.Errorf("the uploader: %d", w.Code)
+	}
+	if _, items := list("adminTI", ""); !strings.Contains(names(items), "suelta.txt") {
+		t.Errorf("the admin does not see an editor's pageless file: %s", names(items))
+	}
+
+	// QA-11: la media se revalida en cada uso; si no cambió, 304 sin cuerpo.
+	mw := f.do("adminTI", "GET", secret, "")
+	if mw.Code != http.StatusOK || mw.Header().Get("Cache-Control") != "private, no-cache" || mw.Header().Get("Last-Modified") == "" {
+		t.Fatalf("media: %d, Cache-Control %q, Last-Modified %q", mw.Code, mw.Header().Get("Cache-Control"), mw.Header().Get("Last-Modified"))
+	}
+	r := httptest.NewRequest("GET", secret, nil)
+	r.Header.Set("If-Modified-Since", mw.Header().Get("Last-Modified"))
+	r.AddCookie(f.cookies["adminTI"])
+	again := httptest.NewRecorder()
+	f.h.ServeHTTP(again, r)
+	if again.Code != http.StatusNotModified || again.Body.Len() != 0 {
+		t.Errorf("unchanged media: %d with %d bytes, want 304", again.Code, again.Body.Len())
 	}
 
 	id := func(url string) string { return url[strings.LastIndex(url, "/")+1:] }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, codeOf } from './lib/api';
+  import { api, codeOf, ApiError } from './lib/api';
   import { t, errorText } from './lib/i18n/index.svelte';
   import Brand from './components/Brand.svelte';
   import { site } from './lib/site.svelte';
@@ -17,6 +17,31 @@
   let code = $state('');
   let busy = $state(false);
   let error = $state('');
+  // Bloqueo por intentos fallidos (SPEC §8.2, QA-04): cada 3, un minuto; desde el 9.º, cinco. El
+  // servidor dice cuántos segundos faltan; el aviso los dice una vez y el botón cuenta hacia atrás.
+  let retryAt = $state(0);
+  let now = $state(Date.now());
+  const waitLeft = $derived(Math.max(0, Math.ceil((retryAt - now) / 1000)));
+
+  $effect(() => {
+    if (retryAt <= Date.now()) return;
+    const id = setInterval(() => {
+      now = Date.now();
+      if (now >= retryAt) {
+        clearInterval(id);
+        error = '';
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  });
+
+  function waitText(secs: number): string {
+    if (secs < 60) return t('auth.wait_seconds', { n: String(secs) });
+    const min = Math.ceil(secs / 60);
+    return t(min === 1 ? 'auth.wait_minute' : 'auth.wait_minutes', { n: String(min) });
+  }
+
+  const clock = (secs: number) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -32,7 +57,14 @@
       }
       onlogin();
     } catch (err) {
-      error = errorText(codeOf(err));
+      const secs = err instanceof ApiError ? err.detail.retry_after : undefined;
+      if (codeOf(err) === 'rate_limited' && typeof secs === 'number') {
+        now = Date.now();
+        retryAt = now + secs * 1000;
+        error = t('auth.locked', { wait: waitText(secs) });
+      } else {
+        error = errorText(codeOf(err));
+      }
     } finally {
       busy = false;
     }
@@ -117,8 +149,8 @@
 
       {#if error}<p id="login-error" class="error" role="alert">{error}</p>{/if}
 
-      <button type="submit" class="primary" disabled={busy}>
-        {busy ? t('auth.logging_in') : t('auth.login')}
+      <button type="submit" class="primary" disabled={busy || waitLeft > 0}>
+        {busy ? t('auth.logging_in') : t('auth.login')}{#if waitLeft > 0}&nbsp;<span aria-hidden="true">({clock(waitLeft)})</span>{/if}
       </button>
     </form>
     {#if site.passkeys && canPasskey}

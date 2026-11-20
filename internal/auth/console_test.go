@@ -15,7 +15,7 @@ import (
 // La consola corre en otro proceso que el servidor: aquí, otro Service sobre la misma BD.
 func consoleFor(t *testing.T, r *repo.Repo, c *clock) *Service {
 	t.Helper()
-	s, err := NewService(r, audit.NewRecorder(r, c.now, slog.New(slog.DiscardHandler)), c.now, false)
+	s, err := NewService(r, audit.NewRecorder(r, c.now, slog.New(slog.DiscardHandler)), c.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,14 +34,15 @@ func lastAudit(t *testing.T, r *repo.Repo) repo.AuditEntry {
 func TestConsoleUnlock(t *testing.T) {
 	server, r, c := newService(t)
 	ctx := context.Background()
-	for range loginMaxAttempts {
+	for range loginBurst {
 		server.Login(ctx, "10.0.0.1", "ana@empresa.cl", "clave-equivocada")
 	}
 	if _, err := server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword); !errors.As(err, new(RateLimitedError)) {
 		t.Fatalf("locked: %v, want RateLimitedError", err)
 	}
 
-	c.t = c.t.Add(time.Minute)
+	// Antes de que venza el minuto: entra solo por el desbloqueo.
+	c.t = c.t.Add(10 * time.Second)
 	if err := consoleFor(t, r, c).UnlockLogin(ctx, "ANA@empresa.cl"); err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +54,8 @@ func TestConsoleUnlock(t *testing.T) {
 	}
 
 	// Un desbloqueo viejo no sirve contra un bloqueo nuevo.
-	c.t = c.t.Add(time.Minute)
-	for range loginMaxAttempts {
+	c.t = c.t.Add(10 * time.Second)
+	for range loginBurst {
 		server.Login(ctx, "10.0.0.1", "ana@empresa.cl", "clave-equivocada")
 	}
 	if _, err := server.Login(ctx, "10.0.0.1", "ana@empresa.cl", goodPassword); !errors.As(err, new(RateLimitedError)) {

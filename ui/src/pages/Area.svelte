@@ -12,7 +12,6 @@
   import SearchResults from './SearchResults.svelte';
   import Trash from './Trash.svelte';
   import Files from './Files.svelte';
-  import Templates from './Templates.svelte';
   import Review from './Review.svelte';
   import ReadRequests from './ReadRequests.svelte';
   import QuizTake from './QuizTake.svelte';
@@ -145,6 +144,8 @@
   const editing = $derived((sub === 'new' && canEdit(area)) || (kind === 'edit' && canWrite(area)) || !!proposalView?.[2]);
   // CodeMirror pesa: se descarga solo al abrir el editor, no para leer.
   const loadEditor = () => import('./Editor.svelte');
+  // Plantillas trae CodeMirror como el editor: se carga al abrirla, no con la wiki (QA-13).
+  const loadTemplates = () => import('./Templates.svelte');
 
   async function loadTree() {
     try {
@@ -404,7 +405,7 @@
         {:else if kind === 'history'}
           <History {area} slug={pageSlug} level={refs.find((r) => r.slug === pageSlug)?.level} onreverted={loadTree} />
         {:else if sub === 'templates' && area.role === 'admin'}
-          <Templates endpoint={`${base}/templates`} context={adminContext} />
+          {#await loadTemplates() then { default: Templates }}<Templates endpoint={`${base}/templates`} context={adminContext} />{/await}
         {:else if sub === 'files' && canEdit(area)}
           <Files {area} />
         {:else if kind === 'quiz' && !area.personal}
